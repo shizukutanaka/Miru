@@ -14,8 +14,9 @@ ring = { workspace = true }
 ed25519-dalek = { workspace = true }
 base64 = "0.22"
 uuid = { workspace = true }
-reqwest = { version = "0.12", features = ["json"], default-features = false }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 tokio = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }

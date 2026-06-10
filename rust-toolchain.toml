@@ -8,6 +8,6 @@
 #   3. Re-run cargo audit + cargo deny on the new toolchain before merge.
 
 [toolchain]
-channel = "1.80"
+channel = "1.88"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

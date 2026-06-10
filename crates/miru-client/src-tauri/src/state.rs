@@ -142,7 +142,6 @@ impl AppState {
 
 use ed25519_dalek::SigningKey;
 use miru_agent::{AuditEntry, AuditLog};
-use parking_lot::Mutex as PMutex;
 
 impl AppState {
     pub fn identity_signing_key(&self) -> &SigningKey {

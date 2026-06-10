@@ -20,7 +20,10 @@ pub trait EncoderBackend: Send {
 }
 
 impl Encoder {
-    pub fn new(codec: VideoCodec, width: u32, height: u32, _fps: u8, _bitrate_kbps: u32) -> Result<Self> {
+    pub fn new(codec: VideoCodec, width: u32, height: u32, fps: u8, bitrate_kbps: u32) -> Result<Self> {
+        // fps / bitrate_kbps are only consumed by the vpx backend.
+        #[cfg(not(feature = "vpx"))]
+        let _ = (fps, bitrate_kbps);
         let inner: Box<dyn EncoderBackend> = match &codec {
             #[cfg(feature = "vpx")]
             VideoCodec::Vp9 | VideoCodec::Vp8 => {

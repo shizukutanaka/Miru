@@ -4,7 +4,7 @@ use crate::state::{AppState, SessionStats};
 use miru_auth::TrustedPeer;
 use miru_common::message::{InputEvent, InputKind, MouseButton};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, State};
 use tracing::info;
 
 #[derive(Serialize, Deserialize)]
@@ -134,7 +134,7 @@ pub fn fingerprint(state: tauri::State<'_, AppState>) -> String {
 
 // ─── Agent token issuance ────────────────────────────────────────────────────
 
-use miru_agent::{AgentScope, AgentToken, Capability};
+use miru_agent::{AgentToken, Capability};
 use std::collections::HashSet;
 
 #[derive(serde::Deserialize)]

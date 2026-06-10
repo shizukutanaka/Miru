@@ -18,7 +18,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, oneshot};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::state::SessionStats;
 
@@ -49,7 +49,11 @@ pub async fn run(
 
     // 1. Connect to signal server with our viewer device ID
     let viewer_did = DeviceId::new();
-    let mut signal = SignalClient::connect(&args.signal_url, &viewer_did).await?;
+    let mut signal = SignalClient::connect(
+        &args.signal_url,
+        &viewer_did,
+        Some(identity.verifying_key.as_bytes()),
+    ).await?;
 
     while let Some(evt) = signal.next_event().await {
         if matches!(evt, SignalEvent::Registered { .. }) { break; }
