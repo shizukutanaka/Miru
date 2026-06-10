@@ -7,8 +7,8 @@
 use anyhow::Result;
 use core_graphics::{
     event::{
-        CGEvent, CGEventFlags, CGEventTapLocation, CGEventType,
-        CGKeyCode, CGMouseButton, ScrollEventUnit,
+        CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
+        ScrollEventUnit,
     },
     event_source::{CGEventSource, CGEventSourceStateID},
     geometry::CGPoint,
@@ -26,9 +26,9 @@ pub fn inject(event: &InputEvent) -> Result<()> {
     match &event.kind {
         InputKind::MouseMove { x, y, .. } => {
             let pt = screen_point(*x, *y);
-            let ev = CGEvent::new_mouse_event(
-                src, CGEventType::MouseMoved, pt, CGMouseButton::Left,
-            ).map_err(|_| anyhow::anyhow!("mouse move event"))?;
+            let ev =
+                CGEvent::new_mouse_event(src, CGEventType::MouseMoved, pt, CGMouseButton::Left)
+                    .map_err(|_| anyhow::anyhow!("mouse move event"))?;
             ev.post(CGEventTapLocation::HID);
         }
 
@@ -56,7 +56,8 @@ pub fn inject(event: &InputEvent) -> Result<()> {
                 (*dy * 3.0) as i32,
                 (*dx * 3.0) as i32,
                 0,
-            ).map_err(|_| anyhow::anyhow!("scroll event"))?;
+            )
+            .map_err(|_| anyhow::anyhow!("scroll event"))?;
             ev.post(CGEventTapLocation::HID);
         }
 
@@ -97,10 +98,18 @@ fn screen_point(x: f32, y: f32) -> CGPoint {
 
 fn modifier_flags(mods: u8) -> CGEventFlags {
     let mut flags = CGEventFlags::empty();
-    if mods & 0x01 != 0 { flags |= CGEventFlags::CGEventFlagShift; }
-    if mods & 0x02 != 0 { flags |= CGEventFlags::CGEventFlagControl; }
-    if mods & 0x04 != 0 { flags |= CGEventFlags::CGEventFlagAlternate; }
-    if mods & 0x08 != 0 { flags |= CGEventFlags::CGEventFlagCommand; }
+    if mods & 0x01 != 0 {
+        flags |= CGEventFlags::CGEventFlagShift;
+    }
+    if mods & 0x02 != 0 {
+        flags |= CGEventFlags::CGEventFlagControl;
+    }
+    if mods & 0x04 != 0 {
+        flags |= CGEventFlags::CGEventFlagAlternate;
+    }
+    if mods & 0x08 != 0 {
+        flags |= CGEventFlags::CGEventFlagCommand;
+    }
     flags
 }
 

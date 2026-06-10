@@ -37,7 +37,8 @@ pub fn pinned_client_config(pinned_cert_der: Vec<u8>) -> Result<Arc<ClientConfig
 
     // Convert the pinned cert and add to trust set.
     let cert = rustls::pki_types::CertificateDer::from(pinned_cert_der);
-    roots.add(cert)
+    roots
+        .add(cert)
         .context("failed to add pinned cert (malformed?)")?;
 
     let config = ClientConfig::builder()

@@ -6,12 +6,7 @@
 use anyhow::{Context, Result};
 use miru_common::message::{InputEvent, InputKind, MouseButton};
 use std::sync::LazyLock as Lazy;
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    os::unix::io::RawFd,
-    sync::Mutex,
-};
+use std::{fs::OpenOptions, io::Write, os::unix::io::RawFd, sync::Mutex};
 use tracing::warn;
 
 // Linux uinput ioctl numbers and structs
@@ -46,9 +41,8 @@ struct InputEventRaw {
     value: i32,
 }
 
-static UINPUT: Lazy<Mutex<Option<UinputDevice>>> = Lazy::new(|| {
-    Mutex::new(UinputDevice::new().ok())
-});
+static UINPUT: Lazy<Mutex<Option<UinputDevice>>> =
+    Lazy::new(|| Mutex::new(UinputDevice::new().ok()));
 
 struct UinputDevice {
     fd: RawFd,
@@ -115,14 +109,21 @@ impl UinputDevice {
             libc::ioctl(fd, UI_DEV_SETUP, &setup as *const _);
             libc::ioctl(fd, UI_DEV_CREATE as libc::c_ulong);
 
-            Ok(Self { fd, screen_w, screen_h })
+            Ok(Self {
+                fd,
+                screen_w,
+                screen_h,
+            })
         }
     }
 
     fn write_event(&self, type_: u16, code: u16, value: i32) {
         let ev = InputEventRaw {
-            time_sec: 0, time_usec: 0,
-            type_, code, value,
+            time_sec: 0,
+            time_usec: 0,
+            type_,
+            code,
+            value,
         };
         unsafe {
             libc::write(
@@ -174,7 +175,8 @@ impl Drop for UinputDevice {
 pub fn inject(event: &InputEvent) -> Result<()> {
     // Mutex poisoning isn't catastrophic here — uinput state is replaceable.
     let guard = UINPUT.lock().unwrap_or_else(|p| p.into_inner());
-    let dev = guard.as_ref()
+    let dev = guard
+        .as_ref()
         .ok_or_else(|| anyhow::anyhow!("uinput not available"))?;
 
     match &event.kind {

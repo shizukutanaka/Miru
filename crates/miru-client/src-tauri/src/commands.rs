@@ -44,10 +44,7 @@ pub struct SendInputArgs {
 }
 
 #[tauri::command]
-pub async fn send_input(
-    args: SendInputArgs,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn send_input(args: SendInputArgs, state: State<'_, AppState>) -> Result<(), String> {
     let kind = match args.kind.as_str() {
         "mouse_move" => InputKind::MouseMove {
             x: args.x.unwrap_or(0.0),
@@ -105,10 +102,7 @@ fn parse_button(s: &Option<String>) -> MouseButton {
 }
 
 #[tauri::command]
-pub async fn send_clipboard(
-    text: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn send_clipboard(text: String, state: State<'_, AppState>) -> Result<(), String> {
     state.send_clipboard(text).await.map_err(|e| e.to_string())
 }
 
@@ -171,7 +165,9 @@ pub fn issue_agent_token(
     if args.ttl_hours > 1 {
         return Err("ttl exceeds policy cap (max 15 min — please use shorter sessions)".into());
     }
-    let caps: HashSet<Capability> = args.capabilities.iter()
+    let caps: HashSet<Capability> = args
+        .capabilities
+        .iter()
         .filter_map(|s| match s.as_str() {
             "screen_read" => Some(Capability::ScreenRead),
             "pointer_move" => Some(Capability::PointerMove),
@@ -238,7 +234,9 @@ pub fn audit_entries(
     limit: Option<u64>,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AuditEntryView>, String> {
-    state.audit_entries(limit.unwrap_or(100)).map_err(|e| e.to_string())
+    state
+        .audit_entries(limit.unwrap_or(100))
+        .map_err(|e| e.to_string())
 }
 
 // ─── Constellation ───────────────────────────────────────────────────────────

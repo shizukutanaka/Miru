@@ -112,13 +112,15 @@ impl X11Capturer {
 
         // Allocate shared memory
         let size = (width * height * 4) as usize;
-        let shm_id = unsafe {
-            libc::shmget(libc::IPC_PRIVATE, size, libc::IPC_CREAT | 0o600)
-        };
-        if shm_id < 0 { bail!("shmget failed"); }
+        let shm_id = unsafe { libc::shmget(libc::IPC_PRIVATE, size, libc::IPC_CREAT | 0o600) };
+        if shm_id < 0 {
+            bail!("shmget failed");
+        }
 
         let shm_ptr = unsafe { libc::shmat(shm_id, std::ptr::null(), 0) as *mut u8 };
-        if shm_ptr as isize == -1 { bail!("shmat failed"); }
+        if shm_ptr as isize == -1 {
+            bail!("shmat failed");
+        }
 
         let shm_seg = conn.generate_id()?;
         shm::attach(&conn, shm_seg, shm_id as u32, false)?;
@@ -157,8 +159,8 @@ impl X11Capturer {
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>> {
-        use x11rb::protocol::shm;
         use x11rb::connection::Connection;
+        use x11rb::protocol::shm;
 
         let screen = &self.conn.setup().roots[self.screen_num];
         let root = screen.root;
@@ -166,11 +168,12 @@ impl X11Capturer {
         let cookie = shm::get_image(
             &self.conn,
             root,
-            0, 0,
+            0,
+            0,
             self.width as u16,
             self.height as u16,
             !0u32, // all planes
-            2,    // ZPixmap
+            2,     // ZPixmap
             self.shm_seg,
             0,
         )?;
@@ -200,7 +203,6 @@ impl X11Capturer {
 
 impl Drop for X11Capturer {
     fn drop(&mut self) {
-        
         use x11rb::protocol::shm;
         let _ = shm::detach(&self.conn, self.shm_seg);
         unsafe {
@@ -223,7 +225,13 @@ impl PipeWireCapturer {
         anyhow::bail!("PipeWire capture not yet implemented")
     }
 
-    fn displays(&self) -> Result<Vec<DisplayInfo>> { Ok(vec![]) }
-    fn select_display(&mut self, _i: u8) -> Result<()> { Ok(()) }
-    fn next_frame(&mut self) -> Result<Option<RawFrame>> { Ok(None) }
+    fn displays(&self) -> Result<Vec<DisplayInfo>> {
+        Ok(vec![])
+    }
+    fn select_display(&mut self, _i: u8) -> Result<()> {
+        Ok(())
+    }
+    fn next_frame(&mut self) -> Result<Option<RawFrame>> {
+        Ok(None)
+    }
 }

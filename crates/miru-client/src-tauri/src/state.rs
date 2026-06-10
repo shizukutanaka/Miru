@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use miru_auth::{AclStore, DeviceIdentity, TrustedPeer};
-use miru_common::message::{ClipboardSync, ClipboardFormat, InputEvent, Msg};
+use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, Msg};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -41,8 +41,8 @@ impl AppState {
             .join("miru-viewer");
         std::fs::create_dir_all(&config_dir).ok();
 
-        let identity = DeviceIdentity::load_or_create(&config_dir.join("identity"))
-            .unwrap_or_else(|e| {
+        let identity =
+            DeviceIdentity::load_or_create(&config_dir.join("identity")).unwrap_or_else(|e| {
                 // Identity creation failed — typically a filesystem permission error.
                 // Log clearly; Tauri will show the main window which can surface this.
                 tracing::error!("Identity load failed: {}; using ephemeral identity", e);
@@ -65,17 +65,16 @@ impl AppState {
         self.identity.pubkey_fingerprint()
     }
 
-    pub async fn connect(
-        &self,
-        args: crate::commands::ConnectArgs,
-        app: AppHandle,
-    ) -> Result<()> {
+    pub async fn connect(&self, args: crate::commands::ConnectArgs, app: AppHandle) -> Result<()> {
         self.disconnect().await;
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>(64);
         let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
 
-        *self.session.lock() = Some(ActiveSession { tx: cmd_tx, cancel: cancel_tx });
+        *self.session.lock() = Some(ActiveSession {
+            tx: cmd_tx,
+            cancel: cancel_tx,
+        });
 
         let identity = Arc::clone(&self.identity);
         let stats = Arc::clone(&self.stats);
@@ -83,7 +82,9 @@ impl AppState {
         let session_slot = Arc::clone(&self.session);
 
         tokio::spawn(async move {
-            if let Err(e) = crate::session::run(args, identity, cmd_rx, cancel_rx, app_clone, stats).await {
+            if let Err(e) =
+                crate::session::run(args, identity, cmd_rx, cancel_rx, app_clone, stats).await
+            {
                 tracing::warn!("Session ended: {}", e);
             }
             // Clear session slot when finished
@@ -103,7 +104,8 @@ impl AppState {
     pub async fn send_input(&self, evt: InputEvent) -> Result<()> {
         let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
         if let Some(tx) = tx {
-            tx.send(Msg::InputEvent(evt)).await
+            tx.send(Msg::InputEvent(evt))
+                .await
                 .map_err(|_| anyhow::anyhow!("session closed"))?;
         }
         Ok(())
@@ -115,7 +117,9 @@ impl AppState {
             tx.send(Msg::ClipboardSync(ClipboardSync {
                 format: ClipboardFormat::Text,
                 data: text.into_bytes(),
-            })).await.map_err(|_| anyhow::anyhow!("session closed"))?;
+            }))
+            .await
+            .map_err(|_| anyhow::anyhow!("session closed"))?;
         }
         Ok(())
     }
@@ -156,8 +160,10 @@ impl AppState {
         let path = self.audit_log_path();
         if !path.exists() {
             return Ok(crate::commands::AuditSummary {
-                total_entries: 0, chain_intact: true,
-                last_entry_seq: 0, last_entry_ts_ms: 0,
+                total_entries: 0,
+                chain_intact: true,
+                last_entry_seq: 0,
+                last_entry_ts_ms: 0,
             });
         }
         // Read lines, verify chain
@@ -167,7 +173,9 @@ impl AppState {
         let mut entries = Vec::new();
         for line in r.lines() {
             let line = line?;
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             let entry: AuditEntry = serde_json::from_str(&line)?;
             entries.push(entry);
         }
@@ -181,16 +189,23 @@ impl AppState {
         })
     }
 
-    pub fn audit_entries(&self, limit: u64) -> anyhow::Result<Vec<crate::commands::AuditEntryView>> {
+    pub fn audit_entries(
+        &self,
+        limit: u64,
+    ) -> anyhow::Result<Vec<crate::commands::AuditEntryView>> {
         let path = self.audit_log_path();
-        if !path.exists() { return Ok(Vec::new()); }
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
         use std::io::BufRead;
         let f = std::fs::File::open(&path)?;
         let r = std::io::BufReader::new(f);
         let mut entries = Vec::new();
         for line in r.lines() {
             let line = line?;
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             let entry: AuditEntry = serde_json::from_str(&line)?;
             let hash = entry.hash();
             entries.push(crate::commands::AuditEntryView {
@@ -213,46 +228,61 @@ impl AppState {
     pub fn constellation_devices(&self) -> Vec<crate::commands::ConstellationDevice> {
         // Stub: no live discovery yet wired. Returns trusted-peer cache.
         // Real implementation in v0.3 plugs miru-discovery + Constellation.
-        self.acl.lock().list().iter().map(|p| {
-            crate::commands::ConstellationDevice {
+        self.acl
+            .lock()
+            .list()
+            .iter()
+            .map(|p| crate::commands::ConstellationDevice {
                 device_id: p.device_id.clone(),
-                name: p.friendly_name.clone().unwrap_or_else(|| p.device_id.clone()),
+                name: p
+                    .friendly_name
+                    .clone()
+                    .unwrap_or_else(|| p.device_id.clone()),
                 form_factor: "desktop".into(),
                 status: "offline".into(),
                 last_seen_secs_ago: now_unix().saturating_sub(p.last_seen),
                 addresses: vec![],
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     pub fn list_recordings(&self) -> Vec<crate::commands::RecordingSummary> {
         let dir = self.config_dir.join("recordings");
-        if !dir.exists() { return Vec::new(); }
+        if !dir.exists() {
+            return Vec::new();
+        }
         let mut out = Vec::new();
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for entry in rd.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) != Some("mkv") { continue; }
+                if path.extension().and_then(|s| s.to_str()) != Some("mkv") {
+                    continue;
+                }
                 let meta = match path.metadata() {
                     Ok(m) => m,
                     Err(_) => continue,
                 };
                 let size = meta.len();
-                let start_ts_ms = meta.created().ok()
+                let start_ts_ms = meta
+                    .created()
+                    .ok()
                     .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as u64).unwrap_or(0);
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
 
-                let session_id = path.file_stem()
+                let session_id = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .and_then(|s| s.split('-').nth(1))
-                    .unwrap_or("unknown").to_string();
+                    .unwrap_or("unknown")
+                    .to_string();
 
                 out.push(crate::commands::RecordingSummary {
                     path: path.to_string_lossy().to_string(),
                     session_id,
                     start_ts_ms,
-                    duration_ms: 0,    // requires reading the recording header
-                    frame_count: 0,    // ditto
+                    duration_ms: 0, // requires reading the recording header
+                    frame_count: 0, // ditto
                     size_bytes: size,
                 });
             }
@@ -265,5 +295,6 @@ impl AppState {
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_secs()
+        .unwrap_or_default()
+        .as_secs()
 }

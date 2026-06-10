@@ -21,7 +21,10 @@ pub fn negotiate(
     host: &[crate::message::VideoCodec],
     viewer: &[crate::message::VideoCodec],
 ) -> Option<crate::message::VideoCodec> {
-    CODEC_PRIORITY.iter().find(|c| host.contains(c) && viewer.contains(c)).cloned()
+    CODEC_PRIORITY
+        .iter()
+        .find(|c| host.contains(c) && viewer.contains(c))
+        .cloned()
 }
 
 #[cfg(test)]

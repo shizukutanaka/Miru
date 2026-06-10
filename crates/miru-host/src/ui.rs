@@ -15,7 +15,7 @@ pub fn print_banner(device_id: &DeviceId, identity: &DeviceIdentity) {
     println!("  │                                          │");
     println!("  │   Device ID:  {:<27}│", device_id.0);
     println!("  │   Fingerprint:                           │");
-    println!("  │     {:<37}│", fpr);
+    println!("  │     {fpr:<37}│");
     println!("  │                                          │");
     println!("  │   Tell the connecting party your         │");
     println!("  │   Device ID. Verify the fingerprint      │");

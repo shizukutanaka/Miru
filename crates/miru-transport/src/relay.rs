@@ -3,8 +3,11 @@
 use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use miru_common::{crypto::SessionCipher, message::Msg};
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
-use tokio::sync::{Mutex, mpsc};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
+use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::info;
 
@@ -23,10 +26,11 @@ pub struct RelayTransport {
 impl RelayTransport {
     /// Connect to relay. Cipher is initially None; install it after handshake.
     pub async fn connect(relay_url: &str, token: &str, role: &str) -> Result<Self> {
-        let url = format!("{}/relay?token={}&role={}", relay_url, token, role);
+        let url = format!("{relay_url}/relay?token={token}&role={role}");
         info!("Relay connect: {}", url);
 
-        let (ws_stream, _) = connect_async(&url).await
+        let (ws_stream, _) = connect_async(&url)
+            .await
             .context("relay WebSocket connect failed")?;
         let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
@@ -36,7 +40,9 @@ impl RelayTransport {
 
         tokio::spawn(async move {
             while let Some(data) = out_rx.recv().await {
-                if ws_tx.send(Message::Binary(data)).await.is_err() { break }
+                if ws_tx.send(Message::Binary(data)).await.is_err() {
+                    break;
+                }
             }
             let _ = ws_tx.close().await;
         });
@@ -45,7 +51,9 @@ impl RelayTransport {
             while let Some(msg) = ws_rx.next().await {
                 match msg {
                     Ok(Message::Binary(data)) => {
-                        if in_tx.send(data).await.is_err() { break }
+                        if in_tx.send(data).await.is_err() {
+                            break;
+                        }
                     }
                     Ok(Message::Close(_)) | Err(_) => break,
                     _ => {}
@@ -79,7 +87,9 @@ impl RelayTransport {
         };
         let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
         frame.extend(payload);
-        self.tx.send(frame).await
+        self.tx
+            .send(frame)
+            .await
             .map_err(|_| anyhow::anyhow!("relay send channel closed"))
     }
 
@@ -90,7 +100,9 @@ impl RelayTransport {
         };
         let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
         frame.extend(payload);
-        self.tx.send(frame).await
+        self.tx
+            .send(frame)
+            .await
             .map_err(|_| anyhow::anyhow!("relay send channel closed"))
     }
 
@@ -99,7 +111,9 @@ impl RelayTransport {
         match rx.recv().await {
             None => Ok(None),
             Some(frame) => {
-                if frame.len() < 4 { return Ok(None); }
+                if frame.len() < 4 {
+                    return Ok(None);
+                }
                 let payload = &frame[4..];
                 let plain = match self.rx_cipher.lock().await.as_ref() {
                     Some(c) => c.decrypt(payload)?,

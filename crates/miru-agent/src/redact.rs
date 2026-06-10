@@ -37,7 +37,6 @@ use serde_json::{json, Value};
 
 use crate::token::Capability;
 
-
 /// Redact a raw action payload so it is safe to write to the audit log.
 ///
 /// Keys-of-interest per capability:
@@ -127,7 +126,8 @@ fn redact_bytes_field(obj: &mut serde_json::Map<String, Value>, field: &str) {
         }
         Value::Array(arr) => {
             // Array of u8-sized numbers
-            let bytes: Vec<u8> = arr.iter()
+            let bytes: Vec<u8> = arr
+                .iter()
                 .filter_map(|v| v.as_u64().map(|n| n as u8))
                 .collect();
             (bytes.len(), sha256_hex(&bytes))
@@ -150,7 +150,8 @@ fn redact_image_field(obj: &mut serde_json::Map<String, Value>, field: &str) {
     let (len, hash) = match value {
         Value::String(s) => (s.len(), sha256_hex(s.as_bytes())),
         Value::Array(arr) => {
-            let bytes: Vec<u8> = arr.iter()
+            let bytes: Vec<u8> = arr
+                .iter()
                 .filter_map(|v| v.as_u64().map(|n| n as u8))
                 .collect();
             (bytes.len(), sha256_hex(&bytes))
@@ -179,13 +180,20 @@ fn redact_url_to_origin(obj: &mut serde_json::Map<String, Value>, field: &str) {
 /// a heavyweight URL crate. Returns None on malformed input.
 fn parse_origin(url: &str) -> Option<String> {
     let (scheme, rest) = url.split_once("://")?;
-    if scheme.is_empty() || scheme.len() > 16 { return None; }
-    if !scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+') {
+    if scheme.is_empty() || scheme.len() > 16 {
+        return None;
+    }
+    if !scheme
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+')
+    {
         return None;
     }
     // Trim everything after first '/', '?' or '#' to drop path/query/fragment.
     let host = rest.split(['/', '?', '#']).next()?;
-    if host.is_empty() { return None; }
+    if host.is_empty() {
+        return None;
+    }
     Some(format!("{scheme}://{host}"))
 }
 
@@ -310,7 +318,10 @@ mod tests {
         let secret = "hunter2".repeat(20);
         let a1 = redact_action(Capability::KeyType, json!({"text": &secret}));
         let a2 = redact_action(Capability::KeyType, json!({"text": &secret}));
-        assert_eq!(a1, a2, "redaction must be deterministic for replay verification");
+        assert_eq!(
+            a1, a2,
+            "redaction must be deterministic for replay verification"
+        );
     }
 
     #[test]

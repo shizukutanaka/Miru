@@ -87,13 +87,19 @@ impl FrameController {
         if in_flight < PANIC_THRESHOLD {
             return false;
         }
-        let mut last = self.last_keyframe_request.lock().unwrap_or_else(|p| p.into_inner());
+        let mut last = self
+            .last_keyframe_request
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let now = Instant::now();
         match *last {
             Some(t) if now.duration_since(t) < Duration::from_secs(1) => false,
             _ => {
                 *last = Some(now);
-                warn!("backpressure: requesting keyframe (in_flight={})", in_flight);
+                warn!(
+                    "backpressure: requesting keyframe (in_flight={})",
+                    in_flight
+                );
                 // Reset in_flight assuming the keyframe will resync
                 self.in_flight.store(MAX_IN_FLIGHT, Ordering::Relaxed);
                 true
@@ -121,7 +127,9 @@ pub struct FrameStats {
 
 impl FrameStats {
     pub fn skip_rate(&self) -> f32 {
-        if self.captured == 0 { return 0.0; }
+        if self.captured == 0 {
+            return 0.0;
+        }
         self.skipped as f32 / self.captured as f32
     }
 }
@@ -164,7 +172,9 @@ mod tests {
         }
         assert!(c.want_keyframe());
         // Immediate second call within cooldown
-        for _ in 0..5 { c.on_send(); }
+        for _ in 0..5 {
+            c.on_send();
+        }
         assert!(!c.want_keyframe());
     }
 }

@@ -6,7 +6,7 @@
 //!   - Input is rate-limited (max 1000 events/sec per session)
 
 use anyhow::Result;
-use miru_common::message::{ClipboardSync, ClipboardFormat, InputEvent};
+use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 

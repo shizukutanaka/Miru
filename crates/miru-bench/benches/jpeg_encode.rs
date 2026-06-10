@@ -14,14 +14,11 @@ fn make_frame(w: u32, h: u32) -> DecodedFrame {
 
 fn bench_jpeg(c: &mut Criterion) {
     let mut group = c.benchmark_group("jpeg_encode");
-    for &(w, h, name) in &[
-        (1280, 720, "720p"),
-        (1920, 1080, "1080p"),
-    ] {
+    for &(w, h, name) in &[(1280, 720, "720p"), (1920, 1080, "1080p")] {
         for &quality in &[50u8, 70, 90] {
             let frame = make_frame(w, h);
             group.bench_with_input(
-                BenchmarkId::new(format!("{}_q{}", name, quality), "default"),
+                BenchmarkId::new(format!("{name}_q{quality}"), "default"),
                 &frame,
                 |b, f| {
                     b.iter(|| {

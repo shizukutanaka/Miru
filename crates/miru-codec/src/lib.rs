@@ -8,8 +8,8 @@ pub mod jpeg;
 #[cfg(feature = "vpx")]
 pub mod vpx;
 
-pub use encoder::Encoder;
 pub use decoder::Decoder;
+pub use encoder::Encoder;
 pub use hw::{probe as probe_hw, HwEncoder};
 pub use jpeg::{i420_to_jpeg, i420_to_rgb};
 
@@ -40,7 +40,9 @@ pub fn available_codecs() -> Vec<VideoCodec> {
     }
     for hw in probe_hw() {
         for c in hw.codecs() {
-            if !codecs.contains(c) { codecs.push(c.clone()); }
+            if !codecs.contains(c) {
+                codecs.push(c.clone());
+            }
         }
     }
     // JPEG fallback always available (no external codec dep).

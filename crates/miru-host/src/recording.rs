@@ -33,7 +33,7 @@ impl SessionRecorder {
     pub fn create(dir: &Path, session_id: &str) -> Result<Self> {
         std::fs::create_dir_all(dir).context("create record dir")?;
         let timestamp = chrono_format_now();
-        let filename = format!("miru-{}-{}.mkv", session_id, timestamp);
+        let filename = format!("miru-{session_id}-{timestamp}.mkv");
         let path = dir.join(filename);
         let file = File::create(&path).with_context(|| format!("create {}", path.display()))?;
 
@@ -115,7 +115,10 @@ pub struct RecordingSummary {
 
 fn chrono_format_now() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     // Naive YYYYMMDD-HHMMSS without external chrono dep
     let days = secs / 86_400;
     let hours = (secs % 86_400) / 3600;
@@ -123,7 +126,7 @@ fn chrono_format_now() -> String {
     let seconds = secs % 60;
     // Approximate date (1970-01-01 + days). For a real product use chrono;
     // for this skeleton we use the unix timestamp directly.
-    format!("ts{}-{:02}{:02}{:02}", days, hours, minutes, seconds)
+    format!("ts{days}-{hours:02}{minutes:02}{seconds:02}")
 }
 
 #[cfg(test)]
@@ -141,7 +144,8 @@ mod tests {
             keyframe: true,
             codec: VideoCodec::Vp9,
             data: vec![0u8; 1024],
-            width: 1920, height: 1080,
+            width: 1920,
+            height: 1080,
             timestamp_ms: 0,
             color_primaries: Default::default(),
             transfer: Default::default(),

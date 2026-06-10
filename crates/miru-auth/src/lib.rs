@@ -14,11 +14,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use ring::pbkdf2;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    num::NonZeroU32,
-    path::Path,
-};
+use std::{collections::HashMap, num::NonZeroU32, path::Path};
 use tracing::info;
 
 pub use argon::{hash_password, verify_password, SecretBytes};
@@ -37,18 +33,27 @@ impl DeviceIdentity {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
         let verifying_key = signing_key.verifying_key();
-        Self { signing_key, verifying_key }
+        Self {
+            signing_key,
+            verifying_key,
+        }
     }
 
     pub fn load_or_create(path: &Path) -> Result<Self> {
         if path.exists() {
             let bytes = std::fs::read(path)?;
-            if bytes.len() != 32 { bail!("invalid identity file"); }
-            let arr: [u8; 32] = bytes.try_into()
+            if bytes.len() != 32 {
+                bail!("invalid identity file");
+            }
+            let arr: [u8; 32] = bytes
+                .try_into()
                 .map_err(|_| anyhow::anyhow!("bad key length"))?;
             let signing_key = SigningKey::from_bytes(&arr);
             let verifying_key = signing_key.verifying_key();
-            Ok(Self { signing_key, verifying_key })
+            Ok(Self {
+                signing_key,
+                verifying_key,
+            })
         } else {
             let id = Self::generate();
             if let Some(parent) = path.parent() {
@@ -75,7 +80,7 @@ impl DeviceIdentity {
         let digest = ring::digest::digest(&ring::digest::SHA256, self.verifying_key.as_bytes());
         digest.as_ref()[..8]
             .iter()
-            .map(|b| format!("{:02X}", b))
+            .map(|b| format!("{b:02X}"))
             .collect::<Vec<_>>()
             .join(":")
     }
@@ -85,7 +90,9 @@ impl DeviceIdentity {
     }
 
     pub fn verify(pubkey: &[u8; 32], msg: &[u8], sig: &Signature) -> bool {
-        let Ok(vk) = VerifyingKey::from_bytes(pubkey) else { return false };
+        let Ok(vk) = VerifyingKey::from_bytes(pubkey) else {
+            return false;
+        };
         // verify_strict (ZIP-215) rejects small-order pubkeys + non-canonical R encodings.
         vk.verify_strict(msg, sig).is_ok()
     }
@@ -144,7 +151,9 @@ pub struct AclStore {
 
 impl AclStore {
     pub fn load(path: &Path) -> Result<Self> {
-        if !path.exists() { return Ok(Self::default()); }
+        if !path.exists() {
+            return Ok(Self::default());
+        }
         let bytes = std::fs::read(path)?;
         Ok(serde_json::from_slice(&bytes).unwrap_or_default())
     }
@@ -161,15 +170,16 @@ impl AclStore {
     pub fn check(&self, device_id: &str, pubkey_b64: &str) -> TrustDecision {
         match self.peers.get(device_id) {
             None => TrustDecision::Unknown,
-            Some(peer) if peer.pubkey_b64 == pubkey_b64 => {
-                TrustDecision::Trusted(peer.permission)
-            }
+            Some(peer) if peer.pubkey_b64 == pubkey_b64 => TrustDecision::Trusted(peer.permission),
             Some(_) => TrustDecision::PubkeyMismatch,
         }
     }
 
     pub fn trust(&mut self, peer: TrustedPeer) {
-        info!("Trusted peer: {} (fpr {})", peer.device_id, peer.fingerprint);
+        info!(
+            "Trusted peer: {} (fpr {})",
+            peer.device_id, peer.fingerprint
+        );
         self.peers.insert(peer.device_id.clone(), peer);
     }
 
@@ -223,8 +233,16 @@ mod tests {
         let id = DeviceIdentity::generate();
         let msg = b"hello miru";
         let sig = id.sign(msg);
-        assert!(DeviceIdentity::verify(id.verifying_key.as_bytes(), msg, &sig));
-        assert!(!DeviceIdentity::verify(id.verifying_key.as_bytes(), b"different", &sig));
+        assert!(DeviceIdentity::verify(
+            id.verifying_key.as_bytes(),
+            msg,
+            &sig
+        ));
+        assert!(!DeviceIdentity::verify(
+            id.verifying_key.as_bytes(),
+            b"different",
+            &sig
+        ));
     }
 
     #[test]
@@ -245,11 +263,18 @@ mod tests {
             pubkey_b64: "key1".into(),
             fingerprint: "AB:CD".into(),
             permission: Permission::Control,
-            first_seen: 0, last_seen: 0,
+            first_seen: 0,
+            last_seen: 0,
             friendly_name: None,
         });
 
-        assert_eq!(acl.check("AAAA-BBBB", "key1"), TrustDecision::Trusted(Permission::Control));
-        assert_eq!(acl.check("AAAA-BBBB", "EVIL_KEY"), TrustDecision::PubkeyMismatch);
+        assert_eq!(
+            acl.check("AAAA-BBBB", "key1"),
+            TrustDecision::Trusted(Permission::Control)
+        );
+        assert_eq!(
+            acl.check("AAAA-BBBB", "EVIL_KEY"),
+            TrustDecision::PubkeyMismatch
+        );
     }
 }

@@ -69,22 +69,23 @@ async fn stun_binding_request(socket: &TokioUdpSocket, server: &str) -> Result<S
     socket.send_to(&request, server).await?;
 
     let mut buf = [0u8; 1024];
-    let recv = tokio::time::timeout(
-        Duration::from_secs(2),
-        socket.recv_from(&mut buf),
-    ).await??;
+    let recv = tokio::time::timeout(Duration::from_secs(2), socket.recv_from(&mut buf)).await??;
     let (n, _from) = recv;
     parse_stun_xor_mapped(&buf[..n])
 }
 
 fn parse_stun_xor_mapped(buf: &[u8]) -> Result<SocketAddr> {
-    if buf.len() < 20 { bail!("STUN response too short"); }
+    if buf.len() < 20 {
+        bail!("STUN response too short");
+    }
     let mut i = 20; // skip header
     while i + 4 <= buf.len() {
         let attr_type = u16::from_be_bytes([buf[i], buf[i + 1]]);
         let attr_len = u16::from_be_bytes([buf[i + 2], buf[i + 3]]) as usize;
         let val_start = i + 4;
-        if val_start + attr_len > buf.len() { break; }
+        if val_start + attr_len > buf.len() {
+            break;
+        }
 
         // 0x0020 = XOR-MAPPED-ADDRESS
         if attr_type == 0x0020 {
@@ -95,8 +96,10 @@ fn parse_stun_xor_mapped(buf: &[u8]) -> Result<SocketAddr> {
             if family == 0x01 && attr_len >= 8 {
                 // IPv4
                 let xor_ip = u32::from_be_bytes([
-                    buf[val_start + 4], buf[val_start + 5],
-                    buf[val_start + 6], buf[val_start + 7],
+                    buf[val_start + 4],
+                    buf[val_start + 5],
+                    buf[val_start + 6],
+                    buf[val_start + 7],
                 ]);
                 let ip = xor_ip ^ 0x2112A442;
                 return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::from(ip)), port));
@@ -135,10 +138,7 @@ pub async fn punch_to_peer(
         let _ = socket.send_to(punch_packet, peer).await;
 
         // Receive (short timeout — keep punching)
-        match tokio::time::timeout(
-            Duration::from_millis(50),
-            socket.recv_from(&mut buf),
-        ).await {
+        match tokio::time::timeout(Duration::from_millis(50), socket.recv_from(&mut buf)).await {
             Ok(Ok((n, from))) => {
                 let payload = &buf[..n];
                 if from == peer {

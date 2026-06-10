@@ -20,8 +20,7 @@ mod tests {
 
     #[test]
     fn device_id_unique() {
-        let ids: std::collections::HashSet<String> = (0..100)
-            .map(|_| DeviceId::new().0).collect();
+        let ids: std::collections::HashSet<String> = (0..100).map(|_| DeviceId::new().0).collect();
         assert_eq!(ids.len(), 100);
     }
 
@@ -91,7 +90,10 @@ mod tests {
         let c = SessionCipher::new([5u8; 32]);
         let ct = c.encrypt(b"data").unwrap();
         for len in 0..ct.len() {
-            assert!(c.decrypt(&ct[..len]).is_err(), "truncated ct was accepted at len {}", len);
+            assert!(
+                c.decrypt(&ct[..len]).is_err(),
+                "truncated ct was accepted at len {len}"
+            );
         }
     }
 
@@ -121,11 +123,24 @@ mod tests {
         use crate::message::*;
         let msgs: Vec<Msg> = vec![
             Msg::Ping(Ping { ts: 0 }),
-            Msg::Pong(Pong { ts: 0, server_ts: 0 }),
+            Msg::Pong(Pong {
+                ts: 0,
+                server_ts: 0,
+            }),
             Msg::KeyFrame,
-            Msg::Register(Register { device_id: "A1B2-C3D4".into(), pubkey: "".into() }),
-            Msg::Close(CloseReason { code: 0, reason: "".into() }),
-            Msg::QosUpdate(QosUpdate { fps: 30, bitrate_kbps: 2000, quality: 75 }),
+            Msg::Register(Register {
+                device_id: "A1B2-C3D4".into(),
+                pubkey: "".into(),
+            }),
+            Msg::Close(CloseReason {
+                code: 0,
+                reason: "".into(),
+            }),
+            Msg::QosUpdate(QosUpdate {
+                fps: 30,
+                bitrate_kbps: 2000,
+                quality: 75,
+            }),
         ];
         for msg in &msgs {
             let json = serde_json::to_string(msg).expect("serialize");
@@ -143,8 +158,8 @@ mod tests {
     #[test]
     fn message_parser_never_panics_on_garbage() {
         use crate::message::Msg;
-        use rand::{RngCore, SeedableRng};
         use rand::rngs::StdRng;
+        use rand::{RngCore, SeedableRng};
 
         // Fixed seed → reproducible. 10k random byte strings of varied length.
         let mut rng = StdRng::seed_from_u64(0x4D49_5255_u64);
@@ -174,8 +189,8 @@ mod tests {
     #[test]
     fn decrypt_never_panics_on_garbage() {
         use crate::crypto::SessionCipher;
-        use rand::{RngCore, SeedableRng};
         use rand::rngs::StdRng;
+        use rand::{RngCore, SeedableRng};
 
         let cipher = SessionCipher::new([0u8; 32]);
         let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);

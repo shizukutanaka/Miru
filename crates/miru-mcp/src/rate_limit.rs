@@ -53,7 +53,11 @@ impl Policy {
     }
 
     fn per_second(burst: u32, daily_max: u32) -> Self {
-        Self { burst, refill_every: Duration::from_millis(1000 / burst as u64), daily_max }
+        Self {
+            burst,
+            refill_every: Duration::from_millis(1000 / burst as u64),
+            daily_max,
+        }
     }
 
     fn per_minute(burst: u32, daily_max: u32) -> Self {
@@ -110,9 +114,13 @@ impl Bucket {
         }
 
         if self.tokens == 0 {
-            let next_token_in = self.policy.refill_every
+            let next_token_in = self
+                .policy
+                .refill_every
                 .saturating_sub(now.duration_since(self.last_refill));
-            return Err(RateLimitError::BucketEmpty { retry_after: next_token_in });
+            return Err(RateLimitError::BucketEmpty {
+                retry_after: next_token_in,
+            });
         }
 
         self.tokens -= 1;
@@ -136,7 +144,9 @@ pub struct RateLimiter {
 
 impl RateLimiter {
     pub fn new() -> Self {
-        Self { buckets: Mutex::new(HashMap::new()) }
+        Self {
+            buckets: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Try to consume one quota unit for `cap`. Returns Err with retry info
@@ -144,13 +154,17 @@ impl RateLimiter {
     /// entry on Err so denied attempts are forensically visible.
     pub fn try_consume(&self, cap: Capability) -> Result<(), RateLimitError> {
         let mut g = self.buckets.lock();
-        let bucket = g.entry(cap).or_insert_with(|| Bucket::new(Policy::default_for(cap)));
+        let bucket = g
+            .entry(cap)
+            .or_insert_with(|| Bucket::new(Policy::default_for(cap)));
         bucket.try_consume()
     }
 }
 
 impl Default for RateLimiter {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -172,7 +186,10 @@ mod tests {
         let rl = RateLimiter::new();
         // First 10 OK (burst=10 for ScreenRead)
         for i in 0..10 {
-            assert!(rl.try_consume(Capability::ScreenRead).is_ok(), "call {} should succeed", i);
+            assert!(
+                rl.try_consume(Capability::ScreenRead).is_ok(),
+                "call {i} should succeed"
+            );
         }
         // 11th immediately fails
         assert!(rl.try_consume(Capability::ScreenRead).is_err());
@@ -201,11 +218,13 @@ mod tests {
             refill_every: Duration::from_micros(1),
             daily_max: 5,
         });
-        for _ in 0..5 { assert!(bucket.try_consume().is_ok()); }
+        for _ in 0..5 {
+            assert!(bucket.try_consume().is_ok());
+        }
         let err = bucket.try_consume().unwrap_err();
         match err {
             RateLimitError::DailyCapReached { cap_max, .. } => assert_eq!(cap_max, 5),
-            other => panic!("expected DailyCapReached, got {:?}", other),
+            other => panic!("expected DailyCapReached, got {other:?}"),
         }
     }
 }

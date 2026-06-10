@@ -131,7 +131,10 @@ pub struct StageTimer<'a> {
 
 impl<'a> StageTimer<'a> {
     pub fn start(meter: &'a LatencyMeter) -> Self {
-        Self { meter, start: Instant::now() }
+        Self {
+            meter,
+            start: Instant::now(),
+        }
     }
 }
 
@@ -155,7 +158,7 @@ mod tests {
         // Spike samples — smoothed should not jump fully
         m.record(Duration::from_millis(50));
         let after_spike = m.smoothed_ms();
-        assert!(after_spike < 30.0, "got {}", after_spike); // damped
+        assert!(after_spike < 30.0, "got {after_spike}"); // damped
     }
 
     #[test]
@@ -178,6 +181,6 @@ mod tests {
         p.decode.record(Duration::from_millis(3));
         p.display.record(Duration::from_millis(5));
         let snap = p.snapshot();
-        assert!((snap.total_ms - 33.0).abs() < 1.0, "{:?}", snap);
+        assert!((snap.total_ms - 33.0).abs() < 1.0, "{snap:?}");
     }
 }

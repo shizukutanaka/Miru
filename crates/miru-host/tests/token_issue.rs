@@ -16,15 +16,29 @@ fn issued_token_verifies_against_host_identity() {
     // Run the CLI with XDG_CONFIG_HOME pointed at our temp dir so the host
     // creates its identity there.
     let out = Command::new(env!("CARGO_BIN_EXE_miru-host"))
-        .args(["token", "issue", "--cap", "screen_read,pointer_move", "--ttl-hours", "1"])
+        .args([
+            "token",
+            "issue",
+            "--cap",
+            "screen_read,pointer_move",
+            "--ttl-hours",
+            "1",
+        ])
         .env("XDG_CONFIG_HOME", &dir)
         .output()
         .expect("run miru-host token issue");
-    assert!(out.status.success(), "token issue failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "token issue failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let token_str = String::from_utf8(out.stdout).unwrap();
     let token_str = token_str.trim();
-    assert!(token_str.starts_with("miru-agent."), "unexpected token format: {}", token_str);
+    assert!(
+        token_str.starts_with("miru-agent."),
+        "unexpected token format: {token_str}"
+    );
 
     // Load the SAME identity the CLI used (XDG_CONFIG_HOME/miru/identity).
     let identity = DeviceIdentity::load_or_create(&dir.join("miru").join("identity")).unwrap();
@@ -35,7 +49,10 @@ fn issued_token_verifies_against_host_identity() {
 
     assert!(token.has_capability(Capability::ScreenRead));
     assert!(token.has_capability(Capability::PointerMove));
-    assert!(!token.has_capability(Capability::ShellExec), "must not grant un-requested cap");
+    assert!(
+        !token.has_capability(Capability::ShellExec),
+        "must not grant un-requested cap"
+    );
     assert!(token.seconds_remaining() > 0);
 }
 

@@ -12,7 +12,7 @@
 use anyhow::{bail, Result};
 use miru_common::message::VideoCodec;
 
-use crate::{EncodedPacket, encoder::EncoderBackend};
+use crate::{encoder::EncoderBackend, EncodedPacket};
 
 /// Probe available hardware encoders on this system.
 pub fn probe() -> Vec<HwEncoder> {
@@ -104,9 +104,16 @@ pub struct HwEncoderBackend {
 }
 
 impl HwEncoderBackend {
-    pub fn new(hw: HwEncoder, codec: VideoCodec, _w: u32, _h: u32, _fps: u8, _bps: u32) -> Result<Self> {
+    pub fn new(
+        hw: HwEncoder,
+        codec: VideoCodec,
+        _w: u32,
+        _h: u32,
+        _fps: u8,
+        _bps: u32,
+    ) -> Result<Self> {
         if !hw.codecs().contains(&codec) {
-            bail!("{:?} does not support codec {:?}", hw, codec);
+            bail!("{hw:?} does not support codec {codec:?}");
         }
         // TODO: ffmpeg-next AVCodecContext init with hw_device_ctx
         // hwaccel name = match hw { Nvenc => "cuda", VideoToolbox => "videotoolbox", ... }
@@ -115,8 +122,14 @@ impl HwEncoderBackend {
 }
 
 impl EncoderBackend for HwEncoderBackend {
-    fn encode(&mut self, _i420: &[u8], _w: u32, _h: u32, _ts: u64, _kf: bool)
-        -> Result<Option<EncodedPacket>> {
+    fn encode(
+        &mut self,
+        _i420: &[u8],
+        _w: u32,
+        _h: u32,
+        _ts: u64,
+        _kf: bool,
+    ) -> Result<Option<EncodedPacket>> {
         // TODO: avcodec_send_frame → avcodec_receive_packet
         bail!("HW encoder not yet implemented — fall back to VpxEncoder")
     }

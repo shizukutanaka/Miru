@@ -85,7 +85,8 @@ pub async fn viewer_handshake<C: MsgChannel>(
     let hello = Msg::Hello(Hello {
         version: miru_common::PROTOCOL_VERSION,
         role: Role::Viewer,
-        pubkey: format!("{}:{}:{}",
+        pubkey: format!(
+            "{}:{}:{}",
             B64.encode(eph_pub),
             B64.encode(identity_pub),
             B64.encode(sig.to_bytes()),
@@ -98,7 +99,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
     let ack = match chan.recv_msg().await? {
         Some(Msg::HelloAck(a)) => a,
         Some(Msg::Error(e)) => bail!("host rejected: {} {}", e.code, e.message),
-        Some(other) => bail!("expected HelloAck, got {:?}", other),
+        Some(other) => bail!("expected HelloAck, got {other:?}"),
         None => bail!("connection closed during handshake"),
     };
 
@@ -112,7 +113,8 @@ pub async fn viewer_handshake<C: MsgChannel>(
     host_challenge.extend_from_slice(&host_identity);
     let host_vk = VerifyingKey::from_bytes(&host_identity)
         .map_err(|_| anyhow::anyhow!("invalid host identity key"))?;
-    host_vk.verify_strict(&host_challenge, &host_sig)
+    host_vk
+        .verify_strict(&host_challenge, &host_sig)
         .map_err(|_| anyhow::anyhow!("host signature verification failed"))?;
 
     // 7. Derive shared secret + session key
@@ -127,7 +129,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
         peer_identity_pubkey: host_identity,
         selected_video_codec: ack.selected_codec,
         selected_audio_codec: ack.selected_audio,
-        peer_role: Role::Viewer,        // host is always the other side
+        peer_role: Role::Viewer,          // host is always the other side
         peer_pubkey_field: String::new(), // not needed on viewer side
     })
 }
@@ -142,15 +144,17 @@ pub async fn host_handshake<C: MsgChannel>(
     // 1. Receive Hello
     let hello = match chan.recv_msg().await? {
         Some(Msg::Hello(h)) => h,
-        Some(other) => bail!("expected Hello, got {:?}", other),
+        Some(other) => bail!("expected Hello, got {other:?}"),
         None => bail!("connection closed"),
     };
 
     if hello.version != miru_common::PROTOCOL_VERSION {
-        let _ = chan.send_msg(&Msg::Error(miru_common::message::ErrorMsg {
-            code: 1001,
-            message: format!("protocol version {} unsupported", hello.version),
-        })).await;
+        let _ = chan
+            .send_msg(&Msg::Error(miru_common::message::ErrorMsg {
+                code: 1001,
+                message: format!("protocol version {} unsupported", hello.version),
+            }))
+            .await;
         bail!("protocol version mismatch: {}", hello.version);
     }
 
@@ -189,7 +193,8 @@ pub async fn host_handshake<C: MsgChannel>(
     // 6. Send HelloAck
     chan.send_msg(&Msg::HelloAck(HelloAck {
         session_id,
-        pubkey: format!("{}:{}:{}",
+        pubkey: format!(
+            "{}:{}:{}",
             B64.encode(eph_pub),
             B64.encode(identity_pub),
             B64.encode(sig.to_bytes()),
@@ -197,7 +202,8 @@ pub async fn host_handshake<C: MsgChannel>(
         encrypted_key: vec![],
         selected_codec: codec.clone(),
         selected_audio: AudioCodec::Opus,
-    })).await?;
+    }))
+    .await?;
 
     Ok(HandshakeResult {
         tx,
@@ -216,15 +222,21 @@ pub async fn host_handshake<C: MsgChannel>(
 /// Parse `<eph_pub>:<identity_pub>:<signature>` from base64.
 fn parse_pubkey_field(s: &str) -> Result<([u8; 32], [u8; 32], Signature)> {
     let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 3 { bail!("malformed pubkey field"); }
+    if parts.len() != 3 {
+        bail!("malformed pubkey field");
+    }
 
     let eph = B64.decode(parts[0])?;
     let identity = B64.decode(parts[1])?;
     let sig_bytes = B64.decode(parts[2])?;
 
     let eph: [u8; 32] = eph.try_into().map_err(|_| anyhow::anyhow!("eph len"))?;
-    let identity: [u8; 32] = identity.try_into().map_err(|_| anyhow::anyhow!("identity len"))?;
-    let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| anyhow::anyhow!("sig len"))?;
+    let identity: [u8; 32] = identity
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("identity len"))?;
+    let sig_arr: [u8; 64] = sig_bytes
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("sig len"))?;
     let sig = Signature::from_bytes(&sig_arr);
 
     Ok((eph, identity, sig))
@@ -234,7 +246,9 @@ fn parse_pubkey_field(s: &str) -> Result<([u8; 32], [u8; 32], Signature)> {
 fn hkdf_expand(shared: &[u8; 32], salt: &[u8]) -> [u8; 32] {
     let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, salt);
     let prk = salt.extract(shared);
-    let okm = prk.expand(&[HKDF_INFO], hkdf::HKDF_SHA256).expect("hkdf expand");
+    let okm = prk
+        .expand(&[HKDF_INFO], hkdf::HKDF_SHA256)
+        .expect("hkdf expand");
     let mut out = [0u8; 32];
     okm.fill(&mut out).expect("hkdf fill");
     out
@@ -256,7 +270,10 @@ mod tests {
     #[async_trait::async_trait]
     impl MsgChannel for LoopChannel {
         async fn send_msg(&mut self, msg: &Msg) -> Result<()> {
-            self.tx.send(msg.clone()).await.map_err(|_| anyhow::anyhow!("send"))?;
+            self.tx
+                .send(msg.clone())
+                .await
+                .map_err(|_| anyhow::anyhow!("send"))?;
             Ok(())
         }
         async fn recv_msg(&mut self) -> Result<Option<Msg>> {
@@ -296,13 +313,22 @@ mod tests {
 
         // Both derived the same session
         assert_eq!(viewer_result.session_id, host_result.session_id);
-        assert_eq!(viewer_result.selected_video_codec, host_result.selected_video_codec);
+        assert_eq!(
+            viewer_result.selected_video_codec,
+            host_result.selected_video_codec
+        );
         // AV1 wasn't requested → VP9 wins
         assert_eq!(viewer_result.selected_video_codec, VideoCodec::Vp9);
 
         // Identity pinning works
-        assert_eq!(viewer_result.peer_identity_pubkey, host_id.verifying_key().to_bytes());
-        assert_eq!(host_result.peer_identity_pubkey, viewer_id.verifying_key().to_bytes());
+        assert_eq!(
+            viewer_result.peer_identity_pubkey,
+            host_id.verifying_key().to_bytes()
+        );
+        assert_eq!(
+            host_result.peer_identity_pubkey,
+            viewer_id.verifying_key().to_bytes()
+        );
 
         // Both ciphers can encrypt and the other can decrypt.
         // Viewer sends with viewer.tx, host receives with host.rx (= viewer.tx by construction).

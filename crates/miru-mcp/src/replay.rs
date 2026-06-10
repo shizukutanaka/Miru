@@ -14,8 +14,8 @@
 //! Parameters match the paper's recommendation: 1000-nonce window, 30s validity.
 
 use parking_lot::Mutex;
-use std::collections::VecDeque;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Maximum number of nonces retained in the sliding window.
@@ -100,7 +100,10 @@ mod tests {
     use super::*;
 
     fn now() -> u64 {
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
     }
 
     #[test]
@@ -121,9 +124,15 @@ mod tests {
     fn stale_timestamp_rejected() {
         let g = ReplayGuard::new();
         // 60s in the past — beyond the 30s window.
-        assert_eq!(g.check(now() - 60, [2u8; 16]), ReplayDecision::StaleTimestamp);
+        assert_eq!(
+            g.check(now() - 60, [2u8; 16]),
+            ReplayDecision::StaleTimestamp
+        );
         // 60s in the future — also rejected.
-        assert_eq!(g.check(now() + 60, [3u8; 16]), ReplayDecision::StaleTimestamp);
+        assert_eq!(
+            g.check(now() + 60, [3u8; 16]),
+            ReplayDecision::StaleTimestamp
+        );
     }
 
     #[test]

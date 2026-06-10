@@ -81,8 +81,7 @@ impl Capability {
     pub fn security_level(self) -> SecurityLevel {
         match self {
             // Read-only observation — harmless.
-            Capability::ScreenRead
-            | Capability::PointerMove => SecurityLevel::Normal,
+            Capability::ScreenRead | Capability::PointerMove => SecurityLevel::Normal,
 
             // Interactive input + low-impact writes — safe in-context.
             Capability::PointerClick
@@ -132,7 +131,9 @@ impl Capability {
             Capability::KeyCombo,
             Capability::ClipboardWrite,
             Capability::OpenUrl,
-        ].into_iter().collect()
+        ]
+        .into_iter()
+        .collect()
     }
 }
 
@@ -225,17 +226,19 @@ impl AgentToken {
         }
         let payload_bytes = B64URL.decode(parts[1]).context("decode payload")?;
         let sig_bytes = B64URL.decode(parts[2]).context("decode sig")?;
-        let sig_arr: [u8; 64] = sig_bytes.try_into()
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
             .map_err(|_| anyhow::anyhow!("sig wrong length"))?;
         let signature = Signature::from_bytes(&sig_arr);
 
         // Verify signature first — never deserialize untrusted bytes.
         // verify_strict (ZIP-215) rejects small-order pubkeys + non-canonical R.
-        issuer_pubkey.verify_strict(&payload_bytes, &signature)
+        issuer_pubkey
+            .verify_strict(&payload_bytes, &signature)
             .map_err(|_| anyhow::anyhow!("invalid token signature"))?;
 
-        let payload: AgentTokenPayload = serde_json::from_slice(&payload_bytes)
-            .context("deserialize payload")?;
+        let payload: AgentTokenPayload =
+            serde_json::from_slice(&payload_bytes).context("deserialize payload")?;
 
         // Check issuer matches
         let pk_b64 = B64URL.encode(issuer_pubkey.as_bytes());
@@ -246,7 +249,11 @@ impl AgentToken {
         // Logical consistency — our issuer always produces iat < exp, but
         // parse_and_verify accepts external input and must not trust it.
         if payload.iat > payload.exp {
-            bail!("malformed token: iat ({}) is after exp ({})", payload.iat, payload.exp);
+            bail!(
+                "malformed token: iat ({}) is after exp ({})",
+                payload.iat,
+                payload.exp
+            );
         }
 
         // Check expiration
@@ -334,8 +341,11 @@ mod tests {
         let pk = key.verifying_key();
 
         let token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         let s = token.to_string();
         // Flip a character in the payload section
@@ -353,8 +363,11 @@ mod tests {
         let key2 = make_key();
 
         let token = AgentToken::issue(
-            &key1, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key1,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         let s = token.to_string();
 
@@ -368,15 +381,19 @@ mod tests {
         let pk = key.verifying_key();
 
         let mut token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         // Force-expire
         token.payload.exp = unix_now() - 10;
 
         // Re-sign with new payload
         let sig = key.sign(&canonical_payload_bytes(&token.payload));
-        let new_s = format!("miru-agent.{}.{}",
+        let new_s = format!(
+            "miru-agent.{}.{}",
             B64URL.encode(canonical_payload_bytes(&token.payload)),
             B64URL.encode(sig.to_bytes()),
         );
@@ -390,8 +407,11 @@ mod tests {
         let pk = key.verifying_key();
 
         let mut token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         // Forge a logically impossible payload: issued after it expires,
         // with `now` inside the [exp, iat] gap so only the iat<=exp check
@@ -399,7 +419,8 @@ mod tests {
         token.payload.iat = unix_now() + 200;
         token.payload.exp = unix_now() + 100;
         let sig = key.sign(&canonical_payload_bytes(&token.payload));
-        let s = format!("miru-agent.{}.{}",
+        let s = format!(
+            "miru-agent.{}.{}",
             B64URL.encode(canonical_payload_bytes(&token.payload)),
             B64URL.encode(sig.to_bytes()),
         );
@@ -417,13 +438,17 @@ mod tests {
         let pk = key.verifying_key();
 
         let mut token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         token.payload.iat = unix_now() + MAX_CLOCK_SKEW_SECS + 100;
         token.payload.exp = token.payload.iat + 60;
         let sig = key.sign(&canonical_payload_bytes(&token.payload));
-        let s = format!("miru-agent.{}.{}",
+        let s = format!(
+            "miru-agent.{}.{}",
             B64URL.encode(canonical_payload_bytes(&token.payload)),
             B64URL.encode(sig.to_bytes()),
         );

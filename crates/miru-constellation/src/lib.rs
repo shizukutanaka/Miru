@@ -124,10 +124,7 @@ impl Constellation {
 
     /// Issue a new join token (called on the constellation's "primary" device,
     /// the one that holds the constellation private key — typically a desktop).
-    pub fn issue_join(
-        constellation_key: &SigningKey,
-        device_pubkey: &VerifyingKey,
-    ) -> DeviceJoin {
+    pub fn issue_join(constellation_key: &SigningKey, device_pubkey: &VerifyingKey) -> DeviceJoin {
         use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
         let device_id = Uuid::new_v4();
@@ -160,10 +157,13 @@ impl Constellation {
         blob.extend_from_slice(join.device_id.as_bytes());
 
         let sig_bytes = B64.decode(&join.constellation_signature_b64)?;
-        let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| anyhow::anyhow!("sig len"))?;
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("sig len"))?;
         let sig = Signature::from_bytes(&sig_arr);
 
-        self.constellation_pubkey.verify_strict(&blob, &sig)
+        self.constellation_pubkey
+            .verify_strict(&blob, &sig)
             .map_err(|_| anyhow::anyhow!("constellation signature invalid"))?;
 
         self.members.write().insert(join.device_id, join);
@@ -183,7 +183,8 @@ impl Constellation {
     pub fn snapshot(&self) -> Vec<DevicePresence> {
         let presence = self.presence.read();
         let members = self.members.read();
-        members.keys()
+        members
+            .keys()
             .filter_map(|id| presence.get(id).cloned())
             .collect()
     }
@@ -229,7 +230,10 @@ impl HandoffToken {
         let sig: Signature = constellation_key.sign(&blob);
 
         Self {
-            session_id, from_device, to_device, expires_at,
+            session_id,
+            from_device,
+            to_device,
+            expires_at,
             signature_b64: B64.encode(sig.to_bytes()),
         }
     }
@@ -245,9 +249,12 @@ impl HandoffToken {
         blob.extend_from_slice(self.to_device.as_bytes());
         blob.extend_from_slice(&self.expires_at.to_le_bytes());
         let sig_bytes = B64.decode(&self.signature_b64)?;
-        let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| anyhow::anyhow!("sig len"))?;
+        let sig_arr: [u8; 64] = sig_bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("sig len"))?;
         let sig = Signature::from_bytes(&sig_arr);
-        constellation_pubkey.verify_strict(&blob, &sig)
+        constellation_pubkey
+            .verify_strict(&blob, &sig)
             .map_err(|_| anyhow::anyhow!("handoff signature invalid"))?;
         Ok(())
     }
@@ -256,7 +263,10 @@ impl HandoffToken {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 fn unix_now() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 #[cfg(test)]
@@ -322,9 +332,7 @@ mod tests {
     #[test]
     fn handoff_token_verifies() {
         let key = SigningKey::generate(&mut OsRng);
-        let token = HandoffToken::issue(
-            &key, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), 60,
-        );
+        let token = HandoffToken::issue(&key, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), 60);
         assert!(token.verify(&key.verifying_key()).is_ok());
     }
 
@@ -332,9 +340,7 @@ mod tests {
     fn handoff_token_rejects_other_signer() {
         let key1 = SigningKey::generate(&mut OsRng);
         let key2 = SigningKey::generate(&mut OsRng);
-        let token = HandoffToken::issue(
-            &key1, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), 60,
-        );
+        let token = HandoffToken::issue(&key1, Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4(), 60);
         assert!(token.verify(&key2.verifying_key()).is_err());
     }
 }

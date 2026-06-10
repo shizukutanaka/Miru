@@ -8,9 +8,12 @@
 
 use anyhow::Result;
 use flume::Receiver;
-use miru_capture::{frame::{PixelFormat, RawFrame}, ScreenCapturer};
+use miru_capture::{
+    frame::{PixelFormat, RawFrame},
+    ScreenCapturer,
+};
 use miru_codec::encoder::Encoder;
-use miru_common::message::{VideoCodec, VideoFrame, Msg};
+use miru_common::message::{Msg, VideoCodec, VideoFrame};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
@@ -49,8 +52,10 @@ pub fn start(
             let mut last_frame = Instant::now();
             let mut force_keyframe = true;
 
-            info!("Capture loop started: display={} fps={} bitrate={}kbps codec={:?}",
-                display_idx, fps, bitrate, codec);
+            info!(
+                "Capture loop started: display={} fps={} bitrate={}kbps codec={:?}",
+                display_idx, fps, bitrate, codec
+            );
 
             loop {
                 // Rate limiting
@@ -76,7 +81,9 @@ pub fn start(
                 if encoder.is_none() {
                     info!("Encoder init: {}×{} {:?}", frame.width, frame.height, codec);
                     match Encoder::new(codec.clone(), frame.width, frame.height, fps, bitrate) {
-                        Ok(enc) => { encoder = Some(enc); }
+                        Ok(enc) => {
+                            encoder = Some(enc);
+                        }
                         Err(e) => {
                             error!("Encoder init failed: {}; dropping frame and retrying", e);
                             continue;
@@ -96,7 +103,8 @@ pub fn start(
                 // Encode
                 match enc.encode(
                     &i420,
-                    frame.width, frame.height,
+                    frame.width,
+                    frame.height,
                     frame.timestamp_ms,
                     force_keyframe,
                 ) {

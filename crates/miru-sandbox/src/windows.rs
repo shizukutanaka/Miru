@@ -23,7 +23,7 @@ pub fn apply(_policy: &Policy) -> Result<Outcome> {
     o.notes.push(
         "Windows AppContainer is configured at process creation; \
          see installer/wix/miru.wxs for SID + capabilities."
-            .into()
+            .into(),
     );
     tracing::info!(
         notes = ?o.notes,
@@ -33,6 +33,7 @@ pub fn apply(_policy: &Policy) -> Result<Outcome> {
 }
 
 fn drop_privileges(outcome: &mut Outcome) {
+    use windows::core::PCWSTR;
     use windows::Win32::{
         Foundation::{CloseHandle, LUID},
         Security::{
@@ -41,7 +42,6 @@ fn drop_privileges(outcome: &mut Outcome) {
         },
         System::Threading::{GetCurrentProcess, OpenProcessToken},
     };
-    use windows::core::PCWSTR;
 
     let mut token = Default::default();
     if unsafe {
@@ -53,7 +53,9 @@ fn drop_privileges(outcome: &mut Outcome) {
     }
     .is_err()
     {
-        outcome.notes.push("Windows: OpenProcessToken failed".into());
+        outcome
+            .notes
+            .push("Windows: OpenProcessToken failed".into());
         return;
     }
 
@@ -95,7 +97,9 @@ fn drop_privileges(outcome: &mut Outcome) {
         let _ = CloseHandle(token);
     }
 
-    outcome
-        .notes
-        .push(format!("Windows: dropped {}/{} privileges", dropped, to_drop.len()));
+    outcome.notes.push(format!(
+        "Windows: dropped {}/{} privileges",
+        dropped,
+        to_drop.len()
+    ));
 }

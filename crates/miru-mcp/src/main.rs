@@ -23,12 +23,18 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use clap::Parser;
 use ed25519_dalek::VerifyingKey;
 use miru_agent::{AgentSession, AgentToken, AuditLog, ConfirmFn, ConfirmRequest};
-use miru_mcp::{run_stdio, server::{HostBridge, McpServer}};
+use miru_mcp::{
+    run_stdio,
+    server::{HostBridge, McpServer},
+};
 use std::{path::PathBuf, sync::Arc};
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
-#[command(name = "miru-mcp", about = "Miru MCP server — exposes Miru host control to Claude")]
+#[command(
+    name = "miru-mcp",
+    about = "Miru MCP server — exposes Miru host control to Claude"
+)]
 struct Args {
     /// Agent token, normally provided via the MIRU_AGENT_TOKEN env var.
     /// Mint one with `miru-host token issue`.
@@ -36,7 +42,11 @@ struct Args {
     token: Option<String>,
 
     /// Signal server URL.
-    #[arg(long, env = "MIRU_SIGNAL", default_value = "ws://signal.miru.app:21115/ws")]
+    #[arg(
+        long,
+        env = "MIRU_SIGNAL",
+        default_value = "ws://signal.miru.app:21115/ws"
+    )]
     signal: String,
 
     /// Target host's device ID.
@@ -103,7 +113,10 @@ async fn main() -> Result<()> {
     // additional check raises the bar for local-malware attacks.
     match miru_mcp::parent_check::check_parent() {
         Ok(p) if p.allowed => {
-            info!("Parent process check passed (ppid={}, exe={:?})", p.ppid, p.exe);
+            info!(
+                "Parent process check passed (ppid={}, exe={:?})",
+                p.ppid, p.exe
+            );
         }
         Ok(p) if skip_parent_check => {
             warn!(
@@ -118,7 +131,9 @@ async fn main() -> Result<()> {
                  If you are running miru-mcp from a trusted MCP client that \
                  isn't recognised, set MIRU_INSECURE_NO_PARENT_CHECK=1 (not recommended). \
                  Detected: ppid={}, exe={:?}",
-                p.reason.as_deref().unwrap_or("unknown reason"), p.ppid, p.exe
+                p.reason.as_deref().unwrap_or("unknown reason"),
+                p.ppid,
+                p.exe
             );
         }
         Err(e) if skip_parent_check => {
@@ -126,9 +141,8 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             bail!(
-                "parent process verification could not run: {}. \
-                 Set MIRU_INSECURE_NO_PARENT_CHECK=1 to bypass (not recommended).",
-                e
+                "parent process verification could not run: {e}. \
+                 Set MIRU_INSECURE_NO_PARENT_CHECK=1 to bypass (not recommended)."
             );
         }
     }
@@ -147,7 +161,8 @@ async fn main() -> Result<()> {
 
     // Open audit log
     let audit_path = args.audit.unwrap_or_else(|| {
-        dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
             .join(".miru/agent-audit.log")
     });
     let audit = Arc::new(AuditLog::open(&audit_path)?);
@@ -176,7 +191,8 @@ async fn main() -> Result<()> {
         if approved {
             tracing::debug!(
                 "Auto-approved: agent={} cap={:?}",
-                req.agent_label, req.capability
+                req.agent_label,
+                req.capability
             );
         } else {
             warn!(
@@ -192,7 +208,9 @@ async fn main() -> Result<()> {
     // Connect to host. v0.1 uses a stub bridge; the real bridge is wired in
     // host_bridge.rs by miru-host.
     let disp_idx: u8 = std::env::var("MIRU_DISPLAY_IDX")
-        .ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
 
     let bridge: Arc<dyn HostBridge> =
         if std::env::var("DISPLAY").is_ok() || std::env::var("MIRU_FORCE_LOCAL").is_ok() {
@@ -221,21 +239,27 @@ fn parse_issuer(token: &str, issuer_override: Option<&str>) -> Result<VerifyingK
     }
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    let payload_bytes = URL_SAFE_NO_PAD.decode(parts[1])
+    let payload_bytes = URL_SAFE_NO_PAD
+        .decode(parts[1])
         .context("token payload is not base64url")?;
 
     #[derive(serde::Deserialize)]
-    struct ClaimedIssuer { iss: String }
-    let claimed: ClaimedIssuer = serde_json::from_slice(&payload_bytes)
-        .context("token payload is not valid JSON")?;
+    struct ClaimedIssuer {
+        iss: String,
+    }
+    let claimed: ClaimedIssuer =
+        serde_json::from_slice(&payload_bytes).context("token payload is not valid JSON")?;
 
-    let claimed_bytes = URL_SAFE_NO_PAD.decode(&claimed.iss)
+    let claimed_bytes = URL_SAFE_NO_PAD
+        .decode(&claimed.iss)
         .context("iss claim is not base64url")?;
-    let claimed_arr: [u8; 32] = claimed_bytes.try_into()
+    let claimed_arr: [u8; 32] = claimed_bytes
+        .try_into()
         .map_err(|_| anyhow::anyhow!("iss is not 32 bytes"))?;
 
     if let Some(explicit) = issuer_override {
-        let explicit_bytes = B64.decode(explicit)
+        let explicit_bytes = B64
+            .decode(explicit)
             .or_else(|_| URL_SAFE_NO_PAD.decode(explicit))
             .context("--issuer-pubkey is not base64")?;
         if explicit_bytes != claimed_arr {
@@ -243,8 +267,7 @@ fn parse_issuer(token: &str, issuer_override: Option<&str>) -> Result<VerifyingK
         }
     }
 
-    VerifyingKey::from_bytes(&claimed_arr)
-        .map_err(|e| anyhow::anyhow!("issuer pubkey: {}", e))
+    VerifyingKey::from_bytes(&claimed_arr).map_err(|e| anyhow::anyhow!("issuer pubkey: {e}"))
 }
 
 // ─── Stub bridge (replaced by real transport in host integration) ────────────
@@ -262,7 +285,10 @@ mod stub {
 
     impl StubBridge {
         pub fn new(host_id: Option<String>, signal_url: String) -> Self {
-            Self { host_id, signal_url }
+            Self {
+                host_id,
+                signal_url,
+            }
         }
     }
 
@@ -280,15 +306,11 @@ mod stub {
             tracing::info!("stub: capture_screen display={}", disp_idx);
             // Tiny PNG (1x1 transparent) for stub.
             Ok(vec![
-                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
-                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-                0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-                0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
-                0x54, 0x78, 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00,
-                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
-                0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-                0x42, 0x60, 0x82,
+                0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+                0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+                0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+                0x9C, 0x62, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+                0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
             ])
         }
         async fn read_clipboard(&self) -> Result<String> {
@@ -313,12 +335,12 @@ mod stub {
 /// Non-fatal on failure — logs a warning rather than refusing to start.
 fn sandbox_mcp(audit_path: &std::path::Path) {
     let audit_dir = audit_path.parent().unwrap_or(std::path::Path::new("."));
-    let policy = miru_sandbox::Policy::agent_worker()
-        .add_rw(audit_dir);    // read+write the audit log dir only
+    let policy = miru_sandbox::Policy::agent_worker().add_rw(audit_dir); // read+write the audit log dir only
     match miru_sandbox::apply(&policy) {
         Ok(o) => tracing::info!(
             "MCP sandbox applied: fs={} syscall={}",
-            o.fs_restricted, o.syscall_restricted
+            o.fs_restricted,
+            o.syscall_restricted
         ),
         Err(e) => tracing::warn!("MCP sandbox non-fatal: {}", e),
     }

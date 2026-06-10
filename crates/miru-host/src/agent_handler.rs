@@ -51,13 +51,17 @@ impl AgentHandler {
                 if *modifiers == 0 {
                     (Capability::KeyType, "key", json!({"key": key}))
                 } else {
-                    (Capability::KeyCombo, "key_combo", json!({"key": key, "mods": modifiers}))
+                    (
+                        Capability::KeyCombo,
+                        "key_combo",
+                        json!({"key": key, "mods": modifiers}),
+                    )
                 }
             }
             InputKind::Text { text } => (
                 Capability::KeyType,
                 "key_type",
-                json!({"len": text.len()}),  // don't log raw text
+                json!({"len": text.len()}), // don't log raw text
             ),
         };
 
@@ -110,8 +114,8 @@ mod tests {
     #[test]
     fn gate_allows_granted_capability_denies_others() {
         use ed25519_dalek::SigningKey;
-        use miru_agent::{AgentSession, AgentToken};
         use miru_agent::audit::AuditLog;
+        use miru_agent::{AgentSession, AgentToken};
         use miru_common::message::InputEvent;
         use std::collections::HashSet;
         use std::time::Duration;
@@ -129,14 +133,29 @@ mod tests {
 
         // MouseMove → PointerMove granted → allowed.
         let move_evt = InputEvent {
-            kind: InputKind::MouseMove { x: 10.0, y: 20.0, display: 0 }, timestamp_ms: 0,
+            kind: InputKind::MouseMove {
+                x: 10.0,
+                y: 20.0,
+                display: 0,
+            },
+            timestamp_ms: 0,
         };
-        assert!(handler.gate_input(&move_evt).is_ok(), "PointerMove should be allowed");
+        assert!(
+            handler.gate_input(&move_evt).is_ok(),
+            "PointerMove should be allowed"
+        );
 
         // KeyDown → KeyType NOT granted → denied.
         let key_evt = InputEvent {
-            kind: InputKind::KeyDown { key: 65, modifiers: 0 }, timestamp_ms: 0,
+            kind: InputKind::KeyDown {
+                key: 65,
+                modifiers: 0,
+            },
+            timestamp_ms: 0,
         };
-        assert!(handler.gate_input(&key_evt).is_err(), "KeyType should be denied");
+        assert!(
+            handler.gate_input(&key_evt).is_err(),
+            "KeyType should be denied"
+        );
     }
 }

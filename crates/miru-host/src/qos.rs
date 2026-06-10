@@ -64,8 +64,10 @@ impl QosController {
         self.bitrate_kbps = self.bitrate_kbps.clamp(200, 50_000);
 
         if self.fps != prev_fps || self.bitrate_kbps != prev_bitrate {
-            info!("QoS: rtt={}ms loss={:.1}% → fps={} bitrate={}kbps q={}",
-                rtt_ms, packet_loss_pct, self.fps, self.bitrate_kbps, self.quality);
+            info!(
+                "QoS: rtt={}ms loss={:.1}% → fps={} bitrate={}kbps q={}",
+                rtt_ms, packet_loss_pct, self.fps, self.bitrate_kbps, self.quality
+            );
             Some(QosUpdate {
                 fps: self.fps,
                 bitrate_kbps: self.bitrate_kbps,
@@ -76,10 +78,16 @@ impl QosController {
         }
     }
 
-    pub fn fps(&self) -> u8 { self.fps }
-    pub fn bitrate_kbps(&self) -> u32 { self.bitrate_kbps }
+    pub fn fps(&self) -> u8 {
+        self.fps
+    }
+    pub fn bitrate_kbps(&self) -> u32 {
+        self.bitrate_kbps
+    }
     #[allow(dead_code)]
-    pub fn quality(&self) -> u8 { self.quality }
+    pub fn quality(&self) -> u8 {
+        self.quality
+    }
 }
 
 #[cfg(test)]

@@ -18,7 +18,9 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::time;
 use tracing::{error, info, warn};
 
-use crate::{agent_handler::AgentHandler, capture_loop, input_handler::InputHandler, qos::QosController};
+use crate::{
+    agent_handler::AgentHandler, capture_loop, input_handler::InputHandler, qos::QosController,
+};
 
 #[derive(Clone)]
 pub struct HostConfig {
@@ -27,25 +29,32 @@ pub struct HostConfig {
     pub config_dir: PathBuf,
 }
 
-pub async fn run(
-    device_id: DeviceId,
-    signal_url: String,
-    config: HostConfig,
-) -> Result<()> {
+pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) -> Result<()> {
     let mut signal = SignalClient::connect(
         &signal_url,
         &device_id,
         Some(config.identity.verifying_key.as_bytes()),
-    ).await?;
+    )
+    .await?;
     info!("Signal: registered as {}", device_id);
-    info!("Identity fingerprint: {}", config.identity.pubkey_fingerprint());
+    info!(
+        "Identity fingerprint: {}",
+        config.identity.pubkey_fingerprint()
+    );
 
     loop {
         match signal.next_event().await {
-            Some(SignalEvent::Registered { device_id: did, relay_addr }) => {
+            Some(SignalEvent::Registered {
+                device_id: did,
+                relay_addr,
+            }) => {
                 info!("Device ID: {}  relay: {:?}", did, relay_addr);
             }
-            Some(SignalEvent::IncomingConnection { token, relay_addr, relay_port }) => {
+            Some(SignalEvent::IncomingConnection {
+                token,
+                relay_addr,
+                relay_port,
+            }) => {
                 info!("Incoming → relay {}:{}", relay_addr, relay_port);
                 let url = format!("ws://{relay_addr}:{relay_port}");
                 let cfg = config.clone();
@@ -70,11 +79,7 @@ pub async fn run(
     Ok(())
 }
 
-async fn handle_viewer(
-    relay_url: String,
-    token: String,
-    config: HostConfig,
-) -> Result<()> {
+async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> Result<()> {
     // 1. Connect to relay
     let mut relay = RelayTransport::connect(&relay_url, &token, "host").await?;
 
@@ -91,8 +96,10 @@ async fn handle_viewer(
     };
 
     let result = host_handshake(&mut relay, &config.identity.signing_key, host_features).await?;
-    info!("Handshake complete: session={} codec={:?}",
-        result.session_id, result.selected_video_codec);
+    info!(
+        "Handshake complete: session={} codec={:?}",
+        result.session_id, result.selected_video_codec
+    );
 
     // 3. ACL check
     let device_str = B64.encode(result.peer_identity_pubkey);
@@ -104,8 +111,8 @@ async fn handle_viewer(
     let agent_handler: Option<AgentHandler> = if result.peer_role == Role::AiAgent {
         match crate::agent_handler::extract_agent_token(&result.peer_pubkey_field) {
             Ok(token_str) => {
-                use miru_agent::{AgentSession, AgentToken};
                 use miru_agent::audit::AuditLog;
+                use miru_agent::{AgentSession, AgentToken};
                 let audit_path = config.config_dir.join("agent_audit.log");
                 match AuditLog::open(&audit_path) {
                     Ok(audit) => {
@@ -118,16 +125,20 @@ async fn handle_viewer(
                                 // Normal/Conditional capabilities granted by the
                                 // token still work. A native confirmation prompt
                                 // is planned for the v0.3 host UI.
-                                let confirm = std::sync::Arc::new(|req: &miru_agent::ConfirmRequest| {
-                                    warn!(
+                                let confirm = std::sync::Arc::new(
+                                    |req: &miru_agent::ConfirmRequest| {
+                                        warn!(
                                         "Denying {:?} for agent '{}': requires confirmation, but headless host has no prompt UI",
                                         req.capability, req.agent_label
                                     );
-                                    false
-                                });
-                                let session = std::sync::Arc::new(
-                                    AgentSession::open(token, std::sync::Arc::new(audit), confirm)
+                                        false
+                                    },
                                 );
+                                let session = std::sync::Arc::new(AgentSession::open(
+                                    token,
+                                    std::sync::Arc::new(audit),
+                                    confirm,
+                                ));
                                 info!("AI agent session opened — all inputs gated (dangerous caps require confirmation, unavailable headless)");
                                 Some(AgentHandler::new(session))
                             }
@@ -160,7 +171,10 @@ async fn handle_viewer(
 
     // 6. Start capture loop
     let qos = Arc::new(Mutex::new(QosController::new(60, 5000)));
-    let (fps, br) = { let q = qos.lock(); (q.fps(), q.bitrate_kbps()) };
+    let (fps, br) = {
+        let q = qos.lock();
+        (q.fps(), q.bitrate_kbps())
+    };
     let cap_rx = capture_loop::start(
         capture_loop::CaptureConfig {
             codec: result.selected_video_codec.clone(),
@@ -248,7 +262,9 @@ async fn handle_viewer(
         };
         // Host-only commitment (single-signer for v0.1; co-signing in v1.0).
         let commitment = miru_transparency::CoSignedCommitment::new(
-            &metadata, &config.identity.signing_key, &config.identity.signing_key,
+            &metadata,
+            &config.identity.signing_key,
+            &config.identity.signing_key,
         );
         match miru_transparency::rekor::submit_to_rekor(&rekor_url, &metadata, &commitment).await {
             Ok(entry) => info!(
@@ -298,7 +314,9 @@ async fn check_or_pair(
         }
         TrustDecision::PubkeyMismatch => {
             error!("⚠️  Pubkey mismatch for {} — rejecting", device_str);
-            Err(anyhow::anyhow!("pubkey mismatch — possible MITM or device re-keyed"))
+            Err(anyhow::anyhow!(
+                "pubkey mismatch — possible MITM or device re-keyed"
+            ))
         }
     }
 }
@@ -306,12 +324,19 @@ async fn check_or_pair(
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default().as_millis() as u64
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
-fn now_unix() -> u64 { now_ms() / 1000 }
+fn now_unix() -> u64 {
+    now_ms() / 1000
+}
 
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
     let d = ring::digest::digest(&ring::digest::SHA256, pk);
-    d.as_ref()[..8].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
+    d.as_ref()[..8]
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }

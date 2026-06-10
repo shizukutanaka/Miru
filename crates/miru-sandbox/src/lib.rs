@@ -148,7 +148,8 @@ pub fn apply(policy: &Policy) -> Result<Outcome> {
     {
         let _ = policy;
         let mut o = Outcome::empty();
-        o.notes.push(format!("sandboxing unsupported on this platform"));
+        o.notes
+            .push(format!("sandboxing unsupported on this platform"));
         tracing::warn!("miru-sandbox: unsupported platform; running without confinement");
         Ok(o)
     }

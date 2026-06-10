@@ -8,7 +8,8 @@
 use anyhow::Result;
 #[allow(unused_imports)]
 use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait}, StreamConfig,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    StreamConfig,
 };
 use crossbeam_channel::{bounded, Receiver};
 use tracing::{info, warn};
@@ -75,7 +76,10 @@ impl AudioCapturer {
 
         stream.play()?;
 
-        Ok(Self { rx, _stream: stream })
+        Ok(Self {
+            rx,
+            _stream: stream,
+        })
     }
 
     /// Returns the next audio frame, blocking until available.

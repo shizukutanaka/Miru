@@ -4,9 +4,9 @@
 //! JPEG via the `image` crate (always available).
 //! AV1 → dav1d, H264/H265 → ffmpeg (TODO v0.3).
 
+use crate::DecodedFrame;
 use anyhow::{bail, Result};
 use miru_common::message::VideoCodec;
-use crate::DecodedFrame;
 
 pub struct Decoder {
     inner: Box<dyn DecoderBackend>,
@@ -28,11 +28,9 @@ impl Decoder {
             VideoCodec::Vp9 | VideoCodec::Vp8 => {
                 bail!("VP9/VP8 decoding requires the `vpx` feature (install libvpx-dev)")
             }
-            VideoCodec::Jpeg => {
-                Box::new(JpegDecoder)
-            }
+            VideoCodec::Jpeg => Box::new(JpegDecoder),
             VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265 => {
-                bail!("{:?} decoding not yet supported (planned for v0.3)", codec)
+                bail!("{codec:?} decoding not yet supported (planned for v0.3)")
             }
         };
         Ok(Self { inner, codec })
@@ -42,7 +40,9 @@ impl Decoder {
         self.inner.decode(data, ts_ms)
     }
 
-    pub fn codec(&self) -> &VideoCodec { &self.codec }
+    pub fn codec(&self) -> &VideoCodec {
+        &self.codec
+    }
 }
 
 /// JPEG decoder — decompresses to I420 planes via the `image` crate.
@@ -50,13 +50,13 @@ struct JpegDecoder;
 
 impl DecoderBackend for JpegDecoder {
     fn decode(&mut self, data: &[u8], ts_ms: u64) -> Result<Option<DecodedFrame>> {
-        use image::ImageReader as ImageReader;
+        use image::ImageReader;
         use std::io::Cursor;
 
         let img = ImageReader::new(Cursor::new(data))
             .with_guessed_format()?
             .decode()
-            .map_err(|e| anyhow::anyhow!("JPEG decode: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("JPEG decode: {e}"))?;
 
         let rgb = img.to_rgb8();
         let w = rgb.width();

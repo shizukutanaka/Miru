@@ -9,10 +9,7 @@
 
 use anyhow::{bail, Result};
 use parking_lot::Mutex;
-use std::{
-    sync::Arc,
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 use tracing::{info, warn};
 
 use crate::{
@@ -54,11 +51,7 @@ const MAX_AUTO_APPROVE_ENTRIES: usize = 1000;
 const MAX_SCOPE_KEY_BYTES: usize = 4096;
 
 impl AgentSession {
-    pub fn open(
-        token: AgentToken,
-        audit: Arc<AuditLog>,
-        confirm: ConfirmFn,
-    ) -> Self {
+    pub fn open(token: AgentToken, audit: Arc<AuditLog>, confirm: ConfirmFn) -> Self {
         Self::open_with_revocation(token, audit, confirm, None)
     }
 
@@ -75,7 +68,10 @@ impl AgentSession {
             token.seconds_remaining(),
         );
         Self {
-            token, audit, confirm, revocation,
+            token,
+            audit,
+            confirm,
+            revocation,
             auto_approve: Mutex::new(Vec::new()),
         }
     }
@@ -94,7 +90,10 @@ impl AgentSession {
             if rev.is_revoked(&self.token.payload.jti) {
                 self.audit.append(
                     &self.token.payload.jti.to_string(),
-                    cap, action.clone(), None, AuditOutcome::Denied,
+                    cap,
+                    action.clone(),
+                    None,
+                    AuditOutcome::Denied,
                 )?;
                 bail!("token revoked");
             }
@@ -103,7 +102,10 @@ impl AgentSession {
         if !self.token.has_capability(cap) {
             self.audit.append(
                 &self.token.payload.jti.to_string(),
-                cap, action.clone(), None, AuditOutcome::Denied,
+                cap,
+                action.clone(),
+                None,
+                AuditOutcome::Denied,
             )?;
             bail!("capability {cap:?} not granted");
         }
@@ -112,7 +114,10 @@ impl AgentSession {
         if self.token.seconds_remaining() == 0 {
             self.audit.append(
                 &self.token.payload.jti.to_string(),
-                cap, action.clone(), None, AuditOutcome::Denied,
+                cap,
+                action.clone(),
+                None,
+                AuditOutcome::Denied,
             )?;
             bail!("agent token expired");
         }
@@ -147,7 +152,10 @@ impl AgentSession {
 
         self.audit.append(
             &self.token.payload.jti.to_string(),
-            cap, action, confirmed, outcome,
+            cap,
+            action,
+            confirmed,
+            outcome,
         )?;
 
         if matches!(outcome, AuditOutcome::Denied) {
@@ -162,7 +170,9 @@ impl AgentSession {
         let mut entries = self.auto_approve.lock();
         // Drop expired
         entries.retain(|e| e.until > now);
-        entries.iter().any(|e| e.capability == cap && e.scope_key == scope_key)
+        entries
+            .iter()
+            .any(|e| e.capability == cap && e.scope_key == scope_key)
     }
 
     fn add_auto_approve(&self, cap: Capability, scope_key: String, secs: u64) {
@@ -200,7 +210,8 @@ impl AgentSession {
 
         let ts_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs()).unwrap_or(0);
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
         let action = serde_json::json!({
             "kind": "screen_capture_provenance",
@@ -229,36 +240,56 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     fn temp_audit() -> Arc<AuditLog> {
-        let path = std::env::temp_dir().join(format!("miru-agent-test-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let path = std::env::temp_dir().join(format!(
+            "miru-agent-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         Arc::new(AuditLog::open(&path).unwrap())
     }
 
-    fn always_yes() -> ConfirmFn { Arc::new(|_: &ConfirmRequest| true) }
+    fn always_yes() -> ConfirmFn {
+        Arc::new(|_: &ConfirmRequest| true)
+    }
 
     #[test]
     fn allows_capability_in_token() {
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         let session = AgentSession::open(token, temp_audit(), always_yes());
 
-        assert!(session.authorize(Capability::ScreenRead, json!({}), "default").is_ok());
-        assert!(session.authorize(Capability::PointerMove, json!({"x":10}), "default").is_ok());
+        assert!(session
+            .authorize(Capability::ScreenRead, json!({}), "default")
+            .is_ok());
+        assert!(session
+            .authorize(Capability::PointerMove, json!({"x":10}), "default")
+            .is_ok());
     }
 
     #[test]
     fn denies_capability_not_in_token() {
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         let session = AgentSession::open(token, temp_audit(), always_yes());
 
         // assistant_default does not include ShellExec
-        assert!(session.authorize(Capability::ShellExec, json!({"cmd":"ls"}), "default").is_err());
+        assert!(session
+            .authorize(Capability::ShellExec, json!({"cmd":"ls"}), "default")
+            .is_err());
     }
 
     #[test]
@@ -266,10 +297,7 @@ mod tests {
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let mut caps = Capability::assistant_default();
         caps.insert(Capability::ShellExec);
-        let token = AgentToken::issue(
-            &key, "test", caps,
-            std::time::Duration::from_secs(60), None,
-        );
+        let token = AgentToken::issue(&key, "test", caps, std::time::Duration::from_secs(60), None);
 
         // Test with always-no confirmation
         let counter = Arc::new(AtomicU32::new(0));
@@ -280,7 +308,9 @@ mod tests {
         });
 
         let session = AgentSession::open(token, temp_audit(), confirm);
-        assert!(session.authorize(Capability::ShellExec, json!({"cmd":"rm -rf"}), "shell").is_err());
+        assert!(session
+            .authorize(Capability::ShellExec, json!({"cmd":"rm -rf"}), "shell")
+            .is_err());
         assert_eq!(counter.load(Ordering::Relaxed), 1);
     }
 
@@ -289,10 +319,7 @@ mod tests {
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let mut caps = Capability::assistant_default();
         caps.insert(Capability::FileWrite);
-        let token = AgentToken::issue(
-            &key, "test", caps,
-            std::time::Duration::from_secs(60), None,
-        );
+        let token = AgentToken::issue(&key, "test", caps, std::time::Duration::from_secs(60), None);
 
         let counter = Arc::new(AtomicU32::new(0));
         let counter2 = Arc::clone(&counter);
@@ -303,11 +330,19 @@ mod tests {
 
         let session = AgentSession::open(token, temp_audit(), confirm);
         // First call → prompts user
-        session.authorize(Capability::FileWrite, json!({"path":"a.txt"}), "writes").unwrap();
+        session
+            .authorize(Capability::FileWrite, json!({"path":"a.txt"}), "writes")
+            .unwrap();
         // Second call same scope → should NOT prompt
-        session.authorize(Capability::FileWrite, json!({"path":"b.txt"}), "writes").unwrap();
+        session
+            .authorize(Capability::FileWrite, json!({"path":"b.txt"}), "writes")
+            .unwrap();
 
-        assert_eq!(counter.load(Ordering::Relaxed), 1, "user prompted only once");
+        assert_eq!(
+            counter.load(Ordering::Relaxed),
+            1,
+            "user prompted only once"
+        );
     }
 
     #[test]
@@ -315,22 +350,31 @@ mod tests {
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let mut caps = Capability::assistant_default();
         caps.insert(Capability::FileWrite);
-        let token = AgentToken::issue(
-            &key, "test", caps,
-            std::time::Duration::from_secs(60), None,
-        );
+        let token = AgentToken::issue(&key, "test", caps, std::time::Duration::from_secs(60), None);
         let session = AgentSession::open(token, temp_audit(), always_yes());
 
         // Flood with distinct scopes — the cache must stay capped.
         for i in 0..(MAX_AUTO_APPROVE_ENTRIES + 100) {
-            session.authorize(Capability::FileWrite, json!({"path": i}), &format!("scope-{i}")).unwrap();
+            session
+                .authorize(
+                    Capability::FileWrite,
+                    json!({"path": i}),
+                    &format!("scope-{i}"),
+                )
+                .unwrap();
         }
         assert!(session.auto_approve.lock().len() <= MAX_AUTO_APPROVE_ENTRIES);
 
         // Oversized scope keys are never cached.
         let huge_scope = "x".repeat(MAX_SCOPE_KEY_BYTES + 1);
-        session.authorize(Capability::FileWrite, json!({"path":"z"}), &huge_scope).unwrap();
-        assert!(!session.auto_approve.lock().iter().any(|e| e.scope_key == huge_scope));
+        session
+            .authorize(Capability::FileWrite, json!({"path":"z"}), &huge_scope)
+            .unwrap();
+        assert!(!session
+            .auto_approve
+            .lock()
+            .iter()
+            .any(|e| e.scope_key == huge_scope));
     }
 
     #[test]
@@ -339,34 +383,50 @@ mod tests {
 
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         let jti = token.payload.jti;
 
         let dir = tempfile::tempdir().unwrap();
         let rev = Arc::new(RevocationList::open(dir.path().join("rev.log")).unwrap());
         let session = AgentSession::open_with_revocation(
-            token, temp_audit(), always_yes(), Some(Arc::clone(&rev)),
+            token,
+            temp_audit(),
+            always_yes(),
+            Some(Arc::clone(&rev)),
         );
 
         // Before revocation — allowed.
-        assert!(session.authorize(Capability::ScreenRead, json!({}), "s").is_ok());
+        assert!(session
+            .authorize(Capability::ScreenRead, json!({}), "s")
+            .is_ok());
 
         // Panic rotation: revoke this JTI.
         rev.revoke(jti, "panic test").unwrap();
 
         // After revocation — must fail even with otherwise-valid token.
-        let err = session.authorize(Capability::ScreenRead, json!({}), "s").unwrap_err();
-        assert!(err.to_string().contains("revoked"), "expected revoked error, got: {err}");
+        let err = session
+            .authorize(Capability::ScreenRead, json!({}), "s")
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("revoked"),
+            "expected revoked error, got: {err}"
+        );
     }
 
     #[test]
     fn screen_capture_provenance_is_deterministic_and_logged() {
         let key = SigningKey::generate(&mut rand::rngs::OsRng);
         let token = AgentToken::issue(
-            &key, "test", Capability::assistant_default(),
-            std::time::Duration::from_secs(60), None,
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
         );
         let session = AgentSession::open(token, temp_audit(), always_yes());
 

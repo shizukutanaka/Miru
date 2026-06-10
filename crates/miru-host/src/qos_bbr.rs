@@ -89,20 +89,39 @@ impl BbrQos {
         let now = Instant::now();
         self.rtt_samples.push_back((now, rtt_us));
         // Evict old
-        while self.rtt_samples.front().is_some_and(|(t, _)| now.duration_since(*t) > RTT_WINDOW) {
+        while self
+            .rtt_samples
+            .front()
+            .is_some_and(|(t, _)| now.duration_since(*t) > RTT_WINDOW)
+        {
             self.rtt_samples.pop_front();
         }
-        self.rtt_min_us = self.rtt_samples.iter().map(|(_, v)| *v).min().unwrap_or(rtt_us);
+        self.rtt_min_us = self
+            .rtt_samples
+            .iter()
+            .map(|(_, v)| *v)
+            .min()
+            .unwrap_or(rtt_us);
     }
 
     /// Feed an observed delivery rate (bytes acknowledged / interval).
     pub fn on_delivery(&mut self, kbps: u32) {
         let now = Instant::now();
         self.bw_samples.push_back((now, kbps));
-        while self.bw_samples.front().is_some_and(|(t, _)| now.duration_since(*t) > BW_WINDOW) {
+        while self
+            .bw_samples
+            .front()
+            .is_some_and(|(t, _)| now.duration_since(*t) > BW_WINDOW)
+        {
             self.bw_samples.pop_front();
         }
-        self.bw_max_kbps = self.bw_samples.iter().map(|(_, v)| *v).max().unwrap_or(kbps).max(1);
+        self.bw_max_kbps = self
+            .bw_samples
+            .iter()
+            .map(|(_, v)| *v)
+            .max()
+            .unwrap_or(kbps)
+            .max(1);
     }
 
     /// Run a control step. Returns a QoS update if anything changed.
@@ -163,15 +182,15 @@ impl BbrQos {
                 // Periodically dip to ProbeRtt to refresh rtt_min.
                 // No samples at all also counts as "stale".
                 let window_stale = match (self.rtt_samples.front(), self.rtt_samples.back()) {
-                    (Some((first, _)), Some((last, _))) => {
-                        last.duration_since(*first) > RTT_WINDOW
-                    }
+                    (Some((first, _)), Some((last, _))) => last.duration_since(*first) > RTT_WINDOW,
                     _ => true,
                 };
                 if window_stale {
                     self.phase = Phase::ProbeRtt;
                 } else {
-                    self.phase = Phase::ProbeBw { gain_idx: gain_idx.wrapping_add(1) };
+                    self.phase = Phase::ProbeBw {
+                        gain_idx: gain_idx.wrapping_add(1),
+                    };
                 }
             }
             Phase::ProbeRtt => {
@@ -187,9 +206,15 @@ impl BbrQos {
         (50.0 + bw_score - rtt_penalty).clamp(20.0, 95.0) as u8
     }
 
-    pub fn fps(&self) -> u8 { self.cur_fps }
-    pub fn bitrate_kbps(&self) -> u32 { self.cur_bitrate_kbps }
-    pub fn rtt_min_ms(&self) -> u32 { self.rtt_min_us / 1000 }
+    pub fn fps(&self) -> u8 {
+        self.cur_fps
+    }
+    pub fn bitrate_kbps(&self) -> u32 {
+        self.cur_bitrate_kbps
+    }
+    pub fn rtt_min_ms(&self) -> u32 {
+        self.rtt_min_us / 1000
+    }
 }
 
 #[cfg(test)]

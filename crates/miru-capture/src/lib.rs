@@ -34,8 +34,8 @@ pub mod platform {
 }
 
 use anyhow::Result;
-use miru_common::message::DisplayInfo;
 pub use frame::RawFrame;
+use miru_common::message::DisplayInfo;
 
 /// Synchronous capture trait — runs on a dedicated OS thread.
 /// Returns raw BGRA/NV12 frames as fast as possible.

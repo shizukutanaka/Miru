@@ -2,7 +2,10 @@
 
 use anyhow::Result;
 use miru_common::{crypto::SessionCipher, message::Msg};
-use std::sync::{Arc, atomic::{AtomicU32, Ordering}};
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -56,7 +59,9 @@ impl Connection {
         let mut frame = len.to_le_bytes().to_vec();
         frame.extend(encrypted);
 
-        self.tx.send(frame).await
+        self.tx
+            .send(frame)
+            .await
             .map_err(|_| anyhow::anyhow!("send channel closed"))
     }
 
@@ -65,7 +70,9 @@ impl Connection {
         match rx.recv().await {
             None => Ok(None),
             Some(frame) => {
-                if frame.len() < 4 { return Ok(None); }
+                if frame.len() < 4 {
+                    return Ok(None);
+                }
                 let payload = &frame[4..];
                 let plain = self.rx_cipher.decrypt(payload)?;
                 let msg: Msg = serde_json::from_slice(&plain)?;
@@ -74,7 +81,11 @@ impl Connection {
         }
     }
 
-    pub fn rtt_ms(&self) -> u32 { self.rtt.load(Ordering::Relaxed) }
+    pub fn rtt_ms(&self) -> u32 {
+        self.rtt.load(Ordering::Relaxed)
+    }
 
-    pub fn update_rtt(&self, rtt: u32) { self.rtt.store(rtt, Ordering::Relaxed); }
+    pub fn update_rtt(&self, rtt: u32) {
+        self.rtt.store(rtt, Ordering::Relaxed);
+    }
 }

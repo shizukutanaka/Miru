@@ -47,8 +47,7 @@ impl Default for HeadlessConfig {
 pub fn detect_headless() -> bool {
     #[cfg(target_os = "linux")]
     {
-        std::env::var("DISPLAY").is_err()
-            && std::env::var("WAYLAND_DISPLAY").is_err()
+        std::env::var("DISPLAY").is_err() && std::env::var("WAYLAND_DISPLAY").is_err()
     }
     #[cfg(target_os = "macos")]
     {

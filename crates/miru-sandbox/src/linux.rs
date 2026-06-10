@@ -49,27 +49,33 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
     {
         Ok(r) => Some(r),
         Err(e) => {
-            outcome.notes.push(format!("landlock unavailable: {}", e));
+            outcome.notes.push(format!("landlock unavailable: {e}"));
             return;
         }
     };
 
     // Read-only paths.
     for p in &policy.read_only {
-        let Some(rs) = rs_opt.take() else { return; };
+        let Some(rs) = rs_opt.take() else {
+            return;
+        };
         match PathFd::new(p) {
             Ok(fd) => {
                 let rule = PathBeneath::new(fd, AccessFs::ReadFile | AccessFs::ReadDir);
                 match rs.add_rule(rule) {
                     Ok(r) => rs_opt = Some(r),
                     Err(e) => {
-                        outcome.notes.push(format!("landlock ro {}: {}", p.display(), e));
+                        outcome
+                            .notes
+                            .push(format!("landlock ro {}: {}", p.display(), e));
                         return;
                     }
                 }
             }
             Err(e) => {
-                outcome.notes.push(format!("landlock open ro {}: {}", p.display(), e));
+                outcome
+                    .notes
+                    .push(format!("landlock open ro {}: {}", p.display(), e));
                 rs_opt = Some(rs);
             }
         }
@@ -77,20 +83,26 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
 
     // Read-write paths.
     for p in &policy.read_write {
-        let Some(rs) = rs_opt.take() else { return; };
+        let Some(rs) = rs_opt.take() else {
+            return;
+        };
         match PathFd::new(p) {
             Ok(fd) => {
                 let rule = PathBeneath::new(fd, AccessFs::from_all(abi));
                 match rs.add_rule(rule) {
                     Ok(r) => rs_opt = Some(r),
                     Err(e) => {
-                        outcome.notes.push(format!("landlock rw {}: {}", p.display(), e));
+                        outcome
+                            .notes
+                            .push(format!("landlock rw {}: {}", p.display(), e));
                         return;
                     }
                 }
             }
             Err(e) => {
-                outcome.notes.push(format!("landlock open rw {}: {}", p.display(), e));
+                outcome
+                    .notes
+                    .push(format!("landlock open rw {}: {}", p.display(), e));
                 rs_opt = Some(rs);
             }
         }
@@ -98,12 +110,14 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
 
     // Bind ports.
     for port in &policy.tcp_bind_ports {
-        let Some(rs) = rs_opt.take() else { return; };
+        let Some(rs) = rs_opt.take() else {
+            return;
+        };
         let rule = NetPort::new(*port, AccessNet::BindTcp);
         match rs.add_rule(rule) {
             Ok(r) => rs_opt = Some(r),
             Err(e) => {
-                outcome.notes.push(format!("landlock bind {}: {}", port, e));
+                outcome.notes.push(format!("landlock bind {port}: {e}"));
                 return;
             }
         }
@@ -112,12 +126,14 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
     // Common outbound ports for TCP connect.
     if policy.allow_tcp_connect {
         for port in [80u16, 443, 21115, 21116, 21117, 3478, 5349] {
-            let Some(rs) = rs_opt.take() else { return; };
+            let Some(rs) = rs_opt.take() else {
+                return;
+            };
             let rule = NetPort::new(port, AccessNet::ConnectTcp);
             match rs.add_rule(rule) {
                 Ok(r) => rs_opt = Some(r),
                 Err(e) => {
-                    outcome.notes.push(format!("landlock connect {}: {}", port, e));
+                    outcome.notes.push(format!("landlock connect {port}: {e}"));
                     return;
                 }
             }
@@ -125,28 +141,32 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
     }
 
     // Engage.
-    let Some(ruleset) = rs_opt else { return; };
+    let Some(ruleset) = rs_opt else {
+        return;
+    };
     match ruleset.restrict_self() {
         Ok(status) => {
             outcome.fs_restricted = matches!(status.ruleset, RulesetStatus::FullyEnforced)
                 || matches!(status.ruleset, RulesetStatus::PartiallyEnforced);
             outcome.net_restricted = outcome.fs_restricted;
-            outcome.notes.push(format!("landlock status: {:?}", status.ruleset));
+            outcome
+                .notes
+                .push(format!("landlock status: {:?}", status.ruleset));
         }
-        Err(e) => outcome.notes.push(format!("landlock restrict_self: {}", e)),
+        Err(e) => outcome.notes.push(format!("landlock restrict_self: {e}")),
     }
 }
 
 fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
-    use seccompiler::{
-        BpfProgram, SeccompAction, SeccompFilter, SeccompRule, TargetArch,
-    };
+    use seccompiler::{BpfProgram, SeccompAction, SeccompFilter, SeccompRule, TargetArch};
 
     let arch = match std::env::consts::ARCH {
         "x86_64" => TargetArch::x86_64,
         "aarch64" => TargetArch::aarch64,
         other => {
-            outcome.notes.push(format!("seccomp: unsupported arch {}", other));
+            outcome
+                .notes
+                .push(format!("seccomp: unsupported arch {other}"));
             return;
         }
     };
@@ -160,20 +180,20 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
     const DENY: &[(i64, i64, &str)] = &[
         // (x86_64, aarch64, name)
         (101, 117, "ptrace"),
-        (165,  40, "mount"),
-        (166,  39, "umount2"),
+        (165, 40, "mount"),
+        (166, 39, "umount2"),
         (246, 104, "kexec_load"),
         (321, 280, "bpf"),
         (175, 105, "init_module"),
         (313, 106, "delete_module"),
-        (172,  -1, "iopl"),
-        (173,  -1, "ioperm"),
+        (172, -1, "iopl"),
+        (173, -1, "ioperm"),
         (171, 162, "setdomainname"),
         (170, 161, "sethostname"),
-        (135,  92, "personality"),
-        (174,  -1, "create_module"),  // x86_64 only
+        (135, 92, "personality"),
+        (174, -1, "create_module"), // x86_64 only
         (313, 273, "finit_module"),
-        (134,  -1, "uselib"),
+        (134, -1, "uselib"),
         (323, 282, "userfaultfd"),
         (227, 112, "clock_settime"),
         (164, 170, "settimeofday"),
@@ -187,7 +207,9 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
             TargetArch::aarch64 => *a64,
             _ => continue,
         };
-        if nr < 0 { continue; }
+        if nr < 0 {
+            continue;
+        }
         rules.insert(nr, Vec::new());
     }
 
@@ -195,12 +217,12 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
     if !policy.allow_exec {
         const EXEC_FAMILY: &[(i64, i64)] = &[
             // (x86_64, aarch64)
-            ( 59, 221),  // execve
-            (322, 281),  // execveat
-            (435, 435),  // clone3
-            ( 56, 220),  // clone (still allowed on its own — only block if no_new_privs not viable)
-            ( 57,  -1),  // fork (x86_64 only)
-            ( 58,  -1),  // vfork (x86_64 only)
+            (59, 221),  // execve
+            (322, 281), // execveat
+            (435, 435), // clone3
+            (56, 220),  // clone (still allowed on its own — only block if no_new_privs not viable)
+            (57, -1),   // fork (x86_64 only)
+            (58, -1),   // vfork (x86_64 only)
         ];
         for (x64, a64) in EXEC_FAMILY {
             let nr = match arch {
@@ -208,20 +230,22 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
                 TargetArch::aarch64 => *a64,
                 _ => continue,
             };
-            if nr < 0 { continue; }
+            if nr < 0 {
+                continue;
+            }
             rules.insert(nr, Vec::new());
         }
     }
 
     let filter = match SeccompFilter::new(
         rules,
-        SeccompAction::Allow,            // default: pass through
-        SeccompAction::KillProcess,      // matched (denied) syscalls
+        SeccompAction::Allow,       // default: pass through
+        SeccompAction::KillProcess, // matched (denied) syscalls
         arch,
     ) {
         Ok(f) => f,
         Err(e) => {
-            outcome.notes.push(format!("seccomp build: {}", e));
+            outcome.notes.push(format!("seccomp build: {e}"));
             return;
         }
     };
@@ -229,13 +253,13 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
     let prog: BpfProgram = match filter.try_into() {
         Ok(p) => p,
         Err(e) => {
-            outcome.notes.push(format!("seccomp compile: {}", e));
+            outcome.notes.push(format!("seccomp compile: {e}"));
             return;
         }
     };
 
     if let Err(e) = seccompiler::apply_filter(&prog) {
-        outcome.notes.push(format!("seccomp apply: {}", e));
+        outcome.notes.push(format!("seccomp apply: {e}"));
         return;
     }
 

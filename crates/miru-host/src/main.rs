@@ -2,24 +2,32 @@
 
 use anyhow::Result;
 use miru_auth::{AclStore, DeviceIdentity};
-use miru_capture::ScreenCapturer as _;  // trait import for .displays()
+use miru_capture::ScreenCapturer as _; // trait import for .displays()
 use miru_common::session::DeviceId;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::info;
 
 mod agent_handler;
-#[allow(dead_code)] mod backpressure;
+#[allow(dead_code)]
+mod backpressure;
 mod capture_loop;
-#[allow(dead_code)] mod headless;
-#[allow(dead_code)] mod input_handler;
-#[allow(dead_code)] mod metrics;
+#[allow(dead_code)]
+mod headless;
+#[allow(dead_code)]
+mod input_handler;
+#[allow(dead_code)]
+mod metrics;
 mod qos;
-#[allow(dead_code)] mod qos_bbr;
-#[allow(dead_code)] mod recording;
-#[allow(dead_code)] mod safe_fs;
+#[allow(dead_code)]
+mod qos_bbr;
+#[allow(dead_code)]
+mod recording;
+#[allow(dead_code)]
+mod safe_fs;
 mod session;
-#[allow(dead_code)] mod ui;
+#[allow(dead_code)]
+mod ui;
 
 use session::HostConfig;
 
@@ -38,7 +46,7 @@ async fn main() -> Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            std::env::var("MIRU_LOG").unwrap_or_else(|_| "miru_host=debug,info".to_string())
+            std::env::var("MIRU_LOG").unwrap_or_else(|_| "miru_host=debug,info".to_string()),
         )
         .init();
 
@@ -48,11 +56,13 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&config_dir)?;
 
     // Identity (Ed25519, persistent)
-    let identity = Arc::new(DeviceIdentity::load_or_create(&config_dir.join("identity"))?);
+    let identity = Arc::new(DeviceIdentity::load_or_create(
+        &config_dir.join("identity"),
+    )?);
 
     // ACL (TOFU peer database)
     let acl = Arc::new(Mutex::new(
-        AclStore::load(&config_dir.join("acl.json")).unwrap_or_default()
+        AclStore::load(&config_dir.join("acl.json")).unwrap_or_default(),
     ));
 
     // Device ID
@@ -68,16 +78,24 @@ async fn main() -> Result<()> {
             Ok(displays) if displays.is_empty() => info!("No displays found (headless mode)"),
             Ok(displays) => {
                 for d in &displays {
-                    info!("Display {}: {}×{} @ {}Hz [{}]{}",
-                        d.index, d.width, d.height, d.refresh_hz, d.name,
-                        if d.primary { " (primary)" } else { "" });
+                    info!(
+                        "Display {}: {}×{} @ {}Hz [{}]{}",
+                        d.index,
+                        d.width,
+                        d.height,
+                        d.refresh_hz,
+                        d.name,
+                        if d.primary { " (primary)" } else { "" }
+                    );
                 }
             }
             Err(e) => tracing::warn!("display enumeration: {}", e),
         },
         Err(e) => tracing::warn!(
             "Screen capture unavailable (headless?): {}. \
-             Set DISPLAY=:99 and start Xvfb for screen sharing.", e),
+             Set DISPLAY=:99 and start Xvfb for screen sharing.",
+            e
+        ),
     }
 
     // Print available codecs
@@ -85,7 +103,9 @@ async fn main() -> Result<()> {
     info!("Codecs: {:?}", codecs);
     let hw = miru_codec::probe_hw();
     if !hw.is_empty() {
-        for h in &hw { info!("HW: {} → {:?}", h.name(), h.codecs()); }
+        for h in &hw {
+            info!("HW: {} → {:?}", h.name(), h.codecs());
+        }
     }
 
     let signal_url = std::env::var("MIRU_SIGNAL")
@@ -99,11 +119,11 @@ async fn main() -> Result<()> {
     // We deliberately continue on sandbox failure (non-fatal) but log loudly so
     // operators know when a layer didn't engage.
     let sandbox_policy = miru_sandbox::Policy::host_daemon()
-        .add_rw(&config_dir)      // audit log, ACL, identity
-        .add_ro("/usr")           // dynamically-linked libs
+        .add_rw(&config_dir) // audit log, ACL, identity
+        .add_ro("/usr") // dynamically-linked libs
         .add_ro("/lib")
         .add_ro("/lib64")
-        .add_ro("/etc/ssl")       // TLS CA bundles
+        .add_ro("/etc/ssl") // TLS CA bundles
         .add_ro("/etc/resolv.conf");
     match miru_sandbox::apply(&sandbox_policy) {
         Ok(outcome) => {
@@ -120,7 +140,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    let config = HostConfig { identity, acl, config_dir };
+    let config = HostConfig {
+        identity,
+        acl,
+        config_dir,
+    };
     session::run(device_id, signal_url, config).await
 }
 
@@ -144,25 +168,32 @@ fn run_audit_command(args: &[String]) -> Result<()> {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("miru")
         .join("agent_audit.log");
-    let path = args.get(1)
+    let path = args
+        .get(1)
         .map(std::path::PathBuf::from)
         .unwrap_or(default_path);
 
     match sub {
         "verify" => {
             if !path.exists() {
-                println!("No audit log at {} (no agent activity yet).", path.display());
+                println!(
+                    "No audit log at {} (no agent activity yet).",
+                    path.display()
+                );
                 return Ok(());
             }
             match miru_agent::audit::verify_path(&path) {
                 Ok(n) => {
-                    println!("✓ Audit chain VALID: {} entries, hash-chain intact.", n);
+                    println!("✓ Audit chain VALID: {n} entries, hash-chain intact.");
                     println!("  {}", path.display());
                     Ok(())
                 }
                 Err(e) => {
-                    eprintln!("✗ Audit chain BROKEN: {}", e);
-                    eprintln!("  The log at {} has been tampered with or truncated.", path.display());
+                    eprintln!("✗ Audit chain BROKEN: {e}");
+                    eprintln!(
+                        "  The log at {} has been tampered with or truncated.",
+                        path.display()
+                    );
                     std::process::exit(1);
                 }
             }
@@ -175,11 +206,15 @@ fn run_audit_command(args: &[String]) -> Result<()> {
             let entries = match miru_agent::audit::read_all_verified(&path) {
                 Ok(e) => e,
                 Err(e) => {
-                    eprintln!("✗ Cannot show — audit chain BROKEN: {}", e);
+                    eprintln!("✗ Cannot show — audit chain BROKEN: {e}");
                     std::process::exit(1);
                 }
             };
-            println!("Audit log: {} ({} entries, chain verified)", path.display(), entries.len());
+            println!(
+                "Audit log: {} ({} entries, chain verified)",
+                path.display(),
+                entries.len()
+            );
             for e in &entries {
                 let confirmed = match e.confirmed {
                     Some(true) => "confirmed",
@@ -231,24 +266,34 @@ fn run_token_command(args: &[String]) -> Result<()> {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--cap" => { cap_str = args.get(i + 1).cloned(); i += 2; }
+            "--cap" => {
+                cap_str = args.get(i + 1).cloned();
+                i += 2;
+            }
             "--ttl-hours" => {
                 ttl_hours = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(8);
                 i += 2;
             }
-            "--label" => { label = args.get(i + 1).cloned().unwrap_or(label); i += 2; }
-            other => { eprintln!("unknown flag: {}", other); std::process::exit(2); }
+            "--label" => {
+                label = args.get(i + 1).cloned().unwrap_or(label);
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown flag: {other}");
+                std::process::exit(2);
+            }
         }
     }
 
     let caps: HashSet<Capability> = match cap_str {
         None => Capability::assistant_default(),
         Some(s) => {
-            let parsed: HashSet<Capability> = s.split(',')
+            let parsed: HashSet<Capability> = s
+                .split(',')
                 .filter_map(|c| parse_capability(c.trim()))
                 .collect();
             if parsed.is_empty() {
-                eprintln!("no valid capabilities in '{}'", s);
+                eprintln!("no valid capabilities in '{s}'");
                 std::process::exit(2);
             }
             parsed
@@ -271,15 +316,15 @@ fn run_token_command(args: &[String]) -> Result<()> {
     );
 
     // Print the token + guidance to stdout.
-    let mut cap_names: Vec<String> = caps.iter().map(|c| format!("{:?}", c)).collect();
+    let mut cap_names: Vec<String> = caps.iter().map(|c| format!("{c:?}")).collect();
     cap_names.sort();
     eprintln!("Issued agent token:");
     eprintln!("  capabilities: {}", cap_names.join(", "));
-    eprintln!("  ttl:          {}h", ttl_hours);
+    eprintln!("  ttl:          {ttl_hours}h");
     eprintln!("  issuer:       {}", identity.pubkey_fingerprint());
     eprintln!("  Set this in your MCP client config as MIRU_AGENT_TOKEN:");
     // The token itself goes to stdout alone, so it can be piped/captured.
-    println!("{}", token);
+    println!("{token}");
     Ok(())
 }
 

@@ -4,11 +4,11 @@
 //! Channels mapping: SMPTE / WAV order (FL, FR, FC, LFE, BL, BR, SL, SR).
 
 use anyhow::{bail, Result};
-use audiopus::{Application, Channels, SampleRate};
 use audiopus::coder::{Decoder as OpusDecoder, Encoder as OpusEncoder};
 use audiopus::packet::Packet;
 use audiopus::MutSignals;
-use miru_common::message::{AudioFrame, AudioCodec};
+use audiopus::{Application, Channels, SampleRate};
+use miru_common::message::{AudioCodec, AudioFrame};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const FRAME_SIZE: usize = 960; // 20ms @ 48kHz
@@ -41,7 +41,7 @@ impl Layout {
             2 => Layout::Stereo,
             6 => Layout::Surround51,
             8 => Layout::Surround71,
-            _ => bail!("unsupported channel count: {}", n),
+            _ => bail!("unsupported channel count: {n}"),
         })
     }
 }
@@ -61,13 +61,10 @@ impl AudioEncoder {
         let n = layout.channels();
         let mut remaining = n;
         while remaining >= 2 {
-            let mut enc = OpusEncoder::new(
-                SampleRate::Hz48000,
-                Channels::Stereo,
-                Application::Audio,
-            )?;
+            let mut enc =
+                OpusEncoder::new(SampleRate::Hz48000, Channels::Stereo, Application::Audio)?;
             enc.set_bitrate(audiopus::Bitrate::BitsPerSecond(
-                ((bitrate_kbps as i32) * 1000) / (n as i32 / 2)
+                ((bitrate_kbps as i32) * 1000) / (n as i32 / 2),
             ))?;
             enc.set_inband_fec(true)?;
             enc.set_packet_loss_perc(5)?;
@@ -76,12 +73,11 @@ impl AudioEncoder {
         }
         if remaining == 1 {
             // odd channel count — won't normally happen but handle gracefully
-            let mut enc = OpusEncoder::new(
-                SampleRate::Hz48000,
-                Channels::Mono,
-                Application::Audio,
-            )?;
-            enc.set_bitrate(audiopus::Bitrate::BitsPerSecond((bitrate_kbps as i32) * 1000))?;
+            let mut enc =
+                OpusEncoder::new(SampleRate::Hz48000, Channels::Mono, Application::Audio)?;
+            enc.set_bitrate(audiopus::Bitrate::BitsPerSecond(
+                (bitrate_kbps as i32) * 1000,
+            ))?;
             encoders.push(enc);
         }
 
@@ -118,7 +114,9 @@ impl AudioEncoder {
             let mut combined: Vec<u8> = Vec::with_capacity(2048);
             for (pair_idx, enc) in self.encoders.iter_mut().enumerate() {
                 let pair_start = pair_idx * 2;
-                if pair_start + 1 >= n { break; } // odd channel — handled separately
+                if pair_start + 1 >= n {
+                    break;
+                } // odd channel — handled separately
                 let pair: Vec<f32> = (0..FRAME_SIZE)
                     .flat_map(|s| [chunk[s * n + pair_start], chunk[s * n + pair_start + 1]])
                     .collect();
@@ -141,7 +139,9 @@ impl AudioEncoder {
             sample_rate: SAMPLE_RATE as u32,
             channels: self.layout.channels(),
             timestamp_ms: SystemTime::now()
-                .duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64,
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64,
         }
     }
 }
@@ -171,8 +171,10 @@ impl AudioDecoder {
 
         if matches!(self.layout, Layout::Mono | Layout::Stereo) {
             let mut out = vec![0.0f32; FRAME_SIZE * n];
-            let packet = Packet::try_from(&frame.data[..]).map_err(|e| anyhow::anyhow!("opus packet: {:?}", e))?;
-            let signals = MutSignals::try_from(&mut out[..]).map_err(|e| anyhow::anyhow!("opus signals: {:?}", e))?;
+            let packet = Packet::try_from(&frame.data[..])
+                .map_err(|e| anyhow::anyhow!("opus packet: {e:?}"))?;
+            let signals = MutSignals::try_from(&mut out[..])
+                .map_err(|e| anyhow::anyhow!("opus signals: {e:?}"))?;
             let written = self.decoders[0].decode_float(Some(packet), signals, false)?;
             out.truncate(written * n);
             return Ok(out);
@@ -182,15 +184,21 @@ impl AudioDecoder {
         let mut decoded_pairs: Vec<Vec<f32>> = Vec::new();
         let mut cur = 0;
         for dec in self.decoders.iter_mut() {
-            if cur + 2 > frame.data.len() { break; }
+            if cur + 2 > frame.data.len() {
+                break;
+            }
             let len = u16::from_le_bytes([frame.data[cur], frame.data[cur + 1]]) as usize;
             cur += 2;
-            if cur + len > frame.data.len() { bail!("malformed multi-channel audio"); }
+            if cur + len > frame.data.len() {
+                bail!("malformed multi-channel audio");
+            }
             let pair_data = &frame.data[cur..cur + len];
             cur += len;
             let mut pair_out = vec![0.0f32; FRAME_SIZE * 2];
-            let packet = Packet::try_from(pair_data).map_err(|e| anyhow::anyhow!("opus packet: {:?}", e))?;
-            let signals = MutSignals::try_from(&mut pair_out[..]).map_err(|e| anyhow::anyhow!("opus signals: {:?}", e))?;
+            let packet =
+                Packet::try_from(pair_data).map_err(|e| anyhow::anyhow!("opus packet: {e:?}"))?;
+            let signals = MutSignals::try_from(&mut pair_out[..])
+                .map_err(|e| anyhow::anyhow!("opus signals: {e:?}"))?;
             let _ = dec.decode_float(Some(packet), signals, false)?;
             decoded_pairs.push(pair_out);
         }

@@ -20,14 +20,13 @@ use windows::{
             Direct3D::D3D_DRIVER_TYPE_HARDWARE,
             Direct3D11::{
                 D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-                D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_SDK_VERSION,
-                D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+                D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+                D3D11_USAGE_STAGING,
             },
             Dxgi::{
                 Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY},
-                IDXGIAdapter1, IDXGIDevice, IDXGIFactory1, IDXGIOutput1,
-                IDXGIOutputDuplication, IDXGISurface1,
-                DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT,
+                IDXGIAdapter1, IDXGIDevice, IDXGIFactory1, IDXGIOutput1, IDXGIOutputDuplication,
+                IDXGISurface1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT,
                 DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTPUT_DESC,
             },
         },
@@ -75,8 +74,10 @@ impl WindowsCapturer {
             )
             .context("D3D11CreateDevice failed")?;
 
-            let device = device.ok_or_else(|| anyhow::anyhow!("D3D11CreateDevice: device is None"))?;
-            let context = context.ok_or_else(|| anyhow::anyhow!("D3D11CreateDevice: context is None"))?;
+            let device =
+                device.ok_or_else(|| anyhow::anyhow!("D3D11CreateDevice: device is None"))?;
+            let context =
+                context.ok_or_else(|| anyhow::anyhow!("D3D11CreateDevice: context is None"))?;
 
             let mut capturer = Self {
                 device,
@@ -119,7 +120,8 @@ impl WindowsCapturer {
             }
         }
 
-        let output1 = target_output.ok_or_else(|| anyhow::anyhow!("no output for display {}", index))?;
+        let output1 =
+            target_output.ok_or_else(|| anyhow::anyhow!("no output for display {}", index))?;
         let desc = desc_out.ok_or_else(|| anyhow::anyhow!("no desc for display {}", index))?;
 
         let duplication = output1.DuplicateOutput(&self.device)?;
@@ -145,7 +147,8 @@ impl WindowsCapturer {
             ..Default::default()
         };
         let mut staging = None;
-        self.device.CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
+        self.device
+            .CreateTexture2D(&staging_desc, None, Some(&mut staging))?;
 
         self.duplication = duplication;
         self.staging = staging.ok_or_else(|| anyhow::anyhow!("CreateTexture2D returned None"))?;
@@ -170,7 +173,12 @@ impl ScreenCapturer for WindowsCapturer {
                 let mut desc = DXGI_OUTPUT_DESC::default();
                 output.GetDesc(&mut desc)?;
                 let name = String::from_utf16_lossy(
-                    &desc.DeviceName.iter().take_while(|&&c| c != 0).cloned().collect::<Vec<_>>(),
+                    &desc
+                        .DeviceName
+                        .iter()
+                        .take_while(|&&c| c != 0)
+                        .cloned()
+                        .collect::<Vec<_>>(),
                 );
                 let r = desc.DesktopCoordinates;
                 let w = (r.right - r.left) as u32;
@@ -198,7 +206,11 @@ impl ScreenCapturer for WindowsCapturer {
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource = None;
 
-            match self.duplication.AcquireNextFrame(FRAME_TIMEOUT_MS, &mut frame_info, &mut resource) {
+            match self.duplication.AcquireNextFrame(
+                FRAME_TIMEOUT_MS,
+                &mut frame_info,
+                &mut resource,
+            ) {
                 Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
                 Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => {
                     warn!("DXGI access lost — reinitializing");
@@ -222,14 +234,12 @@ impl ScreenCapturer for WindowsCapturer {
                 let mut moved_size = 0u32;
                 let mut dirty_size = 0u32;
 
-                let _ = self.duplication.GetFrameMoveRects(
-                    &mut moved_buf,
-                    &mut moved_size,
-                );
-                let _ = self.duplication.GetFrameDirtyRects(
-                    bytemuck::cast_slice_mut(&mut buf),
-                    &mut dirty_size,
-                );
+                let _ = self
+                    .duplication
+                    .GetFrameMoveRects(&mut moved_buf, &mut moved_size);
+                let _ = self
+                    .duplication
+                    .GetFrameDirtyRects(bytemuck::cast_slice_mut(&mut buf), &mut dirty_size);
 
                 let count = dirty_size as usize / std::mem::size_of::<RECT>();
                 buf[..count]
@@ -245,7 +255,8 @@ impl ScreenCapturer for WindowsCapturer {
                 RawFrame::full_dirty(self.width, self.height)
             };
 
-            let resource = resource.ok_or_else(|| anyhow::anyhow!("AcquireNextFrame: resource is None"))?;
+            let resource =
+                resource.ok_or_else(|| anyhow::anyhow!("AcquireNextFrame: resource is None"))?;
             let texture: ID3D11Texture2D = resource.cast()?;
 
             // GPU→GPU copy to staging
@@ -254,7 +265,8 @@ impl ScreenCapturer for WindowsCapturer {
 
             // Map staging for CPU read
             let mut mapped = Default::default();
-            self.context.Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+            self.context
+                .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
 
             let stride = mapped.RowPitch;
             let size = (stride * self.height) as usize;

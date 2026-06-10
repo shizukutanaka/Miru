@@ -15,12 +15,7 @@ use anyhow::{Context, Result};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use miru_constellation::{DeviceCapabilities, FormFactor};
 use parking_lot::RwLock;
-use std::{
-    collections::HashMap,
-    net::IpAddr,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -60,25 +55,33 @@ pub struct Discovery {
 
 impl Discovery {
     pub fn start(advert: LocalAdvertisement) -> Result<Self> {
-        let daemon = ServiceDaemon::new()
-            .context("create mDNS daemon")?;
+        let daemon = ServiceDaemon::new().context("create mDNS daemon")?;
 
         // Encode our advertisement as TXT records.
-        let txt = [("device_id".to_string(), advert.device_id.to_string()),
-            ("constellation".to_string(), advert.constellation_pubkey.clone()),
+        let txt = [
+            ("device_id".to_string(), advert.device_id.to_string()),
+            (
+                "constellation".to_string(),
+                advert.constellation_pubkey.clone(),
+            ),
             ("name".to_string(), advert.friendly_name.clone()),
-            ("form".to_string(), match advert.form_factor {
-                FormFactor::Desktop => "desktop",
-                FormFactor::Laptop => "laptop",
-                FormFactor::Phone => "phone",
-                FormFactor::Tablet => "tablet",
-                FormFactor::Server => "server",
-                FormFactor::Embedded => "embedded",
-            }.to_string()),
-            ("os".to_string(), advert.capabilities.os_family.clone())];
+            (
+                "form".to_string(),
+                match advert.form_factor {
+                    FormFactor::Desktop => "desktop",
+                    FormFactor::Laptop => "laptop",
+                    FormFactor::Phone => "phone",
+                    FormFactor::Tablet => "tablet",
+                    FormFactor::Server => "server",
+                    FormFactor::Embedded => "embedded",
+                }
+                .to_string(),
+            ),
+            ("os".to_string(), advert.capabilities.os_family.clone()),
+        ];
 
         let instance_name = format!("miru-{}", &advert.device_id.simple().to_string()[..12]);
-        let hostname = format!("{}.local.", instance_name);
+        let hostname = format!("{instance_name}.local.");
 
         let info = ServiceInfo::new(
             SERVICE_TYPE,
@@ -104,8 +107,13 @@ impl Discovery {
                     ServiceEvent::ServiceResolved(info) => {
                         if let Some(peer) = parse_peer(&info) {
                             // Skip self
-                            if peer.device_id == our_id { continue; }
-                            debug!("Discovery: found {} ({})", peer.friendly_name, peer.device_id);
+                            if peer.device_id == our_id {
+                                continue;
+                            }
+                            debug!(
+                                "Discovery: found {} ({})",
+                                peer.friendly_name, peer.device_id
+                            );
                             peers_clone.write().insert(peer.device_id, peer);
                         }
                     }
@@ -119,13 +127,18 @@ impl Discovery {
             }
         });
 
-        Ok(Self { daemon, instance_name, peers })
+        Ok(Self {
+            daemon,
+            instance_name,
+            peers,
+        })
     }
 
     /// Snapshot of currently known peers, optionally filtered to one constellation.
     pub fn snapshot(&self, constellation_pubkey: Option<&str>) -> Vec<DiscoveredPeer> {
         let peers = self.peers.read();
-        peers.values()
+        peers
+            .values()
             .filter(|p| {
                 constellation_pubkey
                     .map(|c| p.constellation_pubkey == c)
@@ -151,7 +164,8 @@ impl Discovery {
 }
 
 fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
-    let txt: HashMap<String, String> = info.get_properties()
+    let txt: HashMap<String, String> = info
+        .get_properties()
         .iter()
         .map(|p| (p.key().to_string(), p.val_str().to_string()))
         .collect();

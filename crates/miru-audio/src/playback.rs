@@ -2,7 +2,8 @@
 
 use anyhow::{Context, Result};
 use cpal::{
-    traits::{DeviceTrait, HostTrait, StreamTrait}, SampleRate, StreamConfig,
+    traits::{DeviceTrait, HostTrait, StreamTrait},
+    SampleRate, StreamConfig,
 };
 use crossbeam_channel::{bounded, Sender};
 use tracing::{info, warn};
@@ -15,7 +16,8 @@ pub struct AudioPlayer {
 impl AudioPlayer {
     pub fn new(channels: u8, sample_rate: u32) -> Result<Self> {
         let host = cpal::default_host();
-        let device = host.default_output_device()
+        let device = host
+            .default_output_device()
             .context("no default audio output")?;
 
         info!("Audio playback: {}", device.name().unwrap_or_default());
@@ -39,7 +41,9 @@ impl AudioPlayer {
                             Ok(samples) => leftover = samples,
                             Err(_) => {
                                 // Underrun — fill silence
-                                for s in &mut out[filled..] { *s = 0.0; }
+                                for s in &mut out[filled..] {
+                                    *s = 0.0;
+                                }
                                 return;
                             }
                         }
@@ -55,7 +59,10 @@ impl AudioPlayer {
         )?;
 
         stream.play()?;
-        Ok(Self { tx, _stream: stream })
+        Ok(Self {
+            tx,
+            _stream: stream,
+        })
     }
 
     /// Push decoded samples to the output queue.

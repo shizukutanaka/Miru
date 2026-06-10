@@ -30,7 +30,8 @@ impl SessionMetrics {
     ) -> Self {
         let started_at = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default().as_secs();
+            .unwrap_or_default()
+            .as_secs();
         Self {
             started_at,
             session_id,
@@ -56,7 +57,8 @@ impl SessionMetrics {
     pub fn snapshot(&self) -> SessionMetadata {
         let ended_at = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default().as_secs();
+            .unwrap_or_default()
+            .as_secs();
         SessionMetadata {
             session_id: self.session_id,
             host_pubkey_b64: self.host_pubkey_b64.clone(),

@@ -58,7 +58,10 @@ pub fn apply(_policy: &Policy) -> Result<Outcome> {
     if rc == 0 {
         o.notes.push("RLIMIT_CORE=0 (no core dumps)".into());
     } else {
-        o.notes.push(format!("setrlimit(RLIMIT_CORE) failed: {}", std::io::Error::last_os_error()));
+        o.notes.push(format!(
+            "setrlimit(RLIMIT_CORE) failed: {}",
+            std::io::Error::last_os_error()
+        ));
     }
 
     // PT_DENY_ATTACH — refuse ptrace from any other process.
@@ -71,13 +74,15 @@ pub fn apply(_policy: &Policy) -> Result<Outcome> {
     if rc2 == 0 {
         o.notes.push("PT_DENY_ATTACH applied".into());
     } else {
-        o.notes.push(format!("ptrace(PT_DENY_ATTACH) failed (often expected when running unsigned)"));
+        o.notes.push(format!(
+            "ptrace(PT_DENY_ATTACH) failed (often expected when running unsigned)"
+        ));
     }
 
     o.notes.push(
         "macOS sandbox depends on the bundle's entitlements plist; \
          this runtime layer is supplementary."
-            .into()
+            .into(),
     );
 
     tracing::info!(

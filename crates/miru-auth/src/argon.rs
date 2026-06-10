@@ -28,7 +28,8 @@ fn argon2() -> Argon2<'static> {
         ARGON2_ITERATIONS,
         ARGON2_PARALLELISM,
         Some(32),
-    ).expect("argon2 params");
+    )
+    .expect("argon2 params");
     Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
 }
 
@@ -38,16 +39,18 @@ pub fn hash_password(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     let phc = argon2()
         .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| anyhow::anyhow!("argon2 hash: {}", e))?
+        .map_err(|e| anyhow::anyhow!("argon2 hash: {e}"))?
         .to_string();
     Ok(phc)
 }
 
 /// Verify a password against a PHC string. Constant-time.
 pub fn verify_password(password: &str, phc: &str) -> Result<bool> {
-    let parsed = argon2::PasswordHash::new(phc)
-        .map_err(|e| anyhow::anyhow!("argon2 parse: {}", e))?;
-    Ok(argon2().verify_password(password.as_bytes(), &parsed).is_ok())
+    let parsed =
+        argon2::PasswordHash::new(phc).map_err(|e| anyhow::anyhow!("argon2 parse: {e}"))?;
+    Ok(argon2()
+        .verify_password(password.as_bytes(), &parsed)
+        .is_ok())
 }
 
 /// Wrapper that auto-zeroes the secret on drop.
@@ -56,8 +59,12 @@ pub fn verify_password(password: &str, phc: &str) -> Result<bool> {
 pub struct SecretBytes(pub Vec<u8>);
 
 impl SecretBytes {
-    pub fn new(bytes: impl Into<Vec<u8>>) -> Self { Self(bytes.into()) }
-    pub fn as_slice(&self) -> &[u8] { &self.0 }
+    pub fn new(bytes: impl Into<Vec<u8>>) -> Self {
+        Self(bytes.into())
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 #[cfg(test)]

@@ -171,7 +171,9 @@ impl AuditLog {
         read_all_verified(&self.path)
     }
 
-    pub fn path(&self) -> &Path { &self.path }
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 }
 
 /// Read all entries; verify each entry's prev_hash matches the previous entry's hash.
@@ -185,17 +187,26 @@ fn replay_chain(path: &Path) -> Result<(String, u64)> {
     let mut seq = 0u64;
     for (lineno, line) in r.lines().enumerate() {
         let line = line?;
-        if line.trim().is_empty() { continue; }
-        let entry: AuditEntry = serde_json::from_str(&line)
-            .with_context(|| format!("parse line {}", lineno + 1))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: AuditEntry =
+            serde_json::from_str(&line).with_context(|| format!("parse line {}", lineno + 1))?;
 
         if entry.seq != seq {
-            bail!("seq mismatch at line {}: expected {}, got {}", lineno + 1, seq, entry.seq);
+            bail!(
+                "seq mismatch at line {}: expected {}, got {}",
+                lineno + 1,
+                seq,
+                entry.seq
+            );
         }
         if entry.prev_hash != prev_hash {
             bail!(
                 "chain broken at seq {}: expected prev_hash={}, got {}",
-                seq, prev_hash, entry.prev_hash
+                seq,
+                prev_hash,
+                entry.prev_hash
             );
         }
 
@@ -227,11 +238,18 @@ pub fn read_all_verified(path: &Path) -> Result<Vec<AuditEntry>> {
     let mut seq = 0u64;
     for (lineno, line) in r.lines().enumerate() {
         let line = line?;
-        if line.trim().is_empty() { continue; }
-        let entry: AuditEntry = serde_json::from_str(&line)
-            .with_context(|| format!("parse line {}", lineno + 1))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let entry: AuditEntry =
+            serde_json::from_str(&line).with_context(|| format!("parse line {}", lineno + 1))?;
         if entry.seq != seq {
-            bail!("seq mismatch at line {}: expected {}, got {}", lineno + 1, seq, entry.seq);
+            bail!(
+                "seq mismatch at line {}: expected {}, got {}",
+                lineno + 1,
+                seq,
+                entry.seq
+            );
         }
         if entry.prev_hash != prev_hash {
             bail!("chain broken at seq {seq}: prev_hash mismatch");
@@ -268,10 +286,14 @@ mod tests {
     use serde_json::json;
 
     fn temp_log_path() -> PathBuf {
-        let id = format!("miru-audit-test-{}-{}",
+        let id = format!(
+            "miru-audit-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
         std::env::temp_dir().join(id)
     }
 
@@ -280,9 +302,30 @@ mod tests {
         let path = temp_log_path();
         let log = AuditLog::open(&path).unwrap();
 
-        log.append("jti1", Capability::ScreenRead, json!({"x": 100}), None, AuditOutcome::Ok).unwrap();
-        log.append("jti1", Capability::PointerClick, json!({"x": 100, "y": 50}), None, AuditOutcome::Ok).unwrap();
-        log.append("jti2", Capability::ShellExec, json!({"cmd": "ls"}), Some(false), AuditOutcome::Denied).unwrap();
+        log.append(
+            "jti1",
+            Capability::ScreenRead,
+            json!({"x": 100}),
+            None,
+            AuditOutcome::Ok,
+        )
+        .unwrap();
+        log.append(
+            "jti1",
+            Capability::PointerClick,
+            json!({"x": 100, "y": 50}),
+            None,
+            AuditOutcome::Ok,
+        )
+        .unwrap();
+        log.append(
+            "jti2",
+            Capability::ShellExec,
+            json!({"cmd": "ls"}),
+            Some(false),
+            AuditOutcome::Denied,
+        )
+        .unwrap();
 
         assert_eq!(log.verify().unwrap(), 3);
         std::fs::remove_file(&path).ok();
@@ -293,8 +336,22 @@ mod tests {
         let path = temp_log_path();
         {
             let log = AuditLog::open(&path).unwrap();
-            log.append("jti", Capability::ScreenRead, json!({}), None, AuditOutcome::Ok).unwrap();
-            log.append("jti", Capability::PointerMove, json!({"x": 1}), None, AuditOutcome::Ok).unwrap();
+            log.append(
+                "jti",
+                Capability::ScreenRead,
+                json!({}),
+                None,
+                AuditOutcome::Ok,
+            )
+            .unwrap();
+            log.append(
+                "jti",
+                Capability::PointerMove,
+                json!({"x": 1}),
+                None,
+                AuditOutcome::Ok,
+            )
+            .unwrap();
         }
 
         // Tamper: modify the first line's content
@@ -302,7 +359,11 @@ mod tests {
         let mut lines: Vec<String> = content.lines().map(String::from).collect();
         lines[0] = lines[0].replace("\"x\":1", "\"x\":99");
         // We don't have x:1 in line 0; replace timestamp instead
-        lines[0] = lines[0].replacen("\"capability\":\"screen_read\"", "\"capability\":\"shell_exec\"", 1);
+        lines[0] = lines[0].replacen(
+            "\"capability\":\"screen_read\"",
+            "\"capability\":\"shell_exec\"",
+            1,
+        );
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
 
         let log2 = AuditLog::open(&path);
@@ -317,11 +378,25 @@ mod tests {
         let path = temp_log_path();
         {
             let log = AuditLog::open(&path).unwrap();
-            log.append("jti", Capability::ScreenRead, json!({}), None, AuditOutcome::Ok).unwrap();
+            log.append(
+                "jti",
+                Capability::ScreenRead,
+                json!({}),
+                None,
+                AuditOutcome::Ok,
+            )
+            .unwrap();
         }
         // Reopen and append more
         let log = AuditLog::open(&path).unwrap();
-        log.append("jti", Capability::PointerMove, json!({"x": 5}), None, AuditOutcome::Ok).unwrap();
+        log.append(
+            "jti",
+            Capability::PointerMove,
+            json!({"x": 5}),
+            None,
+            AuditOutcome::Ok,
+        )
+        .unwrap();
         assert_eq!(log.verify().unwrap(), 2);
 
         std::fs::remove_file(&path).ok();

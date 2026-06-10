@@ -20,10 +20,24 @@ pub struct SignalClient {
 
 #[derive(Debug)]
 pub enum SignalEvent {
-    Registered { device_id: String, relay_addr: Option<String> },
-    IncomingConnection { token: String, relay_addr: String, relay_port: u16 },
-    ConnectAck { target_id: String, relay: bool, relay_addr: Option<String> },
-    Error { code: u16, message: String },
+    Registered {
+        device_id: String,
+        relay_addr: Option<String>,
+    },
+    IncomingConnection {
+        token: String,
+        relay_addr: String,
+        relay_port: u16,
+    },
+    ConnectAck {
+        target_id: String,
+        relay: bool,
+        relay_addr: Option<String>,
+    },
+    Error {
+        code: u16,
+        message: String,
+    },
     Disconnected,
 }
 
@@ -49,7 +63,9 @@ impl SignalClient {
         // Writer task
         tokio::spawn(async move {
             while let Some(msg) = cmd_rx.recv().await {
-                let Ok(json) = serde_json::to_string(&msg) else { continue };
+                let Ok(json) = serde_json::to_string(&msg) else {
+                    continue;
+                };
                 if ws_tx.send(Message::Text(json)).await.is_err() {
                     break;
                 }
@@ -62,7 +78,9 @@ impl SignalClient {
             while let Some(raw) = ws_rx.next().await {
                 match raw {
                     Ok(Message::Text(text)) => {
-                        let Ok(msg) = serde_json::from_str::<Msg>(&text) else { continue };
+                        let Ok(msg) = serde_json::from_str::<Msg>(&text) else {
+                            continue;
+                        };
                         let event = match msg {
                             Msg::RegisterAck(ack) => SignalEvent::Registered {
                                 device_id: ack.device_id,
@@ -97,7 +115,11 @@ impl SignalClient {
             }
         });
 
-        let client = Self { tx: cmd_tx, events: evt_rx, identity_pubkey: pubkey_b64 };
+        let client = Self {
+            tx: cmd_tx,
+            events: evt_rx,
+            identity_pubkey: pubkey_b64,
+        };
 
         // Register immediately
         client.register(device_id).await?;
@@ -109,7 +131,8 @@ impl SignalClient {
         self.send(Msg::Register(Register {
             device_id: device_id.0.clone(),
             pubkey: self.identity_pubkey.clone(),
-        })).await
+        }))
+        .await
     }
 
     pub async fn request_connect(&self, target_id: &str, viewer_addr: &str) -> Result<()> {
@@ -117,11 +140,14 @@ impl SignalClient {
             target_id: target_id.to_string(),
             viewer_addr: viewer_addr.to_string(),
             viewer_port: 0,
-        })).await
+        }))
+        .await
     }
 
     async fn send(&self, msg: Msg) -> Result<()> {
-        self.tx.send(msg).await
+        self.tx
+            .send(msg)
+            .await
             .map_err(|_| anyhow::anyhow!("signal tx closed"))
     }
 

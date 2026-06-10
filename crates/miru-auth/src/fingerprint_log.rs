@@ -66,8 +66,13 @@ impl FingerprintEntry {
     fn hash(&self) -> String {
         let canonical = format!(
             "{}|{}|{}|{}|{}|{}|{:?}",
-            self.seq, self.prev_hash, self.timestamp_ms, self.label,
-            self.device_id, self.fingerprint, self.action
+            self.seq,
+            self.prev_hash,
+            self.timestamp_ms,
+            self.label,
+            self.device_id,
+            self.fingerprint,
+            self.action
         );
         let d = digest::digest(&digest::SHA256, canonical.as_bytes());
         hex_lower(d.as_ref())
@@ -102,21 +107,32 @@ impl FingerprintLog {
             let reader = BufReader::new(f);
             for (idx, line) in reader.lines().enumerate() {
                 let line = line.context("read fingerprint log")?;
-                if line.trim().is_empty() { continue; }
+                if line.trim().is_empty() {
+                    continue;
+                }
                 let entry: FingerprintEntry = serde_json::from_str(&line)
                     .with_context(|| format!("parse fingerprint log line {}", idx + 1))?;
 
                 if entry.seq != state.next_seq {
-                    bail!("fingerprint log: seq gap at line {} (expected {}, got {})",
-                        idx + 1, state.next_seq, entry.seq);
+                    bail!(
+                        "fingerprint log: seq gap at line {} (expected {}, got {})",
+                        idx + 1,
+                        state.next_seq,
+                        entry.seq
+                    );
                 }
                 if entry.prev_hash != state.last_hash {
-                    bail!("fingerprint log: chain broken at line {} (seq={})",
-                        idx + 1, entry.seq);
+                    bail!(
+                        "fingerprint log: chain broken at line {} (seq={})",
+                        idx + 1,
+                        entry.seq
+                    );
                 }
 
                 if matches!(entry.action, FingerprintAction::Pin) {
-                    state.pinned.insert(entry.device_id.clone(), entry.fingerprint.clone());
+                    state
+                        .pinned
+                        .insert(entry.device_id.clone(), entry.fingerprint.clone());
                 }
 
                 state.last_hash = entry.hash();
@@ -124,7 +140,10 @@ impl FingerprintLog {
             }
         }
 
-        Ok(Self { path, state: Mutex::new(state) })
+        Ok(Self {
+            path,
+            state: Mutex::new(state),
+        })
     }
 
     /// Check a fingerprint against the pinned value. Returns the comparison
@@ -136,7 +155,10 @@ impl FingerprintLog {
         device_id: &str,
         fingerprint: &str,
     ) -> Result<FingerprintCheckResult> {
-        let mut s = self.state.lock().map_err(|e| anyhow::anyhow!("poisoned: {}", e))?;
+        let mut s = self
+            .state
+            .lock()
+            .map_err(|e| anyhow::anyhow!("poisoned: {e}"))?;
 
         let action;
         let result;
@@ -172,14 +194,17 @@ impl FingerprintLog {
 
         let line = serde_json::to_string(&entry)?;
         let mut f = OpenOptions::new()
-            .create(true).append(true).open(&self.path)
+            .create(true)
+            .append(true)
+            .open(&self.path)
             .context("append fingerprint log")?;
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
         f.flush()?;
 
         if matches!(action, FingerprintAction::Pin) {
-            s.pinned.insert(device_id.to_string(), fingerprint.to_string());
+            s.pinned
+                .insert(device_id.to_string(), fingerprint.to_string());
         }
         s.last_hash = entry_hash;
         s.next_seq += 1;
@@ -209,13 +234,18 @@ pub enum FingerprintCheckResult {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn hex_lower(b: &[u8]) -> String {
     use std::fmt::Write;
     let mut s = String::with_capacity(b.len() * 2);
-    for byte in b { let _ = write!(s, "{:02x}", byte); }
+    for byte in b {
+        let _ = write!(s, "{byte:02x}");
+    }
     s
 }
 

@@ -18,7 +18,13 @@ pub struct VpxEncoder {
 unsafe impl Send for VpxEncoder {}
 
 impl VpxEncoder {
-    pub fn new(codec: &VideoCodec, width: u32, height: u32, fps: u8, bitrate_kbps: u32) -> Result<Self> {
+    pub fn new(
+        codec: &VideoCodec,
+        width: u32,
+        height: u32,
+        fps: u8,
+        bitrate_kbps: u32,
+    ) -> Result<Self> {
         unsafe {
             let iface = match codec {
                 VideoCodec::Vp9 => vpx_codec_vp9_cx(),
@@ -45,10 +51,8 @@ impl VpxEncoder {
 
             // VP9 specific: real-time quality preset
             let mut ctx = std::mem::zeroed::<vpx_codec_ctx_t>();
-            let rc = vpx_codec_enc_init_ver(
-                &mut ctx, iface, &cfg, 0,
-                VPX_ENCODER_ABI_VERSION as i32,
-            );
+            let rc =
+                vpx_codec_enc_init_ver(&mut ctx, iface, &cfg, 0, VPX_ENCODER_ABI_VERSION as i32);
             if rc != vpx_codec_err_t::VPX_CODEC_OK {
                 bail!("vpx_codec_enc_init failed: {:?}", rc);
             }
@@ -77,7 +81,8 @@ impl EncoderBackend for VpxEncoder {
     fn encode(
         &mut self,
         i420: &[u8],
-        width: u32, height: u32,
+        width: u32,
+        height: u32,
         ts_ms: u64,
         keyframe: bool,
     ) -> Result<Option<EncodedPacket>> {
@@ -115,7 +120,11 @@ impl EncoderBackend for VpxEncoder {
             img.stride[VPX_PLANE_V as usize] = (width / 2) as i32;
 
             let rc = vpx_codec_encode(
-                &mut self.ctx, &img, pts, duration, flags as i64,
+                &mut self.ctx,
+                &img,
+                pts,
+                duration,
+                flags as i64,
                 VPX_DL_REALTIME as u64,
             );
             if rc != vpx_codec_err_t::VPX_CODEC_OK {
@@ -126,7 +135,11 @@ impl EncoderBackend for VpxEncoder {
             let mut iter = std::ptr::null();
             while let Some(pkt) = {
                 let p = vpx_codec_get_cx_data(&mut self.ctx, &mut iter);
-                if p.is_null() { None } else { Some(&*p) }
+                if p.is_null() {
+                    None
+                } else {
+                    Some(&*p)
+                }
             } {
                 if pkt.kind == vpx_codec_cx_pkt_kind::VPX_CODEC_CX_FRAME_PKT {
                     let data = std::slice::from_raw_parts(
@@ -146,7 +159,9 @@ impl EncoderBackend for VpxEncoder {
         }
     }
 
-    fn request_keyframe(&mut self) { self.keyframe_requested = true; }
+    fn request_keyframe(&mut self) {
+        self.keyframe_requested = true;
+    }
 
     fn update_bitrate(&mut self, kbps: u32) {
         unsafe {
@@ -157,7 +172,9 @@ impl EncoderBackend for VpxEncoder {
 
 impl Drop for VpxEncoder {
     fn drop(&mut self) {
-        unsafe { vpx_codec_destroy(&mut self.ctx); }
+        unsafe {
+            vpx_codec_destroy(&mut self.ctx);
+        }
     }
 }
 
@@ -170,5 +187,7 @@ unsafe fn set_ctrl(ctx: *mut vpx_codec_ctx_t, id: i32, val: i32) -> Result<()> {
 }
 
 fn num_cpus() -> usize {
-    std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
 }

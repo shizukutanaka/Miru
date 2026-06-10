@@ -77,19 +77,20 @@ async fn main() -> Result<()> {
 
     // Ports are configurable via env for testing and multi-instance deployments.
     let rdv_port: u16 = std::env::var("MIRU_RDV_PORT")
-        .ok().and_then(|s| s.parse().ok()).unwrap_or(21115);
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(21115);
     let relay_port: u16 = std::env::var("MIRU_RELAY_PORT")
-        .ok().and_then(|s| s.parse().ok()).unwrap_or(21117);
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(21117);
     let rdv_addr: SocketAddr = format!("0.0.0.0:{rdv_port}").parse()?;
     let relay_addr: SocketAddr = format!("0.0.0.0:{relay_port}").parse()?;
 
     info!("Rendezvous: {}", rdv_addr);
     info!("Relay:      {}", relay_addr);
 
-    tokio::try_join!(
-        run_server(rdv, rdv_addr),
-        run_server(relay, relay_addr),
-    )?;
+    tokio::try_join!(run_server(rdv, rdv_addr), run_server(relay, relay_addr),)?;
     Ok(())
 }
 
@@ -148,14 +149,19 @@ async fn process_rdv_msg(
         Msg::Register(reg) => {
             info!("Register: {}", reg.device_id);
             *my_id = Some(reg.device_id.clone());
-            state.registry.insert(reg.device_id.clone(), DeviceEntry { tx: tx.clone() });
-            let _ = tx.send(Msg::RegisterAck(RegisterAck {
-                device_id: reg.device_id,
-                relay_addr: Some(format!(
-                    "{}:21117",
-                    std::env::var("MIRU_PUBLIC_HOST").unwrap_or_else(|_| "localhost".to_string())
-                )),
-            })).await;
+            state
+                .registry
+                .insert(reg.device_id.clone(), DeviceEntry { tx: tx.clone() });
+            let _ = tx
+                .send(Msg::RegisterAck(RegisterAck {
+                    device_id: reg.device_id,
+                    relay_addr: Some(format!(
+                        "{}:21117",
+                        std::env::var("MIRU_PUBLIC_HOST")
+                            .unwrap_or_else(|_| "localhost".to_string())
+                    )),
+                }))
+                .await;
         }
         Msg::Connect(req) => {
             let target = req.target_id.clone();
@@ -165,10 +171,13 @@ async fn process_rdv_msg(
                 Some(entry) => {
                     // Create relay session token
                     let token = Uuid::new_v4().simple().to_string();
-                    state.relay_sessions.insert(token.clone(), RelaySlot {
-                        host: None,
-                        viewer: None,
-                    });
+                    state.relay_sessions.insert(
+                        token.clone(),
+                        RelaySlot {
+                            host: None,
+                            viewer: None,
+                        },
+                    );
 
                     // Reap the slot if neither peer ever claims it — otherwise
                     // every unanswered Connect leaks an entry forever.
@@ -191,33 +200,42 @@ async fn process_rdv_msg(
                     // Notify host
                     let public_host = std::env::var("MIRU_PUBLIC_HOST")
                         .unwrap_or_else(|_| "localhost".to_string());
-                    let _ = entry.tx.send(Msg::Relay(RelayOffer {
-                        relay_addr: public_host.clone(),
-                        relay_port: 21117,
-                        token: token.clone(),
-                    })).await;
+                    let _ = entry
+                        .tx
+                        .send(Msg::Relay(RelayOffer {
+                            relay_addr: public_host.clone(),
+                            relay_port: 21117,
+                            token: token.clone(),
+                        }))
+                        .await;
 
                     // Respond to viewer
-                    let _ = tx.send(Msg::ConnectAck(ConnectAck {
-                        target_id: target,
-                        host_addr: None,
-                        host_port: None,
-                        relay: true,
-                    })).await;
+                    let _ = tx
+                        .send(Msg::ConnectAck(ConnectAck {
+                            target_id: target,
+                            host_addr: None,
+                            host_port: None,
+                            relay: true,
+                        }))
+                        .await;
 
                     // Viewer also needs the relay token
-                    let _ = tx.send(Msg::Relay(RelayOffer {
-                        relay_addr: public_host,
-                        relay_port: 21117,
-                        token,
-                    })).await;
+                    let _ = tx
+                        .send(Msg::Relay(RelayOffer {
+                            relay_addr: public_host,
+                            relay_port: 21117,
+                            token,
+                        }))
+                        .await;
                 }
                 None => {
                     warn!("Device {} not found", target);
-                    let _ = tx.send(Msg::Error(miru_common::message::ErrorMsg {
-                        code: 404,
-                        message: format!("Device '{target}' not found or offline"),
-                    })).await;
+                    let _ = tx
+                        .send(Msg::Error(miru_common::message::ErrorMsg {
+                            code: 404,
+                            message: format!("Device '{target}' not found or offline"),
+                        }))
+                        .await;
                 }
             }
         }
@@ -241,23 +259,26 @@ async fn relay_handler(
     ws.on_upgrade(move |sock| relay_session(sock, q.token, q.role, state))
 }
 
-async fn relay_session(
-    sock: WebSocket,
-    token: String,
-    role: Option<String>,
-    state: AppState,
-) {
+async fn relay_session(sock: WebSocket, token: String, role: Option<String>, state: AppState) {
     let is_host = role.as_deref() == Some("host");
-    info!("Relay join: token={}... role={}", &token[..8.min(token.len())], role.as_deref().unwrap_or("?"));
+    info!(
+        "Relay join: token={}... role={}",
+        &token[..8.min(token.len())],
+        role.as_deref().unwrap_or("?")
+    );
 
     // Channel for receiving forwarded bytes from the other peer
     let (fwd_tx, mut fwd_rx) = mpsc::channel::<Vec<u8>>(256);
 
     // Register this side in the relay slot
     let peer_tx = {
-        let mut slot = state.relay_sessions.entry(token.clone()).or_insert(RelaySlot {
-            host: None, viewer: None,
-        });
+        let mut slot = state
+            .relay_sessions
+            .entry(token.clone())
+            .or_insert(RelaySlot {
+                host: None,
+                viewer: None,
+            });
         if is_host {
             slot.host = Some(fwd_tx.clone());
             slot.viewer.clone() // peer is viewer

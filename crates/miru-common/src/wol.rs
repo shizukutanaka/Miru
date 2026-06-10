@@ -25,16 +25,14 @@ pub fn build_magic_packet(mac: [u8; 6]) -> [u8; 102] {
 
 /// Parse "AA:BB:CC:DD:EE:FF" or "AA-BB-CC-DD-EE-FF" into 6 bytes.
 pub fn parse_mac(s: &str) -> Result<[u8; 6]> {
-    let cleaned: String = s.chars()
-        .filter(|c| c.is_ascii_hexdigit())
-        .collect();
+    let cleaned: String = s.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if cleaned.len() != 12 {
         bail!("MAC must be 12 hex digits, got {}", cleaned.len());
     }
     let mut mac = [0u8; 6];
     for i in 0..6 {
         mac[i] = u8::from_str_radix(&cleaned[i * 2..i * 2 + 2], 16)
-            .with_context(|| format!("invalid hex at byte {}", i))?;
+            .with_context(|| format!("invalid hex at byte {i}"))?;
     }
     Ok(mac)
 }
@@ -54,12 +52,18 @@ pub fn wake(mac: [u8; 6], target_ip: Option<Ipv4Addr>) -> Result<()> {
     let target7 = SocketAddr::new(IpAddr::V4(dest), 7);
     let _ = socket.send_to(&packet, target7);
 
-    eprintln!("[wol] {}", format_args!("WoL: magic packet sent to {} → {}", format_mac(&mac), dest));
+    eprintln!(
+        "[wol] {}",
+        format_args!("WoL: magic packet sent to {} → {}", format_mac(&mac), dest)
+    );
     Ok(())
 }
 
 pub fn format_mac(mac: &[u8; 6]) -> String {
-    mac.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":")
+    mac.iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 #[cfg(test)]

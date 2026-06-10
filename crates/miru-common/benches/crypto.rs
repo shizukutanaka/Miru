@@ -38,5 +38,10 @@ fn bench_roundtrip(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_encrypt_small, bench_encrypt_frame, bench_roundtrip);
+criterion_group!(
+    benches,
+    bench_encrypt_small,
+    bench_encrypt_frame,
+    bench_roundtrip
+);
 criterion_main!(benches);

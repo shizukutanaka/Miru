@@ -53,10 +53,13 @@ pub async fn run(
         &args.signal_url,
         &viewer_did,
         Some(identity.verifying_key.as_bytes()),
-    ).await?;
+    )
+    .await?;
 
     while let Some(evt) = signal.next_event().await {
-        if matches!(evt, SignalEvent::Registered { .. }) { break; }
+        if matches!(evt, SignalEvent::Registered { .. }) {
+            break;
+        }
     }
 
     // 2. Request connection
@@ -65,12 +68,16 @@ pub async fn run(
     // 3. Wait for relay offer
     let (relay_addr, relay_port, token) = loop {
         match signal.next_event().await {
-            Some(SignalEvent::IncomingConnection { token, relay_addr, relay_port }) => {
+            Some(SignalEvent::IncomingConnection {
+                token,
+                relay_addr,
+                relay_port,
+            }) => {
                 break (relay_addr, relay_port, token);
             }
             Some(SignalEvent::Error { code, message }) => {
-                emit_status(&app, "error", Some(format!("{}: {}", code, message)), None);
-                return Err(anyhow::anyhow!("signal: {}", message));
+                emit_status(&app, "error", Some(format!("{code}: {message}")), None);
+                return Err(anyhow::anyhow!("signal: {message}"));
             }
             None => return Err(anyhow::anyhow!("signal disconnected")),
             _ => continue,
@@ -78,15 +85,19 @@ pub async fn run(
     };
 
     // 4. Connect to relay
-    let mut relay = RelayTransport::connect(
-        &format!("ws://{}:{}", relay_addr, relay_port),
-        &token,
-        "viewer",
-    ).await?;
+    let mut relay =
+        RelayTransport::connect(&format!("ws://{relay_addr}:{relay_port}"), &token, "viewer")
+            .await?;
 
     // 5. Handshake
     let viewer_features = Features {
-        codecs: vec![VideoCodec::Av1, VideoCodec::H265, VideoCodec::H264, VideoCodec::Vp9, VideoCodec::Vp8],
+        codecs: vec![
+            VideoCodec::Av1,
+            VideoCodec::H265,
+            VideoCodec::H264,
+            VideoCodec::Vp9,
+            VideoCodec::Vp8,
+        ],
         audio_codecs: vec![AudioCodec::Opus],
         hw_decode: true,
         clipboard: true,
@@ -97,8 +108,10 @@ pub async fn run(
 
     let result = viewer_handshake(&mut relay, &identity.signing_key, viewer_features).await?;
     let host_fpr = pubkey_fingerprint(&result.peer_identity_pubkey);
-    info!("Handshake complete: codec={:?} host_fpr={}",
-        result.selected_video_codec, host_fpr);
+    info!(
+        "Handshake complete: codec={:?} host_fpr={}",
+        result.selected_video_codec, host_fpr
+    );
 
     // Install ciphers (separate keys per direction, no nonce-reuse risk)
     relay.install_ciphers(result.tx, result.rx).await;
@@ -198,11 +211,20 @@ pub async fn run(
 
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
     let d = ring::digest::digest(&ring::digest::SHA256, pk);
-    d.as_ref()[..8].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":")
+    d.as_ref()[..8]
+        .iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(":")
 }
 
 fn emit_status(app: &AppHandle, kind: &str, message: Option<String>, fingerprint: Option<String>) {
-    let _ = app.emit("session-event", SessionEvent {
-        kind: kind.to_string(), message, fingerprint,
-    });
+    let _ = app.emit(
+        "session-event",
+        SessionEvent {
+            kind: kind.to_string(),
+            message,
+            fingerprint,
+        },
+    );
 }

@@ -6,10 +6,10 @@
 //!
 //! Run with: cargo test -p miru-signal --test relay_e2e
 
+use futures_util::{SinkExt, StreamExt};
 use std::process::{Child, Command};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
-use futures_util::{SinkExt, StreamExt};
 
 /// Guard that kills the signal child process on drop.
 struct ServerGuard(Child);
@@ -39,14 +39,14 @@ async fn relay_forwards_bytes_between_peers() {
     let _guard = start_signal(relay_port, rdv_port);
 
     let token = format!("test-token-{}", std::process::id());
-    let host_url = format!("ws://127.0.0.1:{}/relay?token={}&role=host", relay_port, token);
-    let viewer_url = format!("ws://127.0.0.1:{}/relay?token={}&role=viewer", relay_port, token);
+    let host_url = format!("ws://127.0.0.1:{relay_port}/relay?token={token}&role=host");
+    let viewer_url = format!("ws://127.0.0.1:{relay_port}/relay?token={token}&role=viewer");
 
     // Connect host first.
     let (mut host_ws, _) = match tokio_tungstenite::connect_async(&host_url).await {
         Ok(x) => x,
         Err(e) => {
-            eprintln!("skip: cannot connect to relay (server may need ports): {}", e);
+            eprintln!("skip: cannot connect to relay (server may need ports): {e}");
             return;
         }
     };
@@ -60,7 +60,10 @@ async fn relay_forwards_bytes_between_peers() {
 
     // Host → Viewer
     let payload = b"hello-from-host".to_vec();
-    host_ws.send(Message::Binary(payload.clone())).await.expect("host send");
+    host_ws
+        .send(Message::Binary(payload.clone()))
+        .await
+        .expect("host send");
 
     let received = tokio::time::timeout(Duration::from_secs(3), viewer_ws.next())
         .await
@@ -69,12 +72,15 @@ async fn relay_forwards_bytes_between_peers() {
         .expect("viewer recv error");
     match received {
         Message::Binary(data) => assert_eq!(data, payload, "host→viewer payload mismatch"),
-        other => panic!("expected binary, got {:?}", other),
+        other => panic!("expected binary, got {other:?}"),
     }
 
     // Viewer → Host (reverse direction)
     let reply = b"ack-from-viewer".to_vec();
-    viewer_ws.send(Message::Binary(reply.clone())).await.expect("viewer send");
+    viewer_ws
+        .send(Message::Binary(reply.clone()))
+        .await
+        .expect("viewer send");
 
     let got = tokio::time::timeout(Duration::from_secs(3), host_ws.next())
         .await
@@ -83,6 +89,6 @@ async fn relay_forwards_bytes_between_peers() {
         .expect("host recv error");
     match got {
         Message::Binary(data) => assert_eq!(data, reply, "viewer→host payload mismatch"),
-        other => panic!("expected binary, got {:?}", other),
+        other => panic!("expected binary, got {other:?}"),
     }
 }

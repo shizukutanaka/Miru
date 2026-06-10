@@ -272,16 +272,22 @@ pub struct InputEvent {
 pub enum InputKind {
     MouseMove { x: f32, y: f32, display: u8 },
     MouseDown { button: MouseButton, x: f32, y: f32 },
-    MouseUp   { button: MouseButton, x: f32, y: f32 },
-    Scroll    { dx: f32, dy: f32, x: f32, y: f32 },
-    KeyDown   { key: u32, modifiers: u8 },
-    KeyUp     { key: u32, modifiers: u8 },
-    Text      { text: String },
+    MouseUp { button: MouseButton, x: f32, y: f32 },
+    Scroll { dx: f32, dy: f32, x: f32, y: f32 },
+    KeyDown { key: u32, modifiers: u8 },
+    KeyUp { key: u32, modifiers: u8 },
+    Text { text: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum MouseButton { Left, Right, Middle, X1, X2 }
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    X1,
+    X2,
+}
 
 // ─── Clipboard ────────────────────────────────────────────────────────────────
 
@@ -293,17 +299,35 @@ pub struct ClipboardSync {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ClipboardFormat { Text, Html, Image }
+pub enum ClipboardFormat {
+    Text,
+    Html,
+    Image,
+}
 
 // ─── File transfer ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum FileTransfer {
-    Start  { id: Uuid, name: String, size: u64, hash: String },
-    Chunk  { id: Uuid, offset: u64, data: Vec<u8> },
-    Done   { id: Uuid },
-    Abort  { id: Uuid, reason: String },
+    Start {
+        id: Uuid,
+        name: String,
+        size: u64,
+        hash: String,
+    },
+    Chunk {
+        id: Uuid,
+        offset: u64,
+        data: Vec<u8>,
+    },
+    Done {
+        id: Uuid,
+    },
+    Abort {
+        id: Uuid,
+        reason: String,
+    },
 }
 
 // ─── Display ──────────────────────────────────────────────────────────────────
@@ -346,13 +370,24 @@ pub struct QosUpdate {
 // ─── Misc ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Ping { pub ts: u64 }
+pub struct Ping {
+    pub ts: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pong { pub ts: u64, pub server_ts: u64 }
+pub struct Pong {
+    pub ts: u64,
+    pub server_ts: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloseReason { pub code: u16, pub reason: String }
+pub struct CloseReason {
+    pub code: u16,
+    pub reason: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ErrorMsg { pub code: u16, pub message: String }
+pub struct ErrorMsg {
+    pub code: u16,
+    pub message: String,
+}

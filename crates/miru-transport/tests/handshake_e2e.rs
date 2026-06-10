@@ -9,10 +9,9 @@
 #[cfg(test)]
 mod tests {
     use ed25519_dalek::SigningKey;
-    use miru_common::message::{Features, VideoCodec, AudioCodec};
+    use miru_common::message::{AudioCodec, Features, VideoCodec};
     use miru_transport::handshake::{host_handshake, viewer_handshake, MsgChannel};
     use tokio::sync::mpsc;
-    use std::sync::Arc;
 
     struct ChannelPair {
         tx: mpsc::Sender<miru_common::message::Msg>,
@@ -22,7 +21,9 @@ mod tests {
     #[async_trait::async_trait]
     impl MsgChannel for ChannelPair {
         async fn send_msg(&mut self, msg: &miru_common::message::Msg) -> anyhow::Result<()> {
-            self.tx.send(msg.clone()).await
+            self.tx
+                .send(msg.clone())
+                .await
                 .map_err(|_| anyhow::anyhow!("send"))?;
             Ok(())
         }
@@ -105,15 +106,21 @@ mod tests {
 
         // Send a Ping instead of Hello — host should bail
         a_tx.send(miru_common::message::Msg::Ping(
-            miru_common::message::Ping { ts: 0 }
-        )).await.unwrap();
+            miru_common::message::Ping { ts: 0 },
+        ))
+        .await
+        .unwrap();
 
         let host_id = SigningKey::generate(&mut rand::rngs::OsRng);
         let result = host_handshake(
             &mut host,
             &host_id,
-            Features { codecs: vec![VideoCodec::Vp9], ..Default::default() },
-        ).await;
+            Features {
+                codecs: vec![VideoCodec::Vp9],
+                ..Default::default()
+            },
+        )
+        .await;
         assert!(result.is_err());
     }
 }

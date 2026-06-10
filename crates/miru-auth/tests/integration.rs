@@ -1,8 +1,7 @@
 //! Integration tests for miru-auth.
 
 use miru_auth::{
-    AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer,
-    generate_pin, pin_to_key,
+    generate_pin, pin_to_key, AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer,
 };
 use tempfile::tempdir;
 
@@ -34,7 +33,11 @@ fn signature_verifies_with_correct_key() {
     let id = DeviceIdentity::generate();
     let msg = b"important payload";
     let sig = id.sign(msg);
-    assert!(DeviceIdentity::verify(id.verifying_key.as_bytes(), msg, &sig));
+    assert!(DeviceIdentity::verify(
+        id.verifying_key.as_bytes(),
+        msg,
+        &sig
+    ));
 }
 
 #[test]
@@ -43,14 +46,22 @@ fn signature_fails_with_wrong_key() {
     let id2 = DeviceIdentity::generate();
     let msg = b"payload";
     let sig = id1.sign(msg);
-    assert!(!DeviceIdentity::verify(id2.verifying_key.as_bytes(), msg, &sig));
+    assert!(!DeviceIdentity::verify(
+        id2.verifying_key.as_bytes(),
+        msg,
+        &sig
+    ));
 }
 
 #[test]
 fn signature_fails_with_tampered_message() {
     let id = DeviceIdentity::generate();
     let sig = id.sign(b"original");
-    assert!(!DeviceIdentity::verify(id.verifying_key.as_bytes(), b"tampered", &sig));
+    assert!(!DeviceIdentity::verify(
+        id.verifying_key.as_bytes(),
+        b"tampered",
+        &sig
+    ));
 }
 
 #[test]
@@ -102,7 +113,10 @@ fn acl_persists_across_save_load() {
 
     let loaded = AclStore::load(&path).unwrap();
     assert_eq!(loaded.list().len(), 1);
-    assert_eq!(loaded.check("AAAA-BBBB", "key1"), TrustDecision::Trusted(Permission::Control));
+    assert_eq!(
+        loaded.check("AAAA-BBBB", "key1"),
+        TrustDecision::Trusted(Permission::Control)
+    );
 }
 
 #[test]
@@ -113,7 +127,8 @@ fn acl_detects_pubkey_mismatch() {
         pubkey_b64: "legitimate_key".into(),
         fingerprint: "".into(),
         permission: Permission::Full,
-        first_seen: 0, last_seen: 0,
+        first_seen: 0,
+        last_seen: 0,
         friendly_name: None,
     });
 
@@ -138,7 +153,8 @@ fn acl_revoke_removes_peer() {
         pubkey_b64: "k".into(),
         fingerprint: "".into(),
         permission: Permission::Control,
-        first_seen: 0, last_seen: 0,
+        first_seen: 0,
+        last_seen: 0,
         friendly_name: None,
     });
     assert!(acl.revoke("AAAA-BBBB"));

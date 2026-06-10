@@ -83,7 +83,8 @@ impl SessionCipher {
         let prk = salt.extract(&self.key_bytes);
         let info_slices: [&[u8]; 1] = [info];
         // Category A (provably-safe): 32-byte output always fits HKDF-SHA256 (max 8160B).
-        let okm = prk.expand(&info_slices, hkdf::HKDF_SHA256)
+        let okm = prk
+            .expand(&info_slices, hkdf::HKDF_SHA256)
             .expect("hkdf expand: 32-byte output is well within limits");
         let mut sub = [0u8; 32];
         okm.fill(&mut sub).expect("hkdf fill"); // same invariant
@@ -101,8 +102,10 @@ impl SessionCipher {
         let nonce = nonce_from_u64(seq);
         let mut out = Vec::with_capacity(8 + plaintext.len() + 16);
         out.extend_from_slice(&seq.to_le_bytes());
-        let ct = self.cipher.encrypt(&nonce, plaintext)
-            .map_err(|e| anyhow::anyhow!("encrypt: {}", e))?;
+        let ct = self
+            .cipher
+            .encrypt(&nonce, plaintext)
+            .map_err(|e| anyhow::anyhow!("encrypt: {e}"))?;
         out.extend(ct);
         Ok(out)
     }
@@ -116,16 +119,15 @@ impl SessionCipher {
         if data.len() < MIN_CIPHERTEXT_LEN {
             bail!("decrypt: input too short ({} bytes)", data.len());
         }
-        let seq = u64::from_le_bytes(
-            data[..8].try_into().expect("8 bytes; checked above")
-        );
+        let seq = u64::from_le_bytes(data[..8].try_into().expect("8 bytes; checked above"));
 
         // Replay check first — refuses to spend AEAD CPU on known-replayed bytes.
         self.check_and_record_seq(seq)?;
 
         let nonce = nonce_from_u64(seq);
-        self.cipher.decrypt(&nonce, &data[8..])
-            .map_err(|e| anyhow::anyhow!("decrypt: {}", e))
+        self.cipher
+            .decrypt(&nonce, &data[8..])
+            .map_err(|e| anyhow::anyhow!("decrypt: {e}"))
     }
 
     fn check_and_record_seq(&self, seq: u64) -> Result<()> {
@@ -149,7 +151,7 @@ impl SessionCipher {
             w.highest = seq;
             Ok(())
         } else if seq == w.highest {
-            bail!("replay: seq {} matches highest", seq);
+            bail!("replay: seq {seq} matches highest");
         } else {
             let offset = w.highest - seq;
             if offset >= REPLAY_WINDOW {
@@ -157,7 +159,7 @@ impl SessionCipher {
             }
             let bit = 1u128 << offset;
             if w.bitmap & bit != 0 {
-                bail!("replay: seq {} already seen", seq);
+                bail!("replay: seq {seq} already seen");
             }
             w.bitmap |= bit;
             Ok(())
@@ -241,9 +243,9 @@ mod tests {
     #[test]
     fn out_of_order_within_window_ok() {
         let (sender, receiver) = pair();
-        let cts: Vec<_> = (0..5).map(|i| {
-            sender.encrypt(format!("msg-{}", i).as_bytes()).unwrap()
-        }).collect();
+        let cts: Vec<_> = (0..5)
+            .map(|i| sender.encrypt(format!("msg-{i}").as_bytes()).unwrap())
+            .collect();
         // Receive newest first, then older
         assert!(receiver.decrypt(&cts[4]).is_ok());
         assert!(receiver.decrypt(&cts[2]).is_ok());
@@ -258,7 +260,9 @@ mod tests {
     fn very_old_seq_rejected() {
         let (sender, receiver) = pair();
         // Encrypt 200 packets, deliver only the latest
-        for _ in 0..199 { sender.encrypt(b"skip").unwrap(); }
+        for _ in 0..199 {
+            sender.encrypt(b"skip").unwrap();
+        }
         let recent = sender.encrypt(b"recent").unwrap();
         assert!(receiver.decrypt(&recent).is_ok());
 
@@ -267,8 +271,10 @@ mod tests {
         old.extend_from_slice(&0u64.to_le_bytes());
         old.extend_from_slice(&[0u8; 16]);
         let err = receiver.decrypt(&old).unwrap_err().to_string();
-        assert!(err.contains("too old") || err.contains("replay"),
-            "unexpected error: {}", err);
+        assert!(
+            err.contains("too old") || err.contains("replay"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -296,7 +302,9 @@ mod tests {
         // Receiver should accept any first packet, regardless of seq value.
         let r = cipher();
         let s = cipher();
-        for _ in 0..1000 { s.encrypt(b"discard").unwrap(); }
+        for _ in 0..1000 {
+            s.encrypt(b"discard").unwrap();
+        }
         let ct = s.encrypt(b"hello").unwrap();
         let pt = r.decrypt(&ct).unwrap();
         assert_eq!(pt, b"hello");

@@ -41,7 +41,9 @@ pub struct SessionStats {
 impl SessionStats {
     pub fn packet_loss_pct(&self) -> f32 {
         let total = self.frames_sent + self.frames_dropped;
-        if total == 0 { return 0.0; }
+        if total == 0 {
+            return 0.0;
+        }
         self.frames_dropped as f32 / total as f32 * 100.0
     }
 }

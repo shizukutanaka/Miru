@@ -67,7 +67,9 @@ pub fn resolve_safe_path(config: &FileTransferConfig, requested: &str) -> Result
         raw.clone()
     } else {
         // Relative: resolve against the FIRST allowed root
-        let root = config.allowed_roots.first()
+        let root = config
+            .allowed_roots
+            .first()
             .ok_or_else(|| anyhow::anyhow!("no allowed roots configured"))?;
         root.join(&raw)
     };
@@ -77,11 +79,14 @@ pub fn resolve_safe_path(config: &FileTransferConfig, requested: &str) -> Result
         Ok(c) => c,
         Err(_) => {
             // Path may not exist yet (write case) — canonicalise the parent
-            let parent = candidate.parent()
+            let parent = candidate
+                .parent()
                 .ok_or_else(|| anyhow::anyhow!("path has no parent"))?;
-            let parent_canon = parent.canonicalize()
+            let parent_canon = parent
+                .canonicalize()
                 .with_context(|| format!("canonicalize {}", parent.display()))?;
-            let filename = candidate.file_name()
+            let filename = candidate
+                .file_name()
                 .ok_or_else(|| anyhow::anyhow!("path has no filename"))?;
             parent_canon.join(filename)
         }
@@ -117,8 +122,8 @@ pub fn resolve_safe_path(config: &FileTransferConfig, requested: &str) -> Result
 /// On Linux, uses O_NOFOLLOW. On Windows, checks reparse points.
 pub fn open_for_read(path: &Path) -> Result<std::fs::File> {
     // Pre-check: symlink_metadata catches symlinks at the leaf.
-    let meta = std::fs::symlink_metadata(path)
-        .with_context(|| format!("stat {}", path.display()))?;
+    let meta =
+        std::fs::symlink_metadata(path).with_context(|| format!("stat {}", path.display()))?;
     if meta.file_type().is_symlink() {
         bail!("refusing to open symlink: {}", path.display());
     }
@@ -139,7 +144,9 @@ pub fn open_for_read(path: &Path) -> Result<std::fs::File> {
     }
     #[cfg(not(unix))]
     {
-        std::fs::OpenOptions::new().read(true).open(path)
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open(path)
             .with_context(|| format!("open {}", path.display()))
     }
 }
@@ -150,9 +157,9 @@ pub fn sanitize_filename(name: &str) -> String {
         .filter(|&c| !matches!(c, '/' | '\\' | '\0' | ':'))
         .filter(|&c| !c.is_control())
         .collect::<String>()
-        .trim_start_matches('.')   // no hidden files via leading "."
+        .trim_start_matches('.') // no hidden files via leading "."
         .chars()
-        .take(255)                 // common FS limit
+        .take(255) // common FS limit
         .collect()
 }
 

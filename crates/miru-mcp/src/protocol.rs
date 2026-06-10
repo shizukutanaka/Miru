@@ -41,12 +41,23 @@ pub struct JsonRpcResponse {
 
 impl JsonRpcResponse {
     pub fn ok(id: Value, result: Value) -> Self {
-        Self { jsonrpc: "2.0", id, result: Some(result), error: None }
+        Self {
+            jsonrpc: "2.0",
+            id,
+            result: Some(result),
+            error: None,
+        }
     }
     pub fn err(id: Value, code: i32, message: impl Into<String>) -> Self {
         Self {
-            jsonrpc: "2.0", id, result: None,
-            error: Some(JsonRpcError { code, message: message.into(), data: None }),
+            jsonrpc: "2.0",
+            id,
+            result: None,
+            error: Some(JsonRpcError {
+                code,
+                message: message.into(),
+                data: None,
+            }),
         }
     }
 }
@@ -118,7 +129,9 @@ pub struct ToolCallResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Content {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     /// Base64-encoded image with MIME type.
     Image {
         data: String,

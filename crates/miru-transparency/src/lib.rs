@@ -78,14 +78,9 @@ pub struct CoSignedCommitment {
 }
 
 impl CoSignedCommitment {
-    pub fn new(
-        metadata: &SessionMetadata,
-        host_key: &SigningKey,
-        viewer_key: &SigningKey,
-    ) -> Self {
+    pub fn new(metadata: &SessionMetadata, host_key: &SigningKey, viewer_key: &SigningKey) -> Self {
         let mut nonce = [0u8; 32];
-        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce)
-            .expect("rand");
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce).expect("rand");
         let commitment = metadata.commitment(&nonce);
         let host_sig: Signature = host_key.sign(&commitment);
         let viewer_sig: Signature = viewer_key.sign(&commitment);
@@ -102,7 +97,9 @@ impl CoSignedCommitment {
     ///   - Both signatures are valid for the claimed pubkeys
     pub fn verify(&self, metadata: &SessionMetadata) -> Result<()> {
         let nonce_v = B64.decode(&self.nonce_b64)?;
-        if nonce_v.len() != 32 { bail!("nonce length"); }
+        if nonce_v.len() != 32 {
+            bail!("nonce length");
+        }
         let mut nonce = [0u8; 32];
         nonce.copy_from_slice(&nonce_v);
 
@@ -118,9 +115,11 @@ impl CoSignedCommitment {
         let host_sig = decode_sig(&self.host_signature_b64)?;
         let viewer_sig = decode_sig(&self.viewer_signature_b64)?;
 
-        host_pub.verify_strict(&expected, &host_sig)
+        host_pub
+            .verify_strict(&expected, &host_sig)
             .map_err(|_| anyhow::anyhow!("host signature invalid"))?;
-        viewer_pub.verify_strict(&expected, &viewer_sig)
+        viewer_pub
+            .verify_strict(&expected, &viewer_sig)
             .map_err(|_| anyhow::anyhow!("viewer signature invalid"))?;
 
         Ok(())
@@ -142,7 +141,9 @@ impl Default for MerkleLog {
 }
 
 impl MerkleLog {
-    pub fn new() -> Self { Self { leaves: Vec::new() } }
+    pub fn new() -> Self {
+        Self { leaves: Vec::new() }
+    }
 
     pub fn append(&mut self, leaf: [u8; 32]) -> u64 {
         let idx = self.leaves.len() as u64;
@@ -155,9 +156,7 @@ impl MerkleLog {
         if self.leaves.is_empty() {
             return [0u8; 32];
         }
-        let mut layer: Vec<[u8; 32]> = self.leaves.iter()
-            .map(leaf_hash)
-            .collect();
+        let mut layer: Vec<[u8; 32]> = self.leaves.iter().map(leaf_hash).collect();
         while layer.len() > 1 {
             let mut next = Vec::with_capacity(layer.len().div_ceil(2));
             for chunk in layer.chunks(2) {
@@ -179,14 +178,18 @@ impl MerkleLog {
 
     /// Inclusion proof for leaf at `index`.
     pub fn proof(&self, index: u64) -> Result<Vec<[u8; 32]>> {
-        if index >= self.leaves.len() as u64 { bail!("out of range"); }
-        let mut layer: Vec<[u8; 32]> = self.leaves.iter()
-            .map(leaf_hash)
-            .collect();
+        if index >= self.leaves.len() as u64 {
+            bail!("out of range");
+        }
+        let mut layer: Vec<[u8; 32]> = self.leaves.iter().map(leaf_hash).collect();
         let mut path = Vec::new();
         let mut idx = index as usize;
         while layer.len() > 1 {
-            let sibling_idx = if idx.is_multiple_of(2) { idx + 1 } else { idx - 1 };
+            let sibling_idx = if idx.is_multiple_of(2) {
+                idx + 1
+            } else {
+                idx - 1
+            };
             if sibling_idx < layer.len() {
                 path.push(layer[sibling_idx]);
             } else {
@@ -209,8 +212,12 @@ impl MerkleLog {
     }
 
     /// Size of the log.
-    pub fn len(&self) -> u64 { self.leaves.len() as u64 }
-    pub fn is_empty(&self) -> bool { self.leaves.is_empty() }
+    pub fn len(&self) -> u64 {
+        self.leaves.len() as u64
+    }
+    pub fn is_empty(&self) -> bool {
+        self.leaves.is_empty()
+    }
 }
 
 /// Verify an inclusion proof.
@@ -254,7 +261,7 @@ fn node_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
 fn decode_pubkey(b64: &str) -> Result<VerifyingKey> {
     let v = B64.decode(b64)?;
     let arr: [u8; 32] = v.try_into().map_err(|_| anyhow::anyhow!("pubkey length"))?;
-    VerifyingKey::from_bytes(&arr).map_err(|e| anyhow::anyhow!("pubkey decode: {}", e))
+    VerifyingKey::from_bytes(&arr).map_err(|e| anyhow::anyhow!("pubkey decode: {e}"))
 }
 
 fn decode_sig(b64: &str) -> Result<Signature> {
@@ -330,8 +337,10 @@ mod tests {
 
         let mut altered = meta.clone();
         altered.video_frames += 1;
-        assert!(cosigned.verify(&altered).is_err(),
-            "tampered metadata should not verify");
+        assert!(
+            cosigned.verify(&altered).is_err(),
+            "tampered metadata should not verify"
+        );
     }
 
     #[test]
@@ -356,8 +365,7 @@ mod tests {
         for i in 0..7u64 {
             let leaf = [i as u8; 32];
             let proof = log.proof(i).unwrap();
-            assert!(verify_proof(&leaf, &proof, i, &root),
-                "proof {} failed", i);
+            assert!(verify_proof(&leaf, &proof, i, &root), "proof {i} failed");
         }
     }
 

@@ -34,7 +34,8 @@ async fn loopback_handshake_smoke_test() {
         // 3. Wait for first VideoFrame on viewer side
         // 4. Verify frame is decryptable
         Ok::<_, anyhow::Error>(())
-    }).await;
+    })
+    .await;
 
     signal_handle.abort();
     assert!(result.is_ok(), "loopback test timed out");

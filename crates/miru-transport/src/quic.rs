@@ -8,8 +8,7 @@
 
 use anyhow::{bail, Context, Result};
 use quinn::{
-    ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig,
-    TransportConfig,
+    ClientConfig, Connection, Endpoint, RecvStream, SendStream, ServerConfig, TransportConfig,
 };
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tracing::info;
@@ -77,7 +76,7 @@ impl QuicTransport {
 
     fn from_conn(conn: Connection, tx_cipher: SessionCipher, rx_cipher: SessionCipher) -> Self {
         let rtt_ms = Arc::new(std::sync::atomic::AtomicU32::new(
-            conn.rtt().as_millis() as u32,
+            conn.rtt().as_millis() as u32
         ));
         Self {
             conn,
@@ -90,21 +89,33 @@ impl QuicTransport {
     /// Open a unidirectional send stream for media data (fire-and-forget frames).
     pub async fn open_send_stream(&self) -> Result<QuicSendStream> {
         let stream = self.conn.open_uni().await?;
-        Ok(QuicSendStream { stream, cipher: self.tx_cipher.clone() })
+        Ok(QuicSendStream {
+            stream,
+            cipher: self.tx_cipher.clone(),
+        })
     }
 
     /// Accept an incoming unidirectional receive stream.
     pub async fn accept_recv_stream(&self) -> Result<QuicRecvStream> {
         let stream = self.conn.accept_uni().await?;
-        Ok(QuicRecvStream { stream, cipher: self.rx_cipher.clone() })
+        Ok(QuicRecvStream {
+            stream,
+            cipher: self.rx_cipher.clone(),
+        })
     }
 
     /// Bidirectional stream for control messages (request/response).
     pub async fn open_bidi(&self) -> Result<(QuicSendStream, QuicRecvStream)> {
         let (tx, rx) = self.conn.open_bi().await?;
         Ok((
-            QuicSendStream { stream: tx, cipher: self.tx_cipher.clone() },
-            QuicRecvStream { stream: rx, cipher: self.rx_cipher.clone() },
+            QuicSendStream {
+                stream: tx,
+                cipher: self.tx_cipher.clone(),
+            },
+            QuicRecvStream {
+                stream: rx,
+                cipher: self.rx_cipher.clone(),
+            },
         ))
     }
 
@@ -164,7 +175,7 @@ impl QuicRecvStream {
         }
         let len = u32::from_le_bytes(len_buf) as usize;
         if len == 0 || len > 64 * 1024 * 1024 {
-            bail!("invalid frame length: {}", len);
+            bail!("invalid frame length: {len}");
         }
         let mut buf = vec![0u8; len];
         self.stream.read_exact(&mut buf).await?;
@@ -181,7 +192,7 @@ impl QuicRecvStream {
         }
         let len = u32::from_le_bytes(len_buf) as usize;
         if len == 0 || len > 64 * 1024 * 1024 {
-            bail!("invalid frame length: {}", len);
+            bail!("invalid frame length: {len}");
         }
         let mut buf = vec![0u8; len];
         self.stream.read_exact(&mut buf).await?;
@@ -207,7 +218,9 @@ fn insecure_client_config() -> ClientConfig {
     transport.keep_alive_interval(Some(Duration::from_secs(15)));
     transport.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
 
-    let mut cfg = ClientConfig::new(Arc::new(quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap()));
+    let mut cfg = ClientConfig::new(Arc::new(
+        quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap(),
+    ));
     cfg.transport_config(Arc::new(transport));
     cfg
 }
@@ -224,13 +237,17 @@ fn self_signed_server_config() -> Result<(ServerConfig, Vec<u8>)> {
         .with_no_client_auth()
         .with_single_cert(
             vec![rustls::pki_types::CertificateDer::from(cert_der.clone())],
-            rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(key_der)),
+            rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+                key_der,
+            )),
         )?;
 
     let mut transport = TransportConfig::default();
     transport.keep_alive_interval(Some(Duration::from_secs(15)));
 
-    let mut cfg = ServerConfig::with_crypto(Arc::new(quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)?));
+    let mut cfg = ServerConfig::with_crypto(Arc::new(
+        quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)?,
+    ));
     cfg.transport_config(Arc::new(transport));
     Ok((cfg, cert_der))
 }
@@ -254,14 +271,18 @@ impl rustls::client::danger::ServerCertVerifier for SkipVerify {
     }
 
     fn verify_tls12_signature(
-        &self, _: &[u8], _: &rustls::pki_types::CertificateDer<'_>,
+        &self,
+        _: &[u8],
+        _: &rustls::pki_types::CertificateDer<'_>,
         _: &rustls::DigitallySignedStruct,
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
     fn verify_tls13_signature(
-        &self, _: &[u8], _: &rustls::pki_types::CertificateDer<'_>,
+        &self,
+        _: &[u8],
+        _: &rustls::pki_types::CertificateDer<'_>,
         _: &rustls::DigitallySignedStruct,
     ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
         Ok(rustls::client::danger::HandshakeSignatureValid::assertion())

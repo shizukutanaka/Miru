@@ -11,9 +11,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 fn is_valid_png(data: &[u8]) -> bool {
-    data.len() > 24
-        && &data[..8] == b"\x89PNG\r\n\x1a\n"
-        && &data[12..16] == b"IHDR"
+    data.len() > 24 && &data[..8] == b"\x89PNG\r\n\x1a\n" && &data[12..16] == b"IHDR"
 }
 
 #[tokio::test]
@@ -25,11 +23,15 @@ async fn screen_capture_returns_png() {
     let bridge = LocalBridge::new(0);
     match bridge.capture_screen(0).await {
         Ok(png) => {
-            assert!(is_valid_png(&png),
-                "expected PNG, got {} bytes: {:02x?}", png.len(), &png[..8.min(png.len())]);
+            assert!(
+                is_valid_png(&png),
+                "expected PNG, got {} bytes: {:02x?}",
+                png.len(),
+                &png[..8.min(png.len())]
+            );
             println!("capture_screen OK: {} bytes PNG ✅", png.len());
         }
-        Err(e) => eprintln!("capture error (may be OK on CI): {}", e),
+        Err(e) => eprintln!("capture error (may be OK on CI): {e}"),
     }
 }
 
@@ -45,23 +47,33 @@ async fn bridge_status_reports_local() {
 fn rate_limiter_shell_exec_burst_1() {
     let rl = RateLimiter::new();
     assert!(rl.try_consume(Capability::ShellExec).is_ok());
-    assert!(rl.try_consume(Capability::ShellExec).is_err(), "second must be denied");
+    assert!(
+        rl.try_consume(Capability::ShellExec).is_err(),
+        "second must be denied"
+    );
 }
 
 #[test]
 fn rate_limiter_screen_read_burst_10() {
     let rl = RateLimiter::new();
     for i in 0..10 {
-        assert!(rl.try_consume(Capability::ScreenRead).is_ok(), "call {} must succeed", i);
+        assert!(
+            rl.try_consume(Capability::ScreenRead).is_ok(),
+            "call {i} must succeed"
+        );
     }
-    assert!(rl.try_consume(Capability::ScreenRead).is_err(), "11th must be denied");
+    assert!(
+        rl.try_consume(Capability::ScreenRead).is_err(),
+        "11th must be denied"
+    );
 }
 
 #[test]
 fn token_capability_roundtrip() {
     let key = SigningKey::generate(&mut OsRng);
     let caps: HashSet<Capability> = [Capability::ScreenRead, Capability::PointerClick]
-        .into_iter().collect();
+        .into_iter()
+        .collect();
     let token = AgentToken::issue(&key, "test", caps, Duration::from_secs(600), None);
     let parsed = AgentToken::parse_and_verify(&token.to_string(), &key.verifying_key())
         .expect("should verify");
@@ -73,24 +85,36 @@ fn token_capability_roundtrip() {
 
 // ── Replay protection (AttestMCP §VI-C) ─────────────────────────────────────
 
+use miru_common::message::{ClipboardSync, InputEvent};
 use miru_mcp::server::McpServer;
-use miru_common::message::{InputEvent, ClipboardSync};
 use std::sync::Arc;
 
 struct NoopBridge;
 
 #[async_trait::async_trait]
 impl HostBridge for NoopBridge {
-    async fn send_input(&self, _: InputEvent) -> anyhow::Result<()> { Ok(()) }
-    async fn send_clipboard(&self, _: ClipboardSync) -> anyhow::Result<()> { Ok(()) }
-    async fn capture_screen(&self, _: u8) -> anyhow::Result<Vec<u8>> { Ok(vec![]) }
-    async fn read_clipboard(&self) -> anyhow::Result<String> { Ok(String::new()) }
-    async fn open_url(&self, _: &str) -> anyhow::Result<()> { Ok(()) }
-    async fn status(&self) -> anyhow::Result<serde_json::Value> { Ok(serde_json::json!({})) }
+    async fn send_input(&self, _: InputEvent) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn send_clipboard(&self, _: ClipboardSync) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn capture_screen(&self, _: u8) -> anyhow::Result<Vec<u8>> {
+        Ok(vec![])
+    }
+    async fn read_clipboard(&self) -> anyhow::Result<String> {
+        Ok(String::new())
+    }
+    async fn open_url(&self, _: &str) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn status(&self) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
 }
 
 fn make_server() -> McpServer {
-    use miru_agent::{AgentSession, audit::AuditLog};
+    use miru_agent::{audit::AuditLog, AgentSession};
     let key = SigningKey::generate(&mut OsRng);
     let caps: HashSet<Capability> = [Capability::ScreenRead].into_iter().collect();
     let token = AgentToken::issue(&key, "test", caps, Duration::from_secs(600), None);
@@ -104,7 +128,9 @@ fn make_server() -> McpServer {
 
 fn now_secs() -> u64 {
     std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
 }
 
 #[test]
@@ -119,12 +145,14 @@ fn replay_duplicate_nonce_rejected() {
     let nonce = [42u8; 16];
     assert!(server.check_replay(now_secs(), nonce).is_ok());
     let err = server.check_replay(now_secs(), nonce).unwrap_err();
-    assert!(err.to_string().contains("duplicate nonce"), "got: {}", err);
+    assert!(err.to_string().contains("duplicate nonce"), "got: {err}");
 }
 
 #[test]
 fn replay_stale_timestamp_rejected() {
     let server = make_server();
-    let err = server.check_replay(now_secs() - 120, [9u8; 16]).unwrap_err();
-    assert!(err.to_string().contains("validity window"), "got: {}", err);
+    let err = server
+        .check_replay(now_secs() - 120, [9u8; 16])
+        .unwrap_err();
+    assert!(err.to_string().contains("validity window"), "got: {err}");
 }

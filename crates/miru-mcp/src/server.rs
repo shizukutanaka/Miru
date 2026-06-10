@@ -11,13 +11,13 @@
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use miru_agent::{AgentSession, Capability};
-use miru_common::message::{InputEvent, InputKind, MouseButton, ClipboardSync, ClipboardFormat};
+use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, InputKind, MouseButton};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
 use crate::protocol::{Content, ToolCallParams, ToolCallResult};
 use crate::rate_limit::{RateLimitError, RateLimiter};
-use crate::replay::{ReplayGuard, ReplayDecision};
+use crate::replay::{ReplayDecision, ReplayGuard};
 
 /// Trait implemented by whatever pipes input back to the host.
 /// We use a trait so tests can stub it out.
@@ -82,11 +82,14 @@ impl McpServer {
             // when v0.3 wires denial events into the chained log.
             match e {
                 RateLimitError::BucketEmpty { retry_after } => {
-                    bail!("rate limit: capability {:?} bucket empty, retry in {}ms",
-                        cap, retry_after.as_millis());
+                    bail!(
+                        "rate limit: capability {:?} bucket empty, retry in {}ms",
+                        cap,
+                        retry_after.as_millis()
+                    );
                 }
                 RateLimitError::DailyCapReached { cap_max, .. } => {
-                    bail!("rate limit: daily cap of {} for {:?} reached", cap_max, cap);
+                    bail!("rate limit: daily cap of {cap_max} for {cap:?} reached");
                 }
             }
         }
@@ -95,10 +98,13 @@ impl McpServer {
 
     pub async fn handle_tool_call(&self, params: ToolCallParams) -> ToolCallResult {
         match self.dispatch(&params.name, &params.arguments).await {
-            Ok(content) => ToolCallResult { content, is_error: false },
+            Ok(content) => ToolCallResult {
+                content,
+                is_error: false,
+            },
             Err(e) => ToolCallResult {
                 content: vec![Content::Text {
-                    text: format!("Error: {}", e),
+                    text: format!("Error: {e}"),
                 }],
                 is_error: true,
             },
@@ -117,7 +123,7 @@ impl McpServer {
             "miru_clipboard_write" => self.tool_clipboard_write(args).await,
             "miru_open_url" => self.tool_open_url(args).await,
             "miru_status" => self.tool_status().await,
-            _ => bail!("unknown tool: {}", name),
+            _ => bail!("unknown tool: {name}"),
         }
     }
 
@@ -140,7 +146,9 @@ impl McpServer {
         // forensically traceable: record (display, timestamp, SHA-256, seq) so
         // that if the agent later takes a harmful action, the exact frame that
         // induced it is identifiable and hash-verifiable after the fact.
-        let seq = self.frame_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let seq = self
+            .frame_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         // Record provenance in the audit log (digest computed in miru-agent).
         let digest = self.session.audit_screen_capture(display, &png, seq);
@@ -149,7 +157,10 @@ impl McpServer {
             Content::Text {
                 text: format!(
                     "Captured display {} ({} bytes) [frame#{} sha256:{}…]",
-                    display, png.len(), seq, &digest[..digest.len().min(16)]
+                    display,
+                    png.len(),
+                    seq,
+                    &digest[..digest.len().min(16)]
                 ),
             },
             Content::Image {
@@ -160,8 +171,14 @@ impl McpServer {
     }
 
     async fn tool_mouse_move(&self, args: &Value) -> Result<Vec<Content>> {
-        let x = args.get("x").and_then(|v| v.as_f64()).context("x missing")? as f32;
-        let y = args.get("y").and_then(|v| v.as_f64()).context("y missing")? as f32;
+        let x = args
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .context("x missing")? as f32;
+        let y = args
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .context("y missing")? as f32;
         self.gate(
             Capability::PointerMove,
             json!({"x": x, "y": y}),
@@ -172,14 +189,28 @@ impl McpServer {
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(evt).await?;
-        Ok(vec![Content::Text { text: format!("Mouse moved to ({:.3}, {:.3})", x, y) }])
+        Ok(vec![Content::Text {
+            text: format!("Mouse moved to ({x:.3}, {y:.3})"),
+        }])
     }
 
     async fn tool_mouse_click(&self, args: &Value) -> Result<Vec<Content>> {
-        let x = args.get("x").and_then(|v| v.as_f64()).context("x missing")? as f32;
-        let y = args.get("y").and_then(|v| v.as_f64()).context("y missing")? as f32;
-        let button_str = args.get("button").and_then(|v| v.as_str()).unwrap_or("left");
-        let double = args.get("double").and_then(|v| v.as_bool()).unwrap_or(false);
+        let x = args
+            .get("x")
+            .and_then(|v| v.as_f64())
+            .context("x missing")? as f32;
+        let y = args
+            .get("y")
+            .and_then(|v| v.as_f64())
+            .context("y missing")? as f32;
+        let button_str = args
+            .get("button")
+            .and_then(|v| v.as_str())
+            .unwrap_or("left");
+        let double = args
+            .get("double")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let button = match button_str {
             "right" => MouseButton::Right,
@@ -208,15 +239,22 @@ impl McpServer {
         }
 
         Ok(vec![Content::Text {
-            text: format!("Clicked {} at ({:.3}, {:.3}){}",
-                button_str, x, y,
-                if double { " (double)" } else { "" }),
+            text: format!(
+                "Clicked {} at ({:.3}, {:.3}){}",
+                button_str,
+                x,
+                y,
+                if double { " (double)" } else { "" }
+            ),
         }])
     }
 
     async fn tool_scroll(&self, args: &Value) -> Result<Vec<Content>> {
         let dx = args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-        let dy = args.get("dy").and_then(|v| v.as_f64()).context("dy missing")? as f32;
+        let dy = args
+            .get("dy")
+            .and_then(|v| v.as_f64())
+            .context("dy missing")? as f32;
         let x = args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
         let y = args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
 
@@ -231,34 +269,44 @@ impl McpServer {
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(evt).await?;
-        Ok(vec![Content::Text { text: format!("Scrolled dx={}, dy={}", dx, dy) }])
+        Ok(vec![Content::Text {
+            text: format!("Scrolled dx={dx}, dy={dy}"),
+        }])
     }
 
     async fn tool_key_type(&self, args: &Value) -> Result<Vec<Content>> {
-        let text = args.get("text").and_then(|v| v.as_str()).context("text missing")?;
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .context("text missing")?;
         self.gate(
             Capability::KeyType,
-            json!({"len": text.len()}),  // don't log raw text in audit
+            json!({"len": text.len()}), // don't log raw text in audit
             "key_type",
         )?;
         let evt = InputEvent {
-            kind: InputKind::Text { text: text.to_string() },
+            kind: InputKind::Text {
+                text: text.to_string(),
+            },
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(evt).await?;
-        Ok(vec![Content::Text { text: format!("Typed {} characters", text.chars().count()) }])
+        Ok(vec![Content::Text {
+            text: format!("Typed {} characters", text.chars().count()),
+        }])
     }
 
     async fn tool_key_combo(&self, args: &Value) -> Result<Vec<Content>> {
-        let combo = args.get("combo").and_then(|v| v.as_str()).context("combo missing")?;
-        self.gate(
-            Capability::KeyCombo,
-            json!({"combo": combo}),
-            "key_combo",
-        )?;
+        let combo = args
+            .get("combo")
+            .and_then(|v| v.as_str())
+            .context("combo missing")?;
+        self.gate(Capability::KeyCombo, json!({"combo": combo}), "key_combo")?;
         // Parse "Ctrl+Shift+T" → modifier mask + key
         let parts: Vec<&str> = combo.split('+').map(|s| s.trim()).collect();
-        if parts.is_empty() { bail!("empty combo"); }
+        if parts.is_empty() {
+            bail!("empty combo");
+        }
         let mut modifiers = 0u8;
         let mut key_str = "";
         for p in &parts {
@@ -283,45 +331,51 @@ impl McpServer {
         self.bridge.send_input(down).await?;
         self.bridge.send_input(up).await?;
 
-        Ok(vec![Content::Text { text: format!("Sent key combo: {}", combo) }])
+        Ok(vec![Content::Text {
+            text: format!("Sent key combo: {combo}"),
+        }])
     }
 
     async fn tool_clipboard_read(&self, _args: &Value) -> Result<Vec<Content>> {
-        self.gate(
-            Capability::ClipboardRead,
-            json!({}),
-            "clipboard_read",
-        )?;
+        self.gate(Capability::ClipboardRead, json!({}), "clipboard_read")?;
         let text = self.bridge.read_clipboard().await?;
         Ok(vec![Content::Text { text }])
     }
 
     async fn tool_clipboard_write(&self, args: &Value) -> Result<Vec<Content>> {
-        let text = args.get("text").and_then(|v| v.as_str()).context("text missing")?;
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .context("text missing")?;
         self.gate(
             Capability::ClipboardWrite,
             json!({"len": text.len()}),
             "clipboard_write",
         )?;
-        self.bridge.send_clipboard(ClipboardSync {
-            format: ClipboardFormat::Text,
-            data: text.as_bytes().to_vec(),
-        }).await?;
-        Ok(vec![Content::Text { text: format!("Clipboard set ({} bytes)", text.len()) }])
+        self.bridge
+            .send_clipboard(ClipboardSync {
+                format: ClipboardFormat::Text,
+                data: text.as_bytes().to_vec(),
+            })
+            .await?;
+        Ok(vec![Content::Text {
+            text: format!("Clipboard set ({} bytes)", text.len()),
+        }])
     }
 
     async fn tool_open_url(&self, args: &Value) -> Result<Vec<Content>> {
-        let url = args.get("url").and_then(|v| v.as_str()).context("url missing")?;
+        let url = args
+            .get("url")
+            .and_then(|v| v.as_str())
+            .context("url missing")?;
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             bail!("only http(s) URLs allowed");
         }
-        self.gate(
-            Capability::OpenUrl,
-            json!({"url": url}),
-            "open_url",
-        )?;
+        self.gate(Capability::OpenUrl, json!({"url": url}), "open_url")?;
         self.bridge.open_url(url).await?;
-        Ok(vec![Content::Text { text: format!("Opened {}", url) }])
+        Ok(vec![Content::Text {
+            text: format!("Opened {url}"),
+        }])
     }
 
     async fn tool_status(&self) -> Result<Vec<Content>> {
@@ -333,7 +387,9 @@ impl McpServer {
             "capabilities": self.session.token.payload.caps,
             "host_status": status,
         });
-        Ok(vec![Content::Text { text: serde_json::to_string_pretty(&summary)? }])
+        Ok(vec![Content::Text {
+            text: serde_json::to_string_pretty(&summary)?,
+        }])
     }
 }
 
@@ -373,10 +429,19 @@ fn parse_key(s: &str) -> Result<u32> {
         "End" => 0x23,
         "PageUp" => 0x21,
         "PageDown" => 0x22,
-        "F1" => 0x70, "F2" => 0x71, "F3" => 0x72, "F4" => 0x73,
-        "F5" => 0x74, "F6" => 0x75, "F7" => 0x76, "F8" => 0x77,
-        "F9" => 0x78, "F10" => 0x79, "F11" => 0x7A, "F12" => 0x7B,
-        _ => bail!("unknown key: {}", s),
+        "F1" => 0x70,
+        "F2" => 0x71,
+        "F3" => 0x72,
+        "F4" => 0x73,
+        "F5" => 0x74,
+        "F6" => 0x75,
+        "F7" => 0x76,
+        "F8" => 0x77,
+        "F9" => 0x78,
+        "F10" => 0x79,
+        "F11" => 0x7A,
+        "F12" => 0x7B,
+        _ => bail!("unknown key: {s}"),
     })
 }
 

@@ -64,7 +64,9 @@ impl RevocationList {
             let f = std::fs::File::open(&path).context("open revocation list")?;
             for (idx, line) in BufReader::new(f).lines().enumerate() {
                 let line = line.context("read revocation list")?;
-                if line.trim().is_empty() { continue; }
+                if line.trim().is_empty() {
+                    continue;
+                }
                 let entry: RevocationEntry = serde_json::from_str(&line)
                     .with_context(|| format!("parse revocation entry line {}", idx + 1))?;
                 revoked.insert(entry.jti);
@@ -85,7 +87,10 @@ impl RevocationList {
     pub fn revoke(&self, jti: Uuid, reason: impl Into<String>) -> Result<()> {
         let reason = reason.into();
         {
-            let mut g = self.revoked.write().map_err(|e| anyhow::anyhow!("poisoned: {e}"))?;
+            let mut g = self
+                .revoked
+                .write()
+                .map_err(|e| anyhow::anyhow!("poisoned: {e}"))?;
             if !g.insert(jti) {
                 // Already revoked; don't double-write.
                 return Ok(());
@@ -98,7 +103,9 @@ impl RevocationList {
         };
         let line = serde_json::to_string(&entry)?;
         let mut f = OpenOptions::new()
-            .create(true).append(true).open(&self.path)
+            .create(true)
+            .append(true)
+            .open(&self.path)
             .context("append revocation list")?;
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
@@ -110,7 +117,11 @@ impl RevocationList {
     /// in-memory list of issued tokens. Returns count revoked.
     ///
     /// This is the user-visible "log out everywhere" button.
-    pub fn revoke_all_known(&self, known_jtis: &[Uuid], reason: impl Into<String>) -> Result<usize> {
+    pub fn revoke_all_known(
+        &self,
+        known_jtis: &[Uuid],
+        reason: impl Into<String>,
+    ) -> Result<usize> {
         let reason = reason.into();
         let mut count = 0;
         for jti in known_jtis {
@@ -122,18 +133,26 @@ impl RevocationList {
 
     /// Check whether a JTI is revoked.
     pub fn is_revoked(&self, jti: &Uuid) -> bool {
-        self.revoked.read().map(|s| s.contains(jti)).unwrap_or(false)
+        self.revoked
+            .read()
+            .map(|s| s.contains(jti))
+            .unwrap_or(false)
     }
 
     pub fn len(&self) -> usize {
         self.revoked.read().map(|s| s.len()).unwrap_or(0)
     }
 
-    pub fn is_empty(&self) -> bool { self.len() == 0 }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 #[cfg(test)]

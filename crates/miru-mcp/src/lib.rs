@@ -10,8 +10,8 @@ pub mod tools;
 
 use anyhow::Result;
 use protocol::{
-    errors, InitializeResult, JsonRpcRequest, JsonRpcResponse, ServerCapabilities,
-    ServerInfo, ToolCallParams, ToolListResult, ToolsCapability, PROTOCOL_VERSION,
+    errors, InitializeResult, JsonRpcRequest, JsonRpcResponse, ServerCapabilities, ServerInfo,
+    ToolCallParams, ToolListResult, ToolsCapability, PROTOCOL_VERSION,
 };
 use serde_json::{json, Value};
 use server::McpServer;
@@ -28,14 +28,18 @@ pub async fn run_stdio(server: Arc<McpServer>) -> Result<()> {
     info!("MCP server ready (stdio transport)");
 
     while let Ok(Some(line)) = reader.next_line().await {
-        if line.trim().is_empty() { continue; }
+        if line.trim().is_empty() {
+            continue;
+        }
 
         let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
             Ok(req) => handle_request(&server, req).await,
             Err(e) => {
                 error!("parse error: {} (line: {})", e, line);
                 Some(JsonRpcResponse::err(
-                    Value::Null, errors::PARSE_ERROR, format!("parse error: {}", e),
+                    Value::Null,
+                    errors::PARSE_ERROR,
+                    format!("parse error: {e}"),
                 ))
             }
         };
@@ -62,13 +66,16 @@ async fn handle_request(server: &Arc<McpServer>, req: JsonRpcRequest) -> Option<
         "initialize" => Ok(serde_json::to_value(InitializeResult {
             protocol_version: PROTOCOL_VERSION,
             capabilities: ServerCapabilities {
-                tools: ToolsCapability { list_changed: false },
+                tools: ToolsCapability {
+                    list_changed: false,
+                },
             },
             server_info: ServerInfo {
                 name: "miru-mcp",
                 version: env!("CARGO_PKG_VERSION"),
             },
-        }).unwrap()),
+        })
+        .unwrap()),
 
         "initialized" | "notifications/initialized" => {
             // Notification — no response
@@ -77,19 +84,28 @@ async fn handle_request(server: &Arc<McpServer>, req: JsonRpcRequest) -> Option<
 
         "tools/list" => Ok(serde_json::to_value(ToolListResult {
             tools: tools::definitions(),
-        }).unwrap()),
+        })
+        .unwrap()),
 
         "tools/call" => {
             let params: ToolCallParams = match req.params {
                 Some(p) => match serde_json::from_value(p) {
                     Ok(v) => v,
                     Err(e) => {
-                        return Some(JsonRpcResponse::err(id, errors::INVALID_PARAMS,
-                            format!("bad params: {}", e)));
+                        return Some(JsonRpcResponse::err(
+                            id,
+                            errors::INVALID_PARAMS,
+                            format!("bad params: {e}"),
+                        ));
                     }
                 },
-                None => return Some(JsonRpcResponse::err(id, errors::INVALID_PARAMS,
-                    "missing params")),
+                None => {
+                    return Some(JsonRpcResponse::err(
+                        id,
+                        errors::INVALID_PARAMS,
+                        "missing params",
+                    ))
+                }
             };
             let result = server.handle_tool_call(params).await;
             Ok(serde_json::to_value(result).unwrap())
@@ -99,8 +115,11 @@ async fn handle_request(server: &Arc<McpServer>, req: JsonRpcRequest) -> Option<
 
         _ => {
             warn!("unknown MCP method: {}", req.method);
-            return Some(JsonRpcResponse::err(id, errors::METHOD_NOT_FOUND,
-                format!("method not found: {}", req.method)));
+            return Some(JsonRpcResponse::err(
+                id,
+                errors::METHOD_NOT_FOUND,
+                format!("method not found: {}", req.method),
+            ));
         }
     };
 

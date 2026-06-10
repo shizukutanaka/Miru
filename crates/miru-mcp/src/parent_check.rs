@@ -75,30 +75,42 @@ pub fn check_parent() -> Result<ParentCheck> {
     let (allowed, reason) = match &exe {
         Some(p) => match exe_filename(p) {
             Some(name) if matches_allowlist(&name) => (true, None),
-            Some(name) => (false, Some(format!(
-                "parent process executable '{}' not in allowlist", name
-            ))),
+            Some(name) => (
+                false,
+                Some(format!(
+                    "parent process executable '{name}' not in allowlist"
+                )),
+            ),
             None => (false, Some("parent executable filename unreadable".into())),
         },
-        None => (false, Some(format!(
-            "could not resolve parent process executable for ppid={}",
-            ppid
-        ))),
+        None => (
+            false,
+            Some(format!(
+                "could not resolve parent process executable for ppid={ppid}"
+            )),
+        ),
     };
 
-    Ok(ParentCheck { ppid, exe, allowed, reason })
+    Ok(ParentCheck {
+        ppid,
+        exe,
+        allowed,
+        reason,
+    })
 }
 
 fn matches_allowlist(name: &str) -> bool {
     let lower = name.to_lowercase();
     ALLOWED_PARENTS.iter().any(|allowed| {
         let a = allowed.to_lowercase();
-        lower == a || lower == format!("{}.exe", a)
+        lower == a || lower == format!("{a}.exe")
     })
 }
 
 fn exe_filename(path: &Path) -> Option<String> {
-    path.file_name().and_then(|s| s.to_str()).map(|s| s.to_string())
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -114,14 +126,16 @@ fn parent_pid() -> Result<u32> {
 
 #[cfg(target_os = "linux")]
 fn parent_exe(ppid: u32) -> Result<PathBuf> {
-    Ok(std::fs::read_link(format!("/proc/{}/exe", ppid))?)
+    Ok(std::fs::read_link(format!("/proc/{ppid}/exe"))?)
 }
 
 #[cfg(target_os = "macos")]
 fn parent_pid() -> Result<u32> {
     // SAFETY: getppid is FFI but a trivial pure read of process metadata.
     let ppid = unsafe { libc::getppid() };
-    if ppid <= 0 { anyhow::bail!("getppid returned {}", ppid); }
+    if ppid <= 0 {
+        anyhow::bail!("getppid returned {}", ppid);
+    }
     Ok(ppid as u32)
 }
 
@@ -133,7 +147,9 @@ fn parent_exe(ppid: u32) -> Result<PathBuf> {
     }
     let mut buf = vec![0i8; 4096];
     let n = unsafe { proc_pidpath(ppid as i32, buf.as_mut_ptr(), buf.len() as u32) };
-    if n <= 0 { anyhow::bail!("proc_pidpath returned {}", n); }
+    if n <= 0 {
+        anyhow::bail!("proc_pidpath returned {}", n);
+    }
     buf.truncate(n as usize);
     let s = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };
     Ok(PathBuf::from(s.to_str()?))
@@ -165,7 +181,9 @@ fn parent_pid() -> Result<u32> {
     const TH32CS_SNAPPROCESS: u32 = 0x00000002;
     let me = unsafe { GetCurrentProcessId() };
     let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if snap.is_null() { anyhow::bail!("CreateToolhelp32Snapshot failed"); }
+    if snap.is_null() {
+        anyhow::bail!("CreateToolhelp32Snapshot failed");
+    }
     let mut pe: Pe32 = unsafe { std::mem::zeroed() };
     pe.dw_size = size_of::<Pe32>() as u32;
     let mut found = 0u32;
@@ -175,11 +193,15 @@ fn parent_pid() -> Result<u32> {
                 found = pe.th32_parent_process_id;
                 break;
             }
-            if unsafe { Process32NextW(snap, &mut pe) } == 0 { break; }
+            if unsafe { Process32NextW(snap, &mut pe) } == 0 {
+                break;
+            }
         }
     }
     unsafe { CloseHandle(snap) };
-    if found == 0 { anyhow::bail!("could not find own ppid"); }
+    if found == 0 {
+        anyhow::bail!("could not find own ppid");
+    }
     Ok(found)
 }
 
@@ -188,25 +210,37 @@ fn parent_exe(ppid: u32) -> Result<PathBuf> {
     extern "system" {
         fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut std::ffi::c_void;
         fn CloseHandle(h: *mut std::ffi::c_void) -> i32;
-        fn QueryFullProcessImageNameW(h: *mut std::ffi::c_void, flags: u32,
-            buf: *mut u16, size: *mut u32) -> i32;
+        fn QueryFullProcessImageNameW(
+            h: *mut std::ffi::c_void,
+            flags: u32,
+            buf: *mut u16,
+            size: *mut u32,
+        ) -> i32;
     }
     const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
     let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, ppid) };
-    if h.is_null() { anyhow::bail!("OpenProcess failed for ppid {}", ppid); }
+    if h.is_null() {
+        anyhow::bail!("OpenProcess failed for ppid {}", ppid);
+    }
     let mut buf = vec![0u16; 4096];
     let mut size = buf.len() as u32;
     let ok = unsafe { QueryFullProcessImageNameW(h, 0, buf.as_mut_ptr(), &mut size) };
     unsafe { CloseHandle(h) };
-    if ok == 0 { anyhow::bail!("QueryFullProcessImageNameW failed"); }
+    if ok == 0 {
+        anyhow::bail!("QueryFullProcessImageNameW failed");
+    }
     buf.truncate(size as usize);
     Ok(PathBuf::from(String::from_utf16_lossy(&buf)))
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn parent_pid() -> Result<u32> { anyhow::bail!("unsupported platform"); }
+fn parent_pid() -> Result<u32> {
+    anyhow::bail!("unsupported platform");
+}
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn parent_exe(_ppid: u32) -> Result<PathBuf> { anyhow::bail!("unsupported platform"); }
+fn parent_exe(_ppid: u32) -> Result<PathBuf> {
+    anyhow::bail!("unsupported platform");
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

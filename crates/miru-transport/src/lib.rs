@@ -9,9 +9,9 @@ pub mod signaling;
 pub mod tls;
 
 pub use connection::{Connection, ConnectionMode};
-pub use signaling::{SignalClient, SignalEvent};
 pub use nat::{detect_nat_type, discover_public_addr, is_punchable, punch_to_peer, NatType};
-pub use tls::{strict_client_config, pinned_client_config};
+pub use signaling::{SignalClient, SignalEvent};
+pub use tls::{pinned_client_config, strict_client_config};
 
 use anyhow::Result;
 use miru_common::message::Msg;

@@ -5,8 +5,8 @@ use bytes::Bytes;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
     Bgra32,
-    Nv12,      // YUV 4:2:0 planar (GPU-native on Windows/DXGI)
-    I420,      // YUV 4:2:0 planar (common codec input)
+    Nv12, // YUV 4:2:0 planar (GPU-native on Windows/DXGI)
+    I420, // YUV 4:2:0 planar (common codec input)
     Rgba32,
 }
 
@@ -17,7 +17,7 @@ pub struct RawFrame {
     pub height: u32,
     pub stride: u32,
     pub format: PixelFormat,
-    pub data: Bytes,         // Arc-counted; cheap clone
+    pub data: Bytes, // Arc-counted; cheap clone
     pub timestamp_ms: u64,
     pub dirty_rects: Vec<DirtyRect>, // Changed regions (DXGI provides this)
 }
@@ -32,7 +32,12 @@ pub struct DirtyRect {
 
 impl RawFrame {
     pub fn full_dirty(width: u32, height: u32) -> Vec<DirtyRect> {
-        vec![DirtyRect { x: 0, y: 0, w: width, h: height }]
+        vec![DirtyRect {
+            x: 0,
+            y: 0,
+            w: width,
+            h: height,
+        }]
     }
 
     pub fn is_full_frame(&self) -> bool {

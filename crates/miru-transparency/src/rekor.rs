@@ -21,7 +21,10 @@ pub const DEFAULT_REKOR_URL: &str = "https://rekor.sigstore.dev";
 pub const PREDICATE_TYPE: &str = "https://miru.app/v0/session-commitment";
 
 /// Build the in-toto statement that gets posted to Rekor.
-pub fn build_statement(metadata: &SessionMetadata, commitment: &CoSignedCommitment) -> serde_json::Value {
+pub fn build_statement(
+    metadata: &SessionMetadata,
+    commitment: &CoSignedCommitment,
+) -> serde_json::Value {
     json!({
         "_type": "https://in-toto.io/Statement/v0.1",
         "subject": [{
@@ -66,7 +69,11 @@ pub struct RekorEntry {
 
 /// Build the URL where users can later verify this entry.
 pub fn entry_url(rekor_url: &str, uuid: &str) -> String {
-    format!("{}/api/v1/log/entries/{}", rekor_url.trim_end_matches('/'), uuid)
+    format!(
+        "{}/api/v1/log/entries/{}",
+        rekor_url.trim_end_matches('/'),
+        uuid
+    )
 }
 
 /// Post a session commitment to a Rekor transparency log.
@@ -90,8 +97,8 @@ pub async fn submit_to_rekor(
     metadata: &crate::SessionMetadata,
     commitment: &crate::CoSignedCommitment,
 ) -> anyhow::Result<RekorEntry> {
-    use base64::Engine;
     use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
 
     let statement = build_statement(metadata, commitment);
 
@@ -119,52 +126,63 @@ pub async fn submit_to_rekor(
         .build()?;
 
     let resp = client
-        .post(format!("{}/api/v1/log/entries", rekor_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/api/v1/log/entries",
+            rekor_url.trim_end_matches('/')
+        ))
         .json(&body)
         .send()
         .await
-        .map_err(|e| anyhow::anyhow!("Rekor POST failed: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Rekor POST failed: {e}"))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Rekor returned {}: {}", status, &text[..text.len().min(200)]);
+        anyhow::bail!(
+            "Rekor returned {}: {}",
+            status,
+            &text[..text.len().min(200)]
+        );
     }
 
     // Rekor returns a map of { uuid: entry_body }. Extract the first (and only) entry.
-    let map: serde_json::Map<String, serde_json::Value> = resp.json().await
-        .map_err(|e| anyhow::anyhow!("Rekor response parse: {}", e))?;
+    let map: serde_json::Map<String, serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Rekor response parse: {e}"))?;
 
-    let (uuid, entry_body) = map.into_iter().next()
+    let (uuid, entry_body) = map
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("Rekor returned empty map"))?;
 
     let log_index = entry_body["logIndex"]
         .as_u64()
         .ok_or_else(|| anyhow::anyhow!("missing logIndex"))?;
-    let log_id = entry_body["logID"]
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    let integrated_time = entry_body["integratedTime"]
-        .as_i64()
-        .unwrap_or(0);
+    let log_id = entry_body["logID"].as_str().unwrap_or("").to_string();
+    let integrated_time = entry_body["integratedTime"].as_i64().unwrap_or(0);
 
-    Ok(RekorEntry { log_index, uuid, log_id, integrated_time })
+    Ok(RekorEntry {
+        log_index,
+        uuid,
+        log_id,
+        integrated_time,
+    })
 }
 
 fn hex_sha256(data: &[u8]) -> String {
     use ring::digest;
     let d = digest::digest(&digest::SHA256, data);
-    d.as_ref().iter().map(|b| format!("{:02x}", b)).collect()
+    d.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
     use ed25519_dalek::SigningKey;
     use rand::rngs::OsRng;
     use uuid::Uuid;
-    use base64::{engine::general_purpose::STANDARD as B64, Engine};
 
     #[test]
     fn statement_contains_required_fields() {
@@ -188,7 +206,10 @@ mod tests {
         assert_eq!(stmt["_type"], "https://in-toto.io/Statement/v0.1");
         assert_eq!(stmt["predicateType"], PREDICATE_TYPE);
         // Subject digest must be the commitment
-        assert_eq!(stmt["subject"][0]["digest"]["sha256"], cosigned.commitment_b64);
+        assert_eq!(
+            stmt["subject"][0]["digest"]["sha256"],
+            cosigned.commitment_b64
+        );
     }
 
     #[test]
