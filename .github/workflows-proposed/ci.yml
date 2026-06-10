@@ -1,0 +1,328 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ─── Lint ──────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev \
+            libxcb-randr0-dev libasound2-dev libpulse-dev pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  # ─── MSRV / pinned toolchain ───────────────────────────────────────────────
+  # Every other job runs on @stable, which silently ignores rust-toolchain.toml.
+  # This job builds with the pinned toolchain + --locked so the pin and the
+  # lockfile can never rot apart again (the 1.80 pin was unbuildable for
+  # months without CI noticing).
+  msrv:
+    name: MSRV (pinned toolchain)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No toolchain action on purpose: rustup honors rust-toolchain.toml.
+      - uses: Swatinem/rust-cache@v2
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev \
+            libxcb-randr0-dev libasound2-dev libpulse-dev pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: cargo check --workspace --all-targets --locked
+
+  # ─── Unit tests ────────────────────────────────────────────────────────────
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev \
+            libxcb-randr0-dev libasound2-dev libpulse-dev pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      # Linux runs the full workspace; Windows/macOS run the
+      # platform-independent crates (Tauri/GUI deps are Linux-checked only).
+      - name: Test workspace (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --workspace --locked
+
+      - name: Test logic crates (Windows/macOS)
+        if: matrix.os != 'ubuntu-latest'
+        run: |
+          cargo test --locked -p miru-common
+          cargo test --locked -p miru-auth
+          cargo test --locked -p miru-agent
+          cargo test --locked -p miru-host
+          cargo test --locked -p miru-transport
+          cargo test --locked -p miru-signal
+
+  # ─── E2E (Xvfb virtual display) ────────────────────────────────────────────
+  e2e:
+    name: E2E Tests (Xvfb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb \
+            libx11-dev libxcb1-dev libxcb-shm0-dev libxcb-randr0-dev \
+            libasound2-dev libpulse-dev libvpx-dev libopus-dev \
+            libclang-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 -ac &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          sleep 2
+      - name: Build binaries
+        run: cargo build --locked --bin miru-signal --bin miru-host --bin miru-mcp
+      - name: Smoke — signal + host register
+        run: |
+          ./target/debug/miru-signal &
+          sleep 1
+          # timeout kills the (long-running) host; only the grep decides pass/fail.
+          MIRU_SIGNAL=ws://127.0.0.1:21115/ws timeout 6 ./target/debug/miru-host 2>&1 | tee /tmp/host.log || true
+          pkill miru-signal || true
+          grep -q "Register:" /tmp/host.log
+          echo "✅ host registered"
+      - name: MCP LocalBridge E2E
+        run: cargo test -p miru-mcp --test local_bridge_e2e
+      - name: Security integration
+        run: cargo test -p miru-agent --test security_integration
+      - name: Signal relay forwarding E2E
+        run: cargo test -p miru-signal --test relay_e2e
+      - name: Audit log tamper detection
+        run: cargo test -p miru-agent --test audit_verification
+      - name: Token issue round-trip
+        run: cargo test -p miru-host --test token_issue
+
+  # ─── Security audit ────────────────────────────────────────────────────────
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked --quiet
+      - run: cargo audit --deny warnings
+
+  # ─── Dependency policy (cargo-deny) ────────────────────────────────────────
+  deny:
+    name: Dependency Policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-deny --locked --quiet
+      - run: cargo deny check advisories
+      - run: cargo deny check licenses
+      - run: cargo deny check bans
+      - run: cargo deny check sources
+
+  # ─── Crypto invariant gate ─────────────────────────────────────────────────
+  # Per docs/CRYPTO.md §2.3 and docs/THREAT_MODEL.md §5: production code
+  # must use Ed25519 verify_strict (ZIP-215). This grep gate fails the build
+  # if any non-strict verify call appears in production source.
+  crypto-gate:
+    name: Crypto Invariant Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: No non-strict Ed25519 verify in production
+        run: |
+          set -euo pipefail
+          # Match `.verify(` not preceded by `_strict`. Allow inside test modules.
+          # We grep for the literal pattern; tests use named methods so they're not affected.
+          BAD=$(grep -rn '\.verify(' crates/*/src/ \
+              | grep -v 'verify_strict' \
+              | grep -v 'token\.verify(\&key' \
+              | grep -v 'cosigned\.verify(\&' \
+              | grep -v 'log\.verify()' \
+              | grep -v 'log2\.unwrap()\.verify()' \
+              || true)
+          if [ -n "$BAD" ]; then
+              echo "::error::found non-strict Ed25519 .verify() — must use .verify_strict() per CRYPTO.md §2.3"
+              echo "$BAD"
+              exit 1
+          fi
+          echo "OK: all production Ed25519 verifications are strict (ZIP-215)"
+
+      - name: No danger_accept_invalid_certs in production
+        run: |
+          set -euo pipefail
+          BAD=$(grep -rn 'danger_accept_invalid\|with_no_client_auth\|accept_invalid_hostnames' crates/*/src/ || true)
+          if [ -n "$BAD" ]; then
+              echo "::error::TLS-disabling APIs found in production source — see RustDesk CVE-2026-30794"
+              echo "$BAD"
+              exit 1
+          fi
+          echo "OK: no TLS-validation-disabling APIs in production"
+
+      - name: SessionCipher must not derive Clone
+        run: |
+          set -euo pipefail
+          # Search for the SessionCipher struct definition area for Clone derive.
+          # Grep is purposely loose — we want any Clone within the SessionCipher impl block.
+          if grep -B 5 'pub struct SessionCipher' crates/miru-common/src/crypto.rs | grep -E 'derive\([^)]*Clone' >/dev/null; then
+              echo "::error::SessionCipher must NOT derive Clone — would cause AEAD nonce reuse"
+              exit 1
+          fi
+          echo "OK: SessionCipher is correctly non-Clone"
+
+      - name: Unwrap budget enforcement
+        run: |
+          set -euo pipefail
+          # Per docs/UNWRAP_TRIAGE.md, production (.unwrap() / .expect()) calls
+          # are budgeted (provably-safe + cooperative-poison). Any net
+          # increase is rejected so review notices new panic points.
+          # Current count: 21 — keep the budget equal to the actual count
+          # so every new unwrap forces a conscious bump in review.
+          BUDGET=21
+          ACTUAL=0
+          for f in $(find crates -name "*.rs" -type f \
+                | grep -v "/target/" | grep -v "/fuzz/" \
+                | grep -v "/tests/" | grep -v "/benches/"); do
+              # Skip lines inside #[cfg(test)] mod tests blocks
+              n=$(awk '
+                /#\[cfg\(test\)\]|^mod tests/ { in_test=1 }
+                /^}/ && in_test { in_test=0; next }
+                !in_test && (/\.unwrap\(\)/ || /\.expect\(/) { count++ }
+                END { print count+0 }
+              ' "$f")
+              ACTUAL=$((ACTUAL + n))
+          done
+          echo "Production unwrap/expect: $ACTUAL (budget: $BUDGET)"
+          if [ "$ACTUAL" -gt "$BUDGET" ]; then
+              echo "::error::unwrap/expect budget exceeded: $ACTUAL > $BUDGET"
+              echo "If new unwrap is provably-safe, update docs/UNWRAP_TRIAGE.md and bump budget."
+              exit 1
+          fi
+
+  # ─── Coverage ──────────────────────────────────────────────────────────────
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: llvm-tools-preview }
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev \
+            libxcb-randr0-dev libasound2-dev libpulse-dev pkg-config \
+            libgtk-3-dev libwebkit2gtk-4.1-dev
+      - run: cargo install cargo-llvm-cov --locked --quiet
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info \
+              --exclude miru-bench --ignore-filename-regex "platform/(windows|macos)"
+      - uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+
+  # ─── Frontend build (Tauri UI) ─────────────────────────────────────────────
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm', cache-dependency-path: crates/miru-client/ui/package-lock.json }
+      - working-directory: crates/miru-client/ui
+        run: |
+          npm ci || npm install
+          npm run build
+        continue-on-error: true   # UI is in early dev; don't block other jobs
+
+  # ─── Benchmarks (informational) ────────────────────────────────────────────
+  bench:
+    name: Benchmark Smoke Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench -p miru-bench -- --quick
+
+  # ─── Release builds (main only) ────────────────────────────────────────────
+  build:
+    name: Release Build (${{ matrix.target }})
+    if: github.ref == 'refs/heads/main'
+    needs: [lint, test, audit]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev \
+            libxcb-randr0-dev libasound2-dev libpulse-dev pkg-config
+
+      - name: Cross-compile setup (Linux ARM)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p ~/.cargo
+          echo "[target.aarch64-unknown-linux-gnu]" >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p miru-host
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p miru-signal
+      - run: cargo build --release --locked --target ${{ matrix.target }} -p miru-mcp
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: miru-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/miru-*
+          retention-days: 7
