@@ -1,5 +1,8 @@
 # Miru 改善計画
 
+> 2026-06 更新: 詳細な長所短所レビューと改善記録は
+> [`docs/PRODUCT_REVIEW.md`](docs/PRODUCT_REVIEW.md) を参照。
+
 ## 長所
 
 - [x] Rust + Tauri — メモリ安全 + 軽量デスクトップ
@@ -20,11 +23,11 @@
 
 ### P0: リリースブロッカー
 
-- [ ] 1. vpx-sys optional 化 → workspace 全体 `cargo check` 通過
+- [x] 1. vpx-sys optional 化 → workspace 全体 `cargo check` 通過
 - [ ] 2. Tauri CSP 強化 (script-src, frame-src, object-src, isolation, freezePrototype)
 - [ ] 3. Tauri capabilities dir 作成 (per-window 最小権限)
-- [ ] 4. cargo + clippy 全クレート通過
-- [ ] 5. README セキュリティセクション更新 (84 tests, verify_strict, redaction)
+- [x] 4. cargo + clippy 全クレート通過 (fmt / clippy 0 warnings, 173 tests — 2026-06)
+- [x] 5. README セキュリティセクション更新 (173 tests, verify_strict, redaction — 2026-06)
 
 ### P1: 品質ゲート
 

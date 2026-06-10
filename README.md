@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/shizukutanaka/miru/actions/workflows/ci.yml/badge.svg)](https://github.com/shizukutanaka/miru/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-130%2B%20passing-brightgreen.svg)](#状態)
+[![Tests](https://img.shields.io/badge/tests-173%20passing-brightgreen.svg)](#状態)
 [![Build](https://img.shields.io/badge/workspace-17%2F17%20compile-brightgreen.svg)](#状態)
 [![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen.svg)](#状態)
 
@@ -35,11 +35,9 @@
 ## 状態
 
 ```
-Workspace:        17/17 crates compile  ✅
-Warnings:         0 (cargo + clippy)    ✅
-Unit tests:       89/89 passing         ✅
-E2E tests:         5/5 passing          ✅  (実 Xvfb PNG キャプチャ確認)
-Integration:       5/5 passing          ✅
+Workspace:        17/17 crates compile (rustc 1.88, --all-targets)  ✅
+Warnings:         0 (cargo + clippy + rustfmt)                      ✅
+Tests:            173 passing / 0 failing (unit + integration + doc) ✅
 Sandbox:          seccomp syscall=true  ✅  (実機確認)
 Signal register:  Register: XXXX-XXXX  ✅  (実機確認)
 ```
@@ -48,22 +46,22 @@ Signal register:  Register: XXXX-XXXX  ✅  (実機確認)
 
 | Crate | 役割 | Tests |
 |-------|------|-------|
-| `miru-common` | Protocol / Crypto (AEAD + replay) | 30 |
-| `miru-auth` | Ed25519 / Argon2id / TOFU log | 13 |
-| `miru-agent` | Capability token / audit / redact / revocation | 29 |
+| `miru-agent` | Capability token / audit / redact / revocation | 44 |
+| `miru-common` | Protocol / Crypto (AEAD + replay) | 36 |
+| `miru-auth` | Ed25519 / Argon2id / TOFU log | 26 |
+| `miru-mcp` | MCP server (stdio) | 21 |
+| `miru-host` | Host daemon + token CLI | 18 |
+| `miru-transparency` | Merkle + Rekor | 10 |
 | `miru-constellation` | Device graph | 5 |
-| `miru-transparency` | Merkle + Rekor | 9 |
-| `miru-mcp` | MCP server (stdio) | 8 |
+| `miru-transport` | QUIC + WS relay + handshake | 5 |
 | `miru-sandbox` | landlock + seccomp + macOS/Win scaffolding | 4 |
-| `miru-transport` | QUIC + WS relay | — |
-| `miru-codec` | VP9 + HW stubs | — |
+| `miru-audio` | Opus 1/2/5.1/7.1 | 3 |
+| `miru-signal` | Rendezvous + relay server | 1 |
+| `miru-codec` | VP9 (feature `vpx`) + JPEG fallback + HW stubs | — |
 | `miru-capture` | DXGI / SCK / X11 SHM | — |
 | `miru-input` | SendInput / CGEvent / uinput | — |
-| `miru-audio` | Opus 1/2/5.1/7.1 | — |
 | `miru-discovery` | mDNS | — |
-| `miru-host` | Host daemon | — |
 | `miru-client` | Tauri viewer | — |
-| `miru-signal` | Rendezvous + relay server | — |
 | `miru-bench` | Criterion benchmarks | — |
 
 ## セキュリティ
@@ -88,7 +86,7 @@ Signal register:  Register: XXXX-XXXX  ✅  (実機確認)
 sudo apt install libx11-dev libxcb-shm0-dev libopus-dev libvpx-dev \
                  libasound2-dev libgtk-3-dev pkg-config
 
-# ビルド (rustc ≥ 1.80)
+# ビルド (rustc ≥ 1.88 — rust-toolchain.toml が自動選択)
 cargo build --workspace --release
 
 # シグナルサーバー
@@ -158,7 +156,8 @@ Rekor anchoring で外部固定される (ADR 0010 周辺)。
 | [`docs/INCIDENT_RESPONSE.md`](docs/INCIDENT_RESPONSE.md) | P0-P3 + 5 scenarios |
 | [`SECURITY.md`](SECURITY.md) | 報告手順 + PGP + 90日 SLA |
 | [`docs/UNWRAP_TRIAGE.md`](docs/UNWRAP_TRIAGE.md) | 24 unwrap 全件分類 |
-| [`docs/adr/`](docs/adr/) | ADR 0001-0009 (設計判断記録) |
+| [`docs/adr/`](docs/adr/) | ADR 0001-0012 (設計判断記録) |
+| [`docs/PRODUCT_REVIEW.md`](docs/PRODUCT_REVIEW.md) | v0.1.0 長所短所レビュー + 改善ロードマップ |
 
 ## ライセンス
 
