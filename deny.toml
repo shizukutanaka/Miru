@@ -14,7 +14,36 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 # Hard fail on known vulnerabilities and unmaintained crates.
 yanked = "deny"
-ignore = []
+# All entries below are "unmaintained" notices (NOT vulnerabilities — those
+# stay hard-fail). They are transitive and currently unavoidable:
+#   - RUSTSEC-2024-041x/0420: gtk-rs GTK3 bindings, pulled in by Tauri 2 / wry
+#     on Linux. Tauri's Linux backend is GTK3 until upstream moves to GTK4.
+#   - RUSTSEC-2024-0370: proc-macro-error (via gtk3 macro stack).
+#   - RUSTSEC-2025-0057: fxhash (via wry/tao stack).
+#   - RUSTSEC-2025-0075/0080/0081/0098/0100: misc transitive (paste, glib
+#     interaction, etc.) — re-audit on every Tauri upgrade.
+#   - RUSTSEC-2026-0150: audiopus_sys (Opus FFI) — replace when a maintained
+#     binding or pure-Rust Opus encoder is viable.
+ignore = [
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2024-0411",
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0414",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0417",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    "RUSTSEC-2025-0057",
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+    "RUSTSEC-2026-0150",
+]
 
 # ─── Licenses ────────────────────────────────────────────────────────────────
 [licenses]
@@ -35,6 +64,7 @@ allow = [
     "MPL-2.0",          # narrowly scoped Mozilla source files; weakly copyleft
     "OpenSSL",          # for ring's vendored copy
     "BSL-1.0",
+    "CDLA-Permissive-2.0",  # webpki-roots: Mozilla CA bundle data license (permissive)
 ]
 exceptions = []
 
@@ -48,9 +78,15 @@ license-files = [
 # ─── Banned crates ────────────────────────────────────────────────────────────
 [bans]
 multiple-versions = "warn"
+# Path-only workspace deps (miru-* = { path = ".." }) carry no version and
+# would otherwise trip the wildcard ban.
 wildcards = "deny"
+allow-wildcard-paths = true
 highlight = "all"
-allow-build-scripts = []   # an empty allowlist means "no specific allowance" — checked manually
+# NOTE: `allow-build-scripts = []` previously appeared here, but in cargo-deny
+# an empty list means "ban ALL build scripts" (ring, libc, serde, ... would all
+# fail). Build scripts are unrestricted; supply-chain review happens via
+# `deny check advisories` + the explicit ban list below.
 
 # Crates that are deliberately excluded.
 deny = [
@@ -60,7 +96,9 @@ deny = [
     { crate = "rustls-native-certs:<0.7", reason = "older versions miss CA validation tightening" },
     # Insecure crypto primitives — never accept these into the dep tree.
     { crate = "md5", reason = "weak hash; use ring::digest::SHA256 or stronger" },
-    { crate = "sha1", reason = "weak hash" },
+    # sha1 is mandated by RFC 6455 for the WebSocket opening handshake
+    # (Sec-WebSocket-Accept) — a non-security use. Allow it only there.
+    { crate = "sha1", reason = "weak hash — permitted solely for the RFC 6455 WS handshake", wrappers = ["tungstenite", "axum"] },
 ]
 
 # Multiple-version overrides — known transitive collisions we tolerate.
