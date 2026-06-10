@@ -1,0 +1,42 @@
+[package]
+name = "miru-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "miru-host"
+path = "src/main.rs"
+
+[dependencies]
+miru-common = { workspace = true }
+miru-capture = { workspace = true }
+miru-transport = { workspace = true }
+miru-input = { workspace = true }
+miru-codec = { workspace = true }
+miru-auth = { path = "../miru-auth" }
+miru-agent = { path = "../miru-agent" }
+miru-transparency = { path = "../miru-transparency" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+crossbeam-channel = { workspace = true }
+flume = { workspace = true }
+parking_lot = { workspace = true }
+dirs = "5"
+bytes = { workspace = true }
+ring = { workspace = true }
+base64 = "0.22"
+uuid = { workspace = true }
+miru-sandbox = { path = "../miru-sandbox" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+rand = { workspace = true }
+ed25519-dalek = { workspace = true }

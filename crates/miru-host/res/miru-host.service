@@ -1,0 +1,30 @@
+[Unit]
+Description=Miru remote desktop host
+Documentation=https://github.com/shizukutanaka/miru
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=miru
+Group=miru
+ExecStart=/usr/local/bin/miru-host --headless
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/etc/miru /var/log/miru
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[package]
+name = "miru-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+miru-common = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+audiopus = "0.3.0-rc.0"   # Pure Rust Opus bindings
+cpal = { workspace = true }
+crossbeam-channel = { workspace = true }

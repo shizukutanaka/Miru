@@ -1,0 +1,19 @@
+[package]
+name = "miru-codec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+miru-common = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }
+vpx-sys = { version = "0.1", optional = true }
+image = { workspace = true }
+
+[features]
+default = []
+vpx = ["dep:vpx-sys"]   # VP9 encoding/decoding via libvpx
+ffmpeg = []              # Hardware encoding via ffmpeg-next (deferred to v0.3)

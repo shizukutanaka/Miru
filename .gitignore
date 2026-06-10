@@ -1,0 +1,30 @@
+/target
+**/*.rs.bk
+# Cargo.lock is intentionally tracked — Miru is a workspace of binaries,
+# so the lockfile must be committed for reproducible builds and supply-chain
+# integrity. See docs/CRYPTO.md §1.
+
+# Tauri / frontend
+/crates/miru-client/ui/node_modules
+/crates/miru-client/ui/dist
+/crates/miru-client/ui/.vite
+/crates/miru-client/src-tauri/target
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Local config
+.env
+.env.local
+
+# Test artifacts
+*.profraw
+fuzz/corpus
+fuzz/artifacts

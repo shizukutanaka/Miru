@@ -1,0 +1,22 @@
+[package]
+name = "miru-constellation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Multi-device presence and capability federation for Miru."
+
+[dependencies]
+miru-common = { workspace = true }
+miru-auth = { path = "../miru-auth" }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ed25519-dalek = { workspace = true }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+base64 = "0.22"
+
+[dev-dependencies]
+rand = { workspace = true }

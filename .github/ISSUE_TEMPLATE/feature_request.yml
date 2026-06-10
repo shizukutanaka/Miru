@@ -1,0 +1,57 @@
+name: 機能要望 / Feature request
+description: 新機能や改善を提案
+title: "[feat] "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提案ありがとうございます。Miru は意図的に機能を絞ったプロダクトです。
+        既存の4軸 (AI Agent / Verifiable E2E / Constellation / Temporal) や
+        基本的な remote desktop 機能を強化する提案を歓迎します。
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 解決したい課題 / Problem
+      placeholder: |
+        どんな状況で困りましたか。
+        例: 「複数のリモートホストを切り替えるとき、毎回 ID を入力するのが手間」
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 提案 / Proposed solution
+      placeholder: |
+        どのような機能で解決できますか。UI 案や API 案を歓迎。
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 代替案 / Alternatives considered
+      description: 他にどんな解決策を検討しましたか
+
+  - type: dropdown
+    id: axis
+    attributes:
+      label: 関連する軸 / Related axis
+      options:
+        - 既存の4軸を強化
+        - 基本的な remote desktop 機能
+        - DX (開発者体験)
+        - ドキュメント
+        - その他
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: 貢献意思
+      options:
+        - label: 自分でこれを実装する PR を出すつもりがある
+        - label: ベータテストに協力できる

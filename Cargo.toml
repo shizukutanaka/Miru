@@ -1,0 +1,90 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/miru-common",
+    "crates/miru-capture",
+    "crates/miru-codec",
+    "crates/miru-transport",
+    "crates/miru-input",
+    "crates/miru-audio",
+    "crates/miru-auth",
+    "crates/miru-agent",
+    "crates/miru-constellation",
+    "crates/miru-discovery",
+    "crates/miru-mcp",
+    "crates/miru-transparency",
+    "crates/miru-bench",
+    "crates/miru-host",
+    "crates/miru-client",
+    "crates/miru-signal",
+    "crates/miru-sandbox",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+authors = ["shizukutanaka"]
+license = "MIT"
+repository = "https://github.com/shizukutanaka/miru"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+quinn = "0.11"
+rustls = { version = "0.23", features = ["ring"] }
+axum = { version = "0.7", features = ["ws"] }
+tungstenite = "0.24"
+tokio-tungstenite = "0.24"
+str0m = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+prost = "0.13"
+bytes = "1"
+ring = "0.17"
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+# vpx-sys removed — now optional in miru-codec via the `vpx` feature gate.
+cpal = "0.15"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+dashmap = "6"
+once_cell = "1"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+flume = "0.11"
+smallvec = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+base64 = "0.22"
+async-trait = "0.1"
+futures-util = "0.3"
+argon2 = "0.5"
+zeroize = { version = "1", features = ["derive"] }
+webpki-roots = "0.26"
+libc = "0.2"
+
+miru-common = { path = "crates/miru-common" }
+miru-capture = { path = "crates/miru-capture" }
+miru-codec = { path = "crates/miru-codec" }
+miru-transport = { path = "crates/miru-transport" }
+miru-input = { path = "crates/miru-input" }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+debug = true
+
+[profile.bench]
+opt-level = 3
+lto = "thin"

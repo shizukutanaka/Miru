@@ -1,0 +1,22 @@
+[package]
+name = "miru-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+miru-common = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+ring = { workspace = true }
+ed25519-dalek = { workspace = true }
+rand = { workspace = true }
+base64 = "0.22"
+argon2 = "0.5"          # Memory-hard KDF; RustDesk used insufficient PBKDF2 → CVE-2026-30785
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"

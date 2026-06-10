@@ -1,0 +1,37 @@
+{
+    "version": "0.1.0",
+    "description": "AI-era secure PC fabric: remote desktop + AI agent + verifiable E2E + constellation",
+    "homepage": "https://miru.app",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/shizukutanaka/miru/releases/download/v0.1.0/miru-0.1.0-x86_64-pc-windows-msvc.zip",
+            "hash": "REPLACE_WITH_RELEASE_SHA256"
+        },
+        "arm64": {
+            "url": "https://github.com/shizukutanaka/miru/releases/download/v0.1.0/miru-0.1.0-aarch64-pc-windows-msvc.zip",
+            "hash": "REPLACE_WITH_RELEASE_SHA256"
+        }
+    },
+    "bin": [
+        "miru-host.exe",
+        "miru-mcp.exe",
+        "miru-signal.exe"
+    ],
+    "checkver": {
+        "github": "https://github.com/shizukutanaka/miru"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/shizukutanaka/miru/releases/download/v$version/miru-$version-x86_64-pc-windows-msvc.zip"
+            },
+            "arm64": {
+                "url": "https://github.com/shizukutanaka/miru/releases/download/v$version/miru-$version-aarch64-pc-windows-msvc.zip"
+            }
+        },
+        "hash": {
+            "url": "$baseurl/SHA256SUMS"
+        }
+    }
+}

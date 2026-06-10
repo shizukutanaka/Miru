@@ -1,0 +1,31 @@
+[package]
+name = "miru-transport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+miru-common = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+quinn = { workspace = true }
+rustls = { workspace = true }
+tokio-tungstenite = { workspace = true }
+dashmap = { workspace = true }
+uuid = { workspace = true }
+rand = { workspace = true }
+ring = { workspace = true }
+parking_lot = { workspace = true }
+flume = { workspace = true }
+futures-util = "0.3"
+async-trait = "0.1"
+base64 = "0.22"
+rcgen = "0.13"
+ed25519-dalek = { workspace = true }
+webpki-roots = "0.26"

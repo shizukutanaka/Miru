@@ -1,0 +1,48 @@
+[package]
+name = "miru-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "miru_client_lib"
+path = "src-tauri/src/lib.rs"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "miru-client"
+path = "src-tauri/src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+miru-common = { workspace = true }
+miru-transport = { workspace = true }
+miru-codec = { workspace = true }
+miru-input = { workspace = true }
+miru-auth = { path = "../miru-auth" }
+miru-audio = { path = "../miru-audio" }
+miru-agent = { path = "../miru-agent" }
+miru-transparency = { path = "../miru-transparency" }
+miru-constellation = { path = "../miru-constellation" }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-clipboard-manager = "2"
+
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+ring = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+flume = { workspace = true }
+parking_lot = { workspace = true }
+dirs = "5"
+uuid = { workspace = true }
+ed25519-dalek = { workspace = true }
+base64 = "0.22"

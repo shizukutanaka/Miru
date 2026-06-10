@@ -1,0 +1,37 @@
+# Maintainer: shizukutanaka <hello@miru.app>
+pkgname=miru
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="AI-era secure PC fabric: remote desktop + AI agent + verifiable E2E + constellation"
+arch=('x86_64' 'aarch64')
+url="https://miru.app"
+license=('MIT')
+depends=('libx11' 'libxcb' 'alsa-lib' 'pulseaudio')
+makedepends=('rust' 'cargo' 'pkgconf')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/shizukutanaka/miru/archive/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    cargo build --release --workspace --locked --bin miru-host --bin miru-mcp --bin miru-signal
+}
+
+check() {
+    cd "$pkgname-$pkgver"
+    cargo test --release --locked --workspace
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+
+    install -Dm755 target/release/miru-host  "$pkgdir/usr/bin/miru-host"
+    install -Dm755 target/release/miru-mcp   "$pkgdir/usr/bin/miru-mcp"
+    install -Dm755 target/release/miru-signal "$pkgdir/usr/bin/miru-signal"
+
+    install -Dm644 LICENSE  "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md  "$pkgdir/usr/share/doc/$pkgname/README.md"
+
+    # systemd unit
+    install -Dm644 crates/miru-host/res/miru-host.service \
+        "$pkgdir/usr/lib/systemd/system/miru-host.service"
+}

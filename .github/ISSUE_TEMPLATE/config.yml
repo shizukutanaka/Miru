@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🔒 セキュリティ脆弱性 / Security vulnerability
+    url: https://github.com/shizukutanaka/miru/security/advisories/new
+    about: 公開 Issue ではなく Security Advisories で報告してください
+  - name: 💬 質問 / Questions
+    url: https://github.com/shizukutanaka/miru/discussions
+    about: 使い方の質問は Discussions へ
+  - name: 📖 ドキュメント / Documentation
+    url: https://miru.app/docs
+    about: 始めるにはまずドキュメントを

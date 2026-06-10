@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 80" role="img" aria-label="Miru">
+  <defs>
+    <linearGradient id="m_grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00C4CC"/>
+      <stop offset="100%" stop-color="#008A91"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Logo mark (compact eye) -->
+  <g transform="translate(8, 8) scale(0.25)">
+    <rect x="16" y="16" width="224" height="224" rx="48" stroke="#00C4CC" stroke-opacity="0.55" stroke-width="8" fill="none"/>
+    <rect x="56" y="56" width="144" height="144" rx="32" stroke="#00C4CC" stroke-opacity="0.85" stroke-width="8" fill="none"/>
+    <rect x="92" y="92" width="72" height="72" rx="18" fill="url(#m_grad)"/>
+    <circle cx="128" cy="128" r="10" fill="#001012"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="80" y="52"
+        font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif"
+        font-weight="700"
+        font-size="40"
+        letter-spacing="-1.2"
+        fill="#FFFFFF">Miru</text>
+</svg>

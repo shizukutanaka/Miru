@@ -1,0 +1,19 @@
+[package]
+name = "miru-discovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "mDNS-based local-network device discovery for Miru constellations."
+
+[dependencies]
+miru-common = { workspace = true }
+miru-constellation = { path = "../miru-constellation" }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+mdns-sd = "0.11"
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+flume = { workspace = true }

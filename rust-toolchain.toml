@@ -1,0 +1,13 @@
+# Pin the Rust toolchain so contributor environments and CI agree.
+# This is the canonical source of truth — `rust-version` in Cargo.toml is
+# the MSRV for downstream consumers; this file is what we actually build with.
+#
+# Update protocol:
+#   1. Bump in a dedicated PR with no other changes.
+#   2. Update Cargo.toml rust-version if MSRV changes.
+#   3. Re-run cargo audit + cargo deny on the new toolchain before merge.
+
+[toolchain]
+channel = "1.80"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,140 @@
+#![cfg(target_os = "macos")]
+//! macOS input injection via CoreGraphics CGEvent.
+//!
+//! Requires: Accessibility permission (System Preferences → Privacy → Accessibility)
+//! Prompts automatically on first use.
+
+use anyhow::Result;
+use core_graphics::{
+    event::{
+        CGEvent, CGEventFlags, CGEventTapLocation, CGEventType,
+        CGKeyCode, CGMouseButton, ScrollEventUnit,
+    },
+    event_source::{CGEventSource, CGEventSourceStateID},
+    geometry::CGPoint,
+};
+use miru_common::message::{InputEvent, InputKind, MouseButton};
+
+fn event_source() -> Result<CGEventSource> {
+    CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|_| anyhow::anyhow!("CGEventSource creation failed"))
+}
+
+pub fn inject(event: &InputEvent) -> Result<()> {
+    let src = event_source()?;
+
+    match &event.kind {
+        InputKind::MouseMove { x, y, .. } => {
+            let pt = screen_point(*x, *y);
+            let ev = CGEvent::new_mouse_event(
+                src, CGEventType::MouseMoved, pt, CGMouseButton::Left,
+            ).map_err(|_| anyhow::anyhow!("mouse move event"))?;
+            ev.post(CGEventTapLocation::HID);
+        }
+
+        InputKind::MouseDown { button, x, y } => {
+            let pt = screen_point(*x, *y);
+            let (ev_type, cg_btn) = mouse_down_type(button);
+            let ev = CGEvent::new_mouse_event(src, ev_type, pt, cg_btn)
+                .map_err(|_| anyhow::anyhow!("mouse down event"))?;
+            ev.post(CGEventTapLocation::HID);
+        }
+
+        InputKind::MouseUp { button, x, y } => {
+            let pt = screen_point(*x, *y);
+            let (ev_type, cg_btn) = mouse_up_type(button);
+            let ev = CGEvent::new_mouse_event(src, ev_type, pt, cg_btn)
+                .map_err(|_| anyhow::anyhow!("mouse up event"))?;
+            ev.post(CGEventTapLocation::HID);
+        }
+
+        InputKind::Scroll { dy, dx, .. } => {
+            let ev = CGEvent::new_scroll_event(
+                src,
+                ScrollEventUnit::Line,
+                2,
+                (*dy * 3.0) as i32,
+                (*dx * 3.0) as i32,
+                0,
+            ).map_err(|_| anyhow::anyhow!("scroll event"))?;
+            ev.post(CGEventTapLocation::HID);
+        }
+
+        InputKind::KeyDown { key, modifiers } => {
+            let ev = CGEvent::new_keyboard_event(src, *key as CGKeyCode, true)
+                .map_err(|_| anyhow::anyhow!("keydown event"))?;
+            ev.set_flags(modifier_flags(*modifiers));
+            ev.post(CGEventTapLocation::HID);
+        }
+
+        InputKind::KeyUp { key, modifiers } => {
+            let ev = CGEvent::new_keyboard_event(src, *key as CGKeyCode, false)
+                .map_err(|_| anyhow::anyhow!("keyup event"))?;
+            ev.set_flags(modifier_flags(*modifiers));
+            ev.post(CGEventTapLocation::HID);
+        }
+
+        InputKind::Text { text } => {
+            // Post Unicode text directly
+            for ch in text.chars() {
+                let src2 = event_source()?;
+                if let Ok(ev) = CGEvent::new_keyboard_event(src2, 0, true) {
+                    let s: Vec<u16> = ch.encode_utf16(&mut [0u16; 2]).to_vec();
+                    ev.set_string_from_utf16_unchecked(&s);
+                    ev.post(CGEventTapLocation::HID);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn screen_point(x: f32, y: f32) -> CGPoint {
+    // x, y are 0.0–1.0 normalized — scale to primary screen resolution
+    // TODO: query actual screen size via CGDisplay
+    CGPoint::new((x * 2560.0) as f64, (y * 1440.0) as f64)
+}
+
+fn modifier_flags(mods: u8) -> CGEventFlags {
+    let mut flags = CGEventFlags::empty();
+    if mods & 0x01 != 0 { flags |= CGEventFlags::CGEventFlagShift; }
+    if mods & 0x02 != 0 { flags |= CGEventFlags::CGEventFlagControl; }
+    if mods & 0x04 != 0 { flags |= CGEventFlags::CGEventFlagAlternate; }
+    if mods & 0x08 != 0 { flags |= CGEventFlags::CGEventFlagCommand; }
+    flags
+}
+
+fn mouse_down_type(btn: &MouseButton) -> (CGEventType, CGMouseButton) {
+    match btn {
+        MouseButton::Left => (CGEventType::LeftMouseDown, CGMouseButton::Left),
+        MouseButton::Right => (CGEventType::RightMouseDown, CGMouseButton::Right),
+        _ => (CGEventType::OtherMouseDown, CGMouseButton::Center),
+    }
+}
+
+fn mouse_up_type(btn: &MouseButton) -> (CGEventType, CGMouseButton) {
+    match btn {
+        MouseButton::Left => (CGEventType::LeftMouseUp, CGMouseButton::Left),
+        MouseButton::Right => (CGEventType::RightMouseUp, CGMouseButton::Right),
+        _ => (CGEventType::OtherMouseUp, CGMouseButton::Center),
+    }
+}
+
+pub fn set_clipboard(text: &str) -> Result<()> {
+    std::process::Command::new("pbcopy")
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut c| {
+            use std::io::Write;
+            if let Some(stdin) = c.stdin.as_mut() {
+                stdin.write_all(text.as_bytes())?;
+            }
+            c.wait()
+        })?;
+    Ok(())
+}
+
+pub fn get_clipboard() -> Result<String> {
+    let out = std::process::Command::new("pbpaste").output()?;
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}

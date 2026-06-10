@@ -1,0 +1,89 @@
+name: バグ報告 / Bug report
+description: 動作の不具合を報告
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        報告ありがとうございます。セキュリティ脆弱性は **Issue ではなく**
+        [SECURITY.md](https://github.com/shizukutanaka/miru/blob/main/SECURITY.md)
+        の手順で報告してください。
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 何が起きましたか / What happened
+      placeholder: 期待した動作と、実際の動作
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 再現手順 / Steps to reproduce
+      placeholder: |
+        1. miru-host を起動
+        2. ビューアから接続
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Miru バージョン / Version
+      placeholder: "0.1.0 (git: abc1234)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - Windows 10
+        - Windows 11
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Ubuntu / Debian
+        - Fedora / RHEL
+        - Arch
+        - Other Linux
+        - iOS
+        - Android
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: コンポーネント / Component
+      options:
+        - miru-host
+        - miru-client (viewer)
+        - miru-mcp
+        - miru-signal
+        - miru-host + miru-client (両方)
+        - その他
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: ログ / Logs
+      description: |
+        `MIRU_LOG=debug miru-host` で再現したログ。
+        個人情報 (IP / 鍵 / トークン) は伏せ字に。
+      render: shell
+
+  - type: checkboxes
+    id: acks
+    attributes:
+      label: 確認事項
+      options:
+        - label: 既存の Issue を検索して重複がないことを確認した
+          required: true
+        - label: 個人情報を含めていないことを確認した
+          required: true

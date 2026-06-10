@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+  miru-signal:
+    image: ghcr.io/shizukutanaka/miru-signal:latest
+    # Or build locally:
+    # build:
+    #   context: .
+    #   dockerfile: crates/miru-signal/Dockerfile
+    container_name: miru-signal
+    restart: unless-stopped
+    ports:
+      - "21115:21115"   # rendezvous
+      - "21117:21117"   # relay
+    environment:
+      MIRU_LOG: info
+      # Set to your server's public IP or domain
+      MIRU_PUBLIC_HOST: ${MIRU_PUBLIC_HOST:-localhost}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:21115/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Optional: Nginx reverse proxy (HTTPS)
+  # nginx:
+  #   image: nginx:alpine
+  #   ports: ["443:443", "80:80"]
+  #   volumes: ["./nginx.conf:/etc/nginx/nginx.conf:ro", "./certs:/etc/certs:ro"]
+  #   depends_on: [miru-signal]
