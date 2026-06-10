@@ -40,6 +40,12 @@ pub struct RevocationEntry {
     pub reason: String,
 }
 
+/// Upper bound on entries loaded into memory. Tokens are TTL-capped at 15
+/// minutes, so a list anywhere near this size means the file is corrupted or
+/// an attacker is using it as a memory-exhaustion vector — refuse to start
+/// rather than OOM.
+pub const MAX_REVOKED_ENTRIES: usize = 1_000_000;
+
 pub struct RevocationList {
     path: PathBuf,
     revoked: RwLock<HashSet<Uuid>>,
@@ -62,6 +68,11 @@ impl RevocationList {
                 let entry: RevocationEntry = serde_json::from_str(&line)
                     .with_context(|| format!("parse revocation entry line {}", idx + 1))?;
                 revoked.insert(entry.jti);
+                if revoked.len() > MAX_REVOKED_ENTRIES {
+                    anyhow::bail!(
+                        "revocation list exceeds {MAX_REVOKED_ENTRIES} entries — refusing to load (corrupted or hostile file?)"
+                    );
+                }
             }
         }
         Ok(Self {
@@ -74,7 +85,7 @@ impl RevocationList {
     pub fn revoke(&self, jti: Uuid, reason: impl Into<String>) -> Result<()> {
         let reason = reason.into();
         {
-            let mut g = self.revoked.write().map_err(|e| anyhow::anyhow!("poisoned: {}", e))?;
+            let mut g = self.revoked.write().map_err(|e| anyhow::anyhow!("poisoned: {e}"))?;
             if !g.insert(jti) {
                 // Already revoked; don't double-write.
                 return Ok(());

@@ -10,7 +10,7 @@
 //!
 //! Token format (compact, no JWT):
 //!   `miru-agent.<base64url(payload)>.<base64url(ed25519_sig)>`
-//!   payload = bincode-serialized AgentTokenPayload
+//!   payload = JSON-serialized (serde_json) AgentTokenPayload
 //!
 //! This is structurally similar to JWT but uses Ed25519 (fast, modern) and
 //! a compact binary payload (no JSON overhead, no algorithm-confusion bugs).
@@ -188,6 +188,10 @@ pub struct AgentToken {
 /// defense-in-depth for any path that calls `issue` directly.
 pub const MAX_TTL_SECS: u64 = 15 * 60;
 
+/// Tolerance for `iat` lying in the future, to absorb NTP jitter between the
+/// issuing host and a verifying process on another clock.
+pub const MAX_CLOCK_SKEW_SECS: u64 = 300;
+
 impl AgentToken {
     pub fn issue(
         signing_key: &SigningKey,
@@ -239,13 +243,21 @@ impl AgentToken {
             bail!("token issuer mismatch");
         }
 
+        // Logical consistency — our issuer always produces iat < exp, but
+        // parse_and_verify accepts external input and must not trust it.
+        if payload.iat > payload.exp {
+            bail!("malformed token: iat ({}) is after exp ({})", payload.iat, payload.exp);
+        }
+
         // Check expiration
         let now = unix_now();
         if now > payload.exp {
             bail!("token expired (exp={}, now={})", payload.exp, now);
         }
-        if now + 300 < payload.iat {
-            bail!("token issued-at is in the future (clock skew?)");
+        if now + MAX_CLOCK_SKEW_SECS < payload.iat {
+            bail!(
+                "token issued-at is in the future by more than {MAX_CLOCK_SKEW_SECS}s (malformed or clock skew)"
+            );
         }
 
         Ok(Self { payload, signature })
@@ -361,7 +373,6 @@ mod tests {
         );
         // Force-expire
         token.payload.exp = unix_now() - 10;
-        let s = token.to_string();
 
         // Re-sign with new payload
         let sig = key.sign(&canonical_payload_bytes(&token.payload));
@@ -371,6 +382,53 @@ mod tests {
         );
 
         assert!(AgentToken::parse_and_verify(&new_s, &pk).is_err());
+    }
+
+    #[test]
+    fn iat_after_exp_rejected() {
+        let key = make_key();
+        let pk = key.verifying_key();
+
+        let mut token = AgentToken::issue(
+            &key, "test", Capability::assistant_default(),
+            std::time::Duration::from_secs(60), None,
+        );
+        // Forge a logically impossible payload: issued after it expires,
+        // with `now` inside the [exp, iat] gap so only the iat<=exp check
+        // can catch it.
+        token.payload.iat = unix_now() + 200;
+        token.payload.exp = unix_now() + 100;
+        let sig = key.sign(&canonical_payload_bytes(&token.payload));
+        let s = format!("miru-agent.{}.{}",
+            B64URL.encode(canonical_payload_bytes(&token.payload)),
+            B64URL.encode(sig.to_bytes()),
+        );
+
+        let err = match AgentToken::parse_and_verify(&s, &pk) {
+            Err(e) => e,
+            Ok(_) => panic!("token with iat > exp must be rejected"),
+        };
+        assert!(err.to_string().contains("iat"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn far_future_iat_rejected() {
+        let key = make_key();
+        let pk = key.verifying_key();
+
+        let mut token = AgentToken::issue(
+            &key, "test", Capability::assistant_default(),
+            std::time::Duration::from_secs(60), None,
+        );
+        token.payload.iat = unix_now() + MAX_CLOCK_SKEW_SECS + 100;
+        token.payload.exp = token.payload.iat + 60;
+        let sig = key.sign(&canonical_payload_bytes(&token.payload));
+        let s = format!("miru-agent.{}.{}",
+            B64URL.encode(canonical_payload_bytes(&token.payload)),
+            B64URL.encode(sig.to_bytes()),
+        );
+
+        assert!(AgentToken::parse_and_verify(&s, &pk).is_err());
     }
 
     #[test]
@@ -405,7 +463,7 @@ mod tests {
             assert_eq!(
                 cap.security_level() == SecurityLevel::Dangerous,
                 cap.requires_confirmation(),
-                "mismatch for {:?}", cap
+                "mismatch for {cap:?}"
             );
         }
     }

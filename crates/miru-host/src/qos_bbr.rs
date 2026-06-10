@@ -148,11 +148,10 @@ impl BbrQos {
         match self.phase {
             Phase::Startup => {
                 // Exit when BW growth plateaus (last 3 samples within 10%)
-                if self.bw_samples.len() >= 3 {
-                    let last = self.bw_samples.back().unwrap().1 as f32;
-                    let third_last = self.bw_samples
-                        .iter().rev().nth(2).unwrap().1 as f32;
-                    if last < third_last * 1.1 {
+                if let (Some(&(_, last)), Some(&(_, third_last))) =
+                    (self.bw_samples.back(), self.bw_samples.iter().rev().nth(2))
+                {
+                    if (last as f32) < third_last as f32 * 1.1 {
                         self.phase = Phase::Drain;
                     }
                 }
@@ -161,11 +160,15 @@ impl BbrQos {
                 self.phase = Phase::ProbeBw { gain_idx: 0 };
             }
             Phase::ProbeBw { gain_idx } => {
-                // Periodically dip to ProbeRtt to refresh rtt_min
-                if self.rtt_samples.is_empty() ||
-                   self.rtt_samples.back().unwrap().0
-                       .duration_since(*self.rtt_samples.front().map(|(t,_)|t).unwrap_or(&Instant::now()))
-                       > RTT_WINDOW {
+                // Periodically dip to ProbeRtt to refresh rtt_min.
+                // No samples at all also counts as "stale".
+                let window_stale = match (self.rtt_samples.front(), self.rtt_samples.back()) {
+                    (Some((first, _)), Some((last, _))) => {
+                        last.duration_since(*first) > RTT_WINDOW
+                    }
+                    _ => true,
+                };
+                if window_stale {
                     self.phase = Phase::ProbeRtt;
                 } else {
                     self.phase = Phase::ProbeBw { gain_idx: gain_idx.wrapping_add(1) };

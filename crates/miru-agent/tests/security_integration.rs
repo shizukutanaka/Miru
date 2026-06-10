@@ -82,7 +82,7 @@ fn full_token_lifecycle() {
     // Read back the log file directly; the plaintext MUST NOT appear.
     let raw = std::fs::read_to_string(&log_path).unwrap();
     assert!(!raw.contains("hunter2"),
-        "audit log leaked plaintext! contents: {}", raw);
+        "audit log leaked plaintext! contents: {raw}");
     assert!(raw.contains("text_len"), "expected redaction sentinel `text_len`");
     assert!(raw.contains("text_sha256"), "expected redaction sentinel `text_sha256`");
 
@@ -137,8 +137,8 @@ fn redaction_is_unbypassable() {
         let red = redact_action(cap, action.clone());
         let ser = serde_json::to_string(&red).unwrap();
         // Plaintext patterns that must never survive redaction
-        assert!(!ser.contains("hunter2"), "leaked plaintext for {:?}", cap);
-        assert!(!ser.contains("ssn"), "leaked URL query for {:?}", cap);
+        assert!(!ser.contains("hunter2"), "leaked plaintext for {cap:?}");
+        assert!(!ser.contains("ssn"), "leaked URL query for {cap:?}");
     }
 }
 

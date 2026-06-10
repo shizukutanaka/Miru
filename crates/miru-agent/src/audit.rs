@@ -80,13 +80,20 @@ impl AuditLog {
             ("0".repeat(64), 0)
         };
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
+        let mut opts = OpenOptions::new();
+        opts.create(true).append(true);
+        // Restrictive permissions applied atomically at creation on Unix —
+        // no window where another local user can open the file first.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let file = opts
             .open(path)
             .with_context(|| format!("open audit log {}", path.display()))?;
 
-        // Restrictive permissions on Unix
+        // For pre-existing files, mode() above has no effect — tighten them too.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -227,7 +234,7 @@ pub fn read_all_verified(path: &Path) -> Result<Vec<AuditEntry>> {
             bail!("seq mismatch at line {}: expected {}, got {}", lineno + 1, seq, entry.seq);
         }
         if entry.prev_hash != prev_hash {
-            bail!("chain broken at seq {}: prev_hash mismatch", seq);
+            bail!("chain broken at seq {seq}: prev_hash mismatch");
         }
         prev_hash = entry.hash();
         seq += 1;
@@ -249,7 +256,7 @@ mod hex {
     pub fn encode(bytes: &[u8]) -> String {
         let mut s = String::with_capacity(bytes.len() * 2);
         for b in bytes {
-            s.push_str(&format!("{:02x}", b));
+            s.push_str(&format!("{b:02x}"));
         }
         s
     }

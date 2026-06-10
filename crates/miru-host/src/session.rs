@@ -47,7 +47,7 @@ pub async fn run(
             }
             Some(SignalEvent::IncomingConnection { token, relay_addr, relay_port }) => {
                 info!("Incoming → relay {}:{}", relay_addr, relay_port);
-                let url = format!("ws://{}:{}", relay_addr, relay_port);
+                let url = format!("ws://{relay_addr}:{relay_port}");
                 let cfg = config.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_viewer(url, token, cfg).await {
@@ -112,11 +112,23 @@ async fn handle_viewer(
                         let issuer_pub = config.identity.verifying_key;
                         match AgentToken::parse_and_verify(token_str, &issuer_pub) {
                             Ok(token) => {
-                                let confirm = std::sync::Arc::new(|_: &miru_agent::ConfirmRequest| false);
+                                // The headless host has no UI to raise a prompt,
+                                // so Dangerous-tier actions (ShellExec, FileWrite,
+                                // ClipboardRead, ...) are denied unconditionally;
+                                // Normal/Conditional capabilities granted by the
+                                // token still work. A native confirmation prompt
+                                // is planned for the v0.3 host UI.
+                                let confirm = std::sync::Arc::new(|req: &miru_agent::ConfirmRequest| {
+                                    warn!(
+                                        "Denying {:?} for agent '{}': requires confirmation, but headless host has no prompt UI",
+                                        req.capability, req.agent_label
+                                    );
+                                    false
+                                });
                                 let session = std::sync::Arc::new(
                                     AgentSession::open(token, std::sync::Arc::new(audit), confirm)
                                 );
-                                info!("AI agent session opened — all inputs gated");
+                                info!("AI agent session opened — all inputs gated (dangerous caps require confirmation, unavailable headless)");
                                 Some(AgentHandler::new(session))
                             }
                             Err(e) => {
@@ -301,5 +313,5 @@ fn now_unix() -> u64 { now_ms() / 1000 }
 
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
     let d = ring::digest::digest(&ring::digest::SHA256, pk);
-    d.as_ref()[..8].iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(":")
+    d.as_ref()[..8].iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":")
 }

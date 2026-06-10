@@ -34,6 +34,10 @@ struct DeviceEntry {
     tx: mpsc::Sender<Msg>,
 }
 
+/// How long an issued relay token may sit completely unclaimed before the
+/// slot is reaped. Generous compared to the 30s in-handler peer wait.
+const UNCLAIMED_SLOT_TTL: Duration = Duration::from_secs(60);
+
 /// Two-slot relay session — waits for both host and viewer to connect.
 struct RelaySlot {
     /// Raw byte sender for each side.
@@ -76,8 +80,8 @@ async fn main() -> Result<()> {
         .ok().and_then(|s| s.parse().ok()).unwrap_or(21115);
     let relay_port: u16 = std::env::var("MIRU_RELAY_PORT")
         .ok().and_then(|s| s.parse().ok()).unwrap_or(21117);
-    let rdv_addr: SocketAddr = format!("0.0.0.0:{}", rdv_port).parse()?;
-    let relay_addr: SocketAddr = format!("0.0.0.0:{}", relay_port).parse()?;
+    let rdv_addr: SocketAddr = format!("0.0.0.0:{rdv_port}").parse()?;
+    let relay_addr: SocketAddr = format!("0.0.0.0:{relay_port}").parse()?;
 
     info!("Rendezvous: {}", rdv_addr);
     info!("Relay:      {}", relay_addr);
@@ -166,6 +170,24 @@ async fn process_rdv_msg(
                         viewer: None,
                     });
 
+                    // Reap the slot if neither peer ever claims it — otherwise
+                    // every unanswered Connect leaks an entry forever.
+                    {
+                        let sessions = state.relay_sessions.clone();
+                        let token = token.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(UNCLAIMED_SLOT_TTL).await;
+                            let unclaimed = sessions
+                                .get(&token)
+                                .map(|s| s.host.is_none() && s.viewer.is_none())
+                                .unwrap_or(false);
+                            if unclaimed {
+                                sessions.remove(&token);
+                                warn!("Relay slot {} expired unclaimed", &token[..8]);
+                            }
+                        });
+                    }
+
                     // Notify host
                     let public_host = std::env::var("MIRU_PUBLIC_HOST")
                         .unwrap_or_else(|_| "localhost".to_string());
@@ -194,7 +216,7 @@ async fn process_rdv_msg(
                     warn!("Device {} not found", target);
                     let _ = tx.send(Msg::Error(miru_common::message::ErrorMsg {
                         code: 404,
-                        message: format!("Device '{}' not found or offline", target),
+                        message: format!("Device '{target}' not found or offline"),
                     })).await;
                 }
             }
@@ -257,6 +279,9 @@ async fn relay_session(
             loop {
                 if tokio::time::Instant::now() >= deadline {
                     warn!("Relay timeout waiting for peer");
+                    // Drop the slot so the abandoned token doesn't sit in the
+                    // map forever (the late peer re-creates and times out too).
+                    state.relay_sessions.remove(&token);
                     return;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;

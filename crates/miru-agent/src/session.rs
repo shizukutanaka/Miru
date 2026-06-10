@@ -48,6 +48,11 @@ struct AutoApprove {
     until: Instant,
 }
 
+/// Bounds on the auto-approve cache so a rogue agent cannot grow it without
+/// limit by confirming actions across many distinct (or oversized) scopes.
+const MAX_AUTO_APPROVE_ENTRIES: usize = 1000;
+const MAX_SCOPE_KEY_BYTES: usize = 4096;
+
 impl AgentSession {
     pub fn open(
         token: AgentToken,
@@ -100,7 +105,7 @@ impl AgentSession {
                 &self.token.payload.jti.to_string(),
                 cap, action.clone(), None, AuditOutcome::Denied,
             )?;
-            bail!("capability {:?} not granted", cap);
+            bail!("capability {cap:?} not granted");
         }
 
         // 2. Token must not be expired
@@ -161,7 +166,16 @@ impl AgentSession {
     }
 
     fn add_auto_approve(&self, cap: Capability, scope_key: String, secs: u64) {
-        self.auto_approve.lock().push(AutoApprove {
+        // Oversized scope keys simply skip caching — the action was already
+        // confirmed; the agent just re-confirms next time.
+        if scope_key.len() > MAX_SCOPE_KEY_BYTES {
+            return;
+        }
+        let mut entries = self.auto_approve.lock();
+        if entries.len() >= MAX_AUTO_APPROVE_ENTRIES {
+            entries.remove(0); // FIFO eviction — oldest grant re-confirms
+        }
+        entries.push(AutoApprove {
             capability: cap,
             scope_key,
             until: Instant::now() + std::time::Duration::from_secs(secs),
@@ -182,7 +196,7 @@ impl AgentSession {
     pub fn audit_screen_capture(&self, display: u8, png: &[u8], seq: u64) -> String {
         use ring::digest;
         let d = digest::digest(&digest::SHA256, png);
-        let sha256: String = d.as_ref().iter().map(|b| format!("{:02x}", b)).collect();
+        let sha256: String = d.as_ref().iter().map(|b| format!("{b:02x}")).collect();
 
         let ts_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -220,7 +234,6 @@ mod tests {
     }
 
     fn always_yes() -> ConfirmFn { Arc::new(|_: &ConfirmRequest| true) }
-    fn always_no() -> ConfirmFn { Arc::new(|_: &ConfirmRequest| false) }
 
     #[test]
     fn allows_capability_in_token() {
@@ -298,6 +311,29 @@ mod tests {
     }
 
     #[test]
+    fn auto_approve_cache_is_bounded() {
+        let key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let mut caps = Capability::assistant_default();
+        caps.insert(Capability::FileWrite);
+        let token = AgentToken::issue(
+            &key, "test", caps,
+            std::time::Duration::from_secs(60), None,
+        );
+        let session = AgentSession::open(token, temp_audit(), always_yes());
+
+        // Flood with distinct scopes — the cache must stay capped.
+        for i in 0..(MAX_AUTO_APPROVE_ENTRIES + 100) {
+            session.authorize(Capability::FileWrite, json!({"path": i}), &format!("scope-{i}")).unwrap();
+        }
+        assert!(session.auto_approve.lock().len() <= MAX_AUTO_APPROVE_ENTRIES);
+
+        // Oversized scope keys are never cached.
+        let huge_scope = "x".repeat(MAX_SCOPE_KEY_BYTES + 1);
+        session.authorize(Capability::FileWrite, json!({"path":"z"}), &huge_scope).unwrap();
+        assert!(!session.auto_approve.lock().iter().any(|e| e.scope_key == huge_scope));
+    }
+
+    #[test]
     fn revoked_token_denied_immediately() {
         use crate::revocation::RevocationList;
 
@@ -322,7 +358,7 @@ mod tests {
 
         // After revocation — must fail even with otherwise-valid token.
         let err = session.authorize(Capability::ScreenRead, json!({}), "s").unwrap_err();
-        assert!(err.to_string().contains("revoked"), "expected revoked error, got: {}", err);
+        assert!(err.to_string().contains("revoked"), "expected revoked error, got: {err}");
     }
 
     #[test]
