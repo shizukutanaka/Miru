@@ -21,6 +21,8 @@ pub struct FileTransferConfig {
     /// Per-file size cap.
     pub max_file_bytes: u64,
     /// Total transfer size cap (across all files in one session).
+    /// Enforced by the session layer when session-level accounting is added.
+    #[allow(dead_code)]
     pub max_session_bytes: u64,
 }
 
@@ -120,6 +122,8 @@ pub fn resolve_safe_path(config: &FileTransferConfig, requested: &str) -> Result
 
 /// Open a file for reading WITH explicit symlink rejection.
 /// On Linux, uses O_NOFOLLOW. On Windows, checks reparse points.
+/// Used when the host sends files to the viewer (not yet wired in v0.1).
+#[allow(dead_code)]
 pub fn open_for_read(path: &Path) -> Result<std::fs::File> {
     // Pre-check: symlink_metadata catches symlinks at the leaf.
     let meta =

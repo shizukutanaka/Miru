@@ -5,7 +5,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use miru_auth::{AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer};
 use miru_capture::create_capturer;
 use miru_common::{
-    message::{AudioCodec, Features, Msg, Role},
+    message::{AudioCodec, Features, FileTransfer, Msg, Role},
     session::DeviceId,
 };
 use miru_transport::{
@@ -14,15 +14,153 @@ use miru_transport::{
     signaling::{SignalClient, SignalEvent},
 };
 use parking_lot::Mutex;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    io::{Seek, SeekFrom, Write},
+    path::PathBuf,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::time;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::{
     agent_handler::AgentHandler, backpressure::FrameController, capture_loop,
     input_handler::InputHandler, metrics::SessionMetrics, qos_bbr::BbrQos,
-    recording::SessionRecorder,
+    recording::SessionRecorder, safe_fs,
 };
+
+/// In-progress file receive state.
+struct FileReceive {
+    temp_path: PathBuf,
+    file: std::fs::File,
+    #[allow(dead_code)]
+    expected_size: u64,
+    expected_hash: String,
+}
+
+/// Resolve the directory where received files are saved.
+/// Priority: MIRU_FILE_TRANSFER_DIR → ~/Downloads/Miru
+fn file_transfer_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("MIRU_FILE_TRANSFER_DIR") {
+        return PathBuf::from(d);
+    }
+    dirs::download_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Miru")
+}
+
+/// Handle an incoming FileTransfer message from a viewer with Full permission.
+fn handle_file_transfer(
+    ft: FileTransfer,
+    transfers: &mut HashMap<Uuid, FileReceive>,
+    ft_cfg: &safe_fs::FileTransferConfig,
+) {
+    match ft {
+        FileTransfer::Start { id, name, size, hash } => {
+            if size > ft_cfg.max_file_bytes {
+                warn!("FileTransfer {id}: rejected — {size} bytes exceeds limit");
+                return;
+            }
+            let safe_name = safe_fs::sanitize_filename(&name);
+            if safe_name.is_empty() {
+                warn!("FileTransfer {id}: rejected — empty filename after sanitization");
+                return;
+            }
+            // Resolve the temp path through safe_fs to prevent path-traversal attacks.
+            let temp_name = format!(".{id}.tmp");
+            let temp_path = match safe_fs::resolve_safe_path(ft_cfg, &temp_name) {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!("FileTransfer {id}: path resolution failed: {e}");
+                    return;
+                }
+            };
+            match std::fs::File::create(&temp_path) {
+                Ok(f) => {
+                    info!("FileTransfer {id}: starting '{safe_name}' ({size} bytes)");
+                    transfers.insert(id, FileReceive { temp_path, file: f, expected_size: size, expected_hash: hash });
+                }
+                Err(e) => warn!("FileTransfer {id}: cannot create temp file: {e}"),
+            }
+        }
+        FileTransfer::Chunk { id, offset, data } => {
+            if let Some(rx) = transfers.get_mut(&id) {
+                if let Err(e) = rx.file.seek(SeekFrom::Start(offset))
+                    .and_then(|_| rx.file.write_all(&data))
+                {
+                    warn!("FileTransfer {id}: write error at offset {offset}: {e}");
+                    let _ = std::fs::remove_file(&rx.temp_path);
+                    transfers.remove(&id);
+                }
+            } else {
+                warn!("FileTransfer {id}: chunk for unknown transfer");
+            }
+        }
+        FileTransfer::Done { id } => {
+            if let Some(rx) = transfers.remove(&id) {
+                drop(rx.file); // flush + close
+                // Verify SHA-256
+                match std::fs::read(&rx.temp_path) {
+                    Ok(bytes) => {
+                        let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
+                        let actual_hash = digest
+                            .as_ref()
+                            .iter()
+                            .map(|b| format!("{b:02x}"))
+                            .collect::<String>();
+                        if actual_hash != rx.expected_hash {
+                            warn!("FileTransfer {id}: hash mismatch (corrupt?), deleting");
+                            let _ = std::fs::remove_file(&rx.temp_path);
+                            return;
+                        }
+                        // Rename to final path in the same directory.
+                        let dir = rx.temp_path.parent().unwrap_or(std::path::Path::new("."));
+                        // Find a non-conflicting name.
+                        let name = rx.temp_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("transfer")
+                            .trim_start_matches('.')
+                            .trim_end_matches(".tmp");
+                        let mut dest = dir.join(name);
+                        let mut counter = 1u32;
+                        while dest.exists() {
+                            let stem = std::path::Path::new(name)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("transfer");
+                            let ext = std::path::Path::new(name)
+                                .extension()
+                                .and_then(|s| s.to_str())
+                                .map(|e| format!(".{e}"))
+                                .unwrap_or_default();
+                            dest = dir.join(format!("{stem} ({counter}){ext}"));
+                            counter += 1;
+                        }
+                        match std::fs::rename(&rx.temp_path, &dest) {
+                            Ok(_) => info!("FileTransfer {id}: saved to {}", dest.display()),
+                            Err(e) => warn!("FileTransfer {id}: rename failed: {e}"),
+                        }
+                    }
+                    Err(e) => {
+                        warn!("FileTransfer {id}: cannot read temp file for hash check: {e}");
+                        let _ = std::fs::remove_file(&rx.temp_path);
+                    }
+                }
+            } else {
+                warn!("FileTransfer {id}: Done for unknown transfer");
+            }
+        }
+        FileTransfer::Abort { id, reason } => {
+            if let Some(rx) = transfers.remove(&id) {
+                info!("FileTransfer {id}: aborted by peer ({reason})");
+                let _ = std::fs::remove_file(&rx.temp_path);
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct HostConfig {
@@ -211,6 +349,24 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         None
     };
 
+    // File transfer setup (Full permission only).
+    let ft_dir = file_transfer_dir();
+    let ft_cfg = if let Permission::Full = permission {
+        if let Err(e) = std::fs::create_dir_all(&ft_dir) {
+            warn!("File transfer dir unavailable ({e}), transfers disabled");
+            None
+        } else {
+            info!("File transfers → {}", ft_dir.display());
+            Some(safe_fs::FileTransferConfig {
+                allowed_roots: vec![ft_dir],
+                ..Default::default()
+            })
+        }
+    } else {
+        None
+    };
+    let mut file_transfers: HashMap<Uuid, FileReceive> = HashMap::new();
+
     // 7. Main loop
     let mut input_handler = InputHandler::new();
     let mut ping_ticker = time::interval(Duration::from_secs(1));
@@ -256,6 +412,9 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     }
                     Some(Msg::ClipboardSync(s)) if matches!(permission, Permission::Full) => {
                         let _ = input_handler.handle_clipboard(&s);
+                    }
+                    Some(Msg::FileTransfer(ft)) if ft_cfg.is_some() => {
+                        handle_file_transfer(ft, &mut file_transfers, ft_cfg.as_ref().unwrap());
                     }
                     Some(Msg::Pong(p)) => {
                         let rtt = now_ms().saturating_sub(p.ts) as u32;

@@ -18,7 +18,6 @@ mod metrics;
 mod qos;
 mod qos_bbr;
 mod recording;
-#[allow(dead_code)]
 mod safe_fs;
 mod session;
 mod ui;
