@@ -1,6 +1,7 @@
 //! MCP server library.
 
 pub mod local_bridge;
+pub mod remote_bridge;
 pub mod parent_check;
 pub mod protocol;
 pub mod rate_limit;

@@ -13,6 +13,9 @@ path = "src/main.rs"
 [dependencies]
 miru-common = { workspace = true }
 miru-agent = { path = "../miru-agent" }
+miru-transport = { workspace = true }
+miru-auth = { path = "../miru-auth" }
+miru-codec = { path = "../miru-codec" }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
@@ -30,6 +33,7 @@ miru-sandbox = { path = "../miru-sandbox" }
 miru-capture = { path = "../miru-capture" }
 miru-input = { path = "../miru-input" }
 png = "0.17"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 open = "5"
 
 [target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]

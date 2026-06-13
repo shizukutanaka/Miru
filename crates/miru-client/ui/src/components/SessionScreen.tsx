@@ -23,6 +23,8 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [selectedDisplay, setSelectedDisplay] = useState(0);
   const [fileSending, setFileSending] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [elapsedSecs, setElapsedSecs] = useState(0);
+  const connectedAtRef = useRef<number | null>(null);
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -55,6 +57,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       if (e.kind === "connected") {
         setStatus("connected");
         setStatusMessage(null);
+        connectedAtRef.current = Date.now();
       } else if (e.kind === "reconnecting") {
         setStatus("reconnecting");
         setStatusMessage(e.message ?? null);
@@ -80,6 +83,9 @@ export function SessionScreen({ onDisconnect }: Props) {
 
     const statsInterval = setInterval(async () => {
       try { setStats(await api.sessionStats()); } catch {}
+      if (connectedAtRef.current !== null) {
+        setElapsedSecs(Math.floor((Date.now() - connectedAtRef.current) / 1000));
+      }
     }, 500);
 
     return () => {
@@ -236,6 +242,9 @@ export function SessionScreen({ onDisconnect }: Props) {
           <div className="stat-row"><span className="label">FPS</span><span className="value">{stats.fps.toFixed(1)}</span></div>
           <div className="stat-row"><span className="label">RTT</span><span className="value">{stats.rtt_ms} ms</span></div>
           <div className="stat-row"><span className="label">BW</span><span className="value">{stats.bitrate_kbps} kbps</span></div>
+          {elapsedSecs > 0 && (
+            <div className="stat-row"><span className="label">T</span><span className="value">{fmtDuration(elapsedSecs)}</span></div>
+          )}
           <div className="stat-row"><span className="label">RX</span><span className="value">{(stats.bytes_recv / 1024 / 1024).toFixed(1)} MB</span></div>
           {stats.packet_loss_pct > 0.5 && (
             <div className="stat-row"><span className="label" style={{ color: "var(--warn, #f90)" }}>PKT</span><span className="value">{stats.packet_loss_pct.toFixed(1)}%</span></div>
@@ -301,4 +310,12 @@ export function SessionScreen({ onDisconnect }: Props) {
       </div>
     </div>
   );
+}
+
+function fmtDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
