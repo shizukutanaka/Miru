@@ -200,6 +200,41 @@ pub async fn run(
                         }
                         last_seq = Some(vf.seq);
 
+                        // JPEG fast path: skip decode+re-encode entirely.
+                        // Passing host JPEG bytes straight to the frontend preserves
+                        // original quality and avoids double-compression loss.
+                        if vf.codec == VideoCodec::Jpeg {
+                            frame_count += 1;
+                            let elapsed = last_stats_update.elapsed();
+                            if elapsed.as_secs() >= 1 {
+                                let elapsed_secs = elapsed.as_secs_f32();
+                                let mut s = stats.lock();
+                                s.frames_decoded = frame_count;
+                                s.bytes_recv += bytes_since_update;
+                                s.fps = frame_count as f32 / elapsed_secs;
+                                s.bitrate_kbps = ((bytes_since_update * 8) as f32
+                                    / elapsed_secs / 1000.0) as u32;
+                                s.packet_loss_pct = if seq_total > 0 {
+                                    (seq_gaps as f32 / seq_total as f32) * 100.0
+                                } else {
+                                    0.0
+                                };
+                                bytes_since_update = 0;
+                                seq_gaps = 0;
+                                seq_total = 0;
+                                last_stats_update = std::time::Instant::now();
+                            }
+                            // Dimensions from JPEG header (parse width/height from SOF marker)
+                            let (w, h) = jpeg_dimensions(&vf.data).unwrap_or((0, 0));
+                            let _ = app.emit("video-frame", VideoFrameEvent {
+                                width: w,
+                                height: h,
+                                keyframe: vf.keyframe,
+                                jpeg_b64: B64.encode(&vf.data),
+                            });
+                            continue;
+                        }
+
                         // Lazy decoder init: get_or_insert_with can't propagate
                         // errors, so we use an explicit check.
                         if decoder.is_none() {
@@ -238,8 +273,8 @@ pub async fn run(
                                     last_stats_update = std::time::Instant::now();
                                 }
 
-                                // Encode to JPEG and emit to UI
-                                if let Ok(jpeg) = i420_to_jpeg(&frame, 70) {
+                                // Re-encode to JPEG at higher quality (85) for VP9/VP8 frames.
+                                if let Ok(jpeg) = i420_to_jpeg(&frame, 85) {
                                     let _ = app.emit("video-frame", VideoFrameEvent {
                                         width: frame.width,
                                         height: frame.height,
@@ -306,6 +341,30 @@ pub async fn run(
 
     emit_status(&app, "disconnected", None, None);
     Ok(())
+}
+
+/// Extract (width, height) from a JPEG SOF0/SOF2 marker without fully decoding.
+fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    let mut i = 0usize;
+    if data.get(0..2)? != [0xFF, 0xD8] {
+        return None;
+    }
+    i = 2;
+    while i + 4 <= data.len() {
+        if data[i] != 0xFF {
+            break;
+        }
+        let marker = data[i + 1];
+        let len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+        // SOF0 (0xC0), SOF1 (0xC1), SOF2 (0xC2) contain image dimensions
+        if matches!(marker, 0xC0 | 0xC1 | 0xC2) && i + 9 <= data.len() {
+            let h = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
+            let w = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
+            return Some((w, h));
+        }
+        i += 2 + len;
+    }
+    None
 }
 
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
