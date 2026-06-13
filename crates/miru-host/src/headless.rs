@@ -69,6 +69,7 @@ pub fn systemd_unit() -> &'static str {
 }
 
 /// launchd plist (macOS).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn launchd_plist() -> &'static str {
     include_str!("../res/app.miru.host.plist")
 }

@@ -11,7 +11,6 @@ use tracing::info;
 mod agent_handler;
 mod backpressure;
 mod capture_loop;
-#[allow(dead_code)]
 mod headless;
 mod input_handler;
 mod metrics;
@@ -38,12 +37,19 @@ async fn main() -> Result<()> {
     if args.get(1).map(|s| s.as_str()) == Some("token") {
         return run_token_command(&args[2..]);
     }
+    if args.get(1).map(|s| s.as_str()) == Some("service") {
+        return run_service_command(&args[2..]);
+    }
 
+    let is_headless = headless::detect_headless();
     tracing_subscriber::fmt()
         .with_env_filter(
             std::env::var("MIRU_LOG").unwrap_or_else(|_| "miru_host=debug,info".to_string()),
         )
         .init();
+    if is_headless {
+        info!("Headless mode detected (no display environment variable set)");
+    }
 
     let config_dir = dirs::config_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -323,6 +329,56 @@ fn run_token_command(args: &[String]) -> Result<()> {
     eprintln!("  Set this in your MCP client config as MIRU_AGENT_TOKEN:");
     // The token itself goes to stdout alone, so it can be piped/captured.
     println!("{token}");
+    Ok(())
+}
+
+/// `miru-host service <install|uninstall|print-unit>`
+/// Manages the system service for running miru-host at boot.
+fn run_service_command(args: &[String]) -> Result<()> {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("help");
+    match sub {
+        "print-unit" | "print" => {
+            #[cfg(target_os = "linux")]
+            {
+                print!("{}", headless::systemd_unit());
+            }
+            #[cfg(target_os = "macos")]
+            {
+                print!("{}", headless::launchd_plist());
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                eprintln!("service unit generation not supported on this platform");
+            }
+        }
+        "install" => {
+            #[cfg(target_os = "linux")]
+            {
+                let unit = headless::systemd_unit();
+                let path = "/etc/systemd/system/miru-host.service";
+                std::fs::write(path, unit)?;
+                println!("Wrote {path}");
+                println!("Run: systemctl daemon-reload && systemctl enable --now miru-host");
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let plist = headless::launchd_plist();
+                let path = "/Library/LaunchDaemons/app.miru.host.plist";
+                std::fs::write(path, plist)?;
+                println!("Wrote {path}");
+                println!("Run: launchctl load {path}");
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            {
+                eprintln!("service install not supported on this platform");
+            }
+        }
+        _ => {
+            println!("Usage: miru-host service <print-unit|install>");
+            println!("  print-unit   Print the systemd unit / launchd plist to stdout");
+            println!("  install      Write the unit file and print activation instructions");
+        }
+    }
     Ok(())
 }
 
