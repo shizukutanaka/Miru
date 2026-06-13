@@ -221,11 +221,18 @@ pub async fn host_handshake<C: MsgChannel>(
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Parse `<eph_pub>:<identity_pub>:<signature>` from base64.
+/// Parse `<eph_pub>:<identity_pub>:<signature>[:<agent_token>]` from base64.
+///
+/// The base 3-segment form is used for human viewers. Agent role (v0.3) adds
+/// a 4th segment: the agent capability token. We accept either form here and
+/// ignore anything past the third colon-delimited segment; callers that need
+/// the agent token use `extract_agent_token` separately.
 fn parse_pubkey_field(s: &str) -> Result<([u8; 32], [u8; 32], Signature)> {
-    let parts: Vec<&str> = s.split(':').collect();
-    if parts.len() != 3 {
-        bail!("malformed pubkey field");
+    // splitn(4, ':') captures any 4th-and-beyond content as a single remainder
+    // slice, preventing it from being mistaken for extra fields.
+    let parts: Vec<&str> = s.splitn(4, ':').collect();
+    if parts.len() < 3 {
+        bail!("malformed pubkey field (expected at least 3 colon-separated segments)");
     }
 
     let eph = B64.decode(parts[0])?;
@@ -377,5 +384,39 @@ mod tests {
         // Host fails first (no common codec); viewer fails second (gets Error)
         assert!(host_task.await.unwrap().is_err());
         assert!(viewer_task.await.unwrap().is_err());
+    }
+
+    /// Regression: parse_pubkey_field previously required exactly 3 segments.
+    /// The v0.3 AI-agent role appends a 4th segment (the capability token).
+    /// Without the fix, every agent connection failed with "malformed pubkey field"
+    /// before the role was even inspected.
+    #[test]
+    fn parse_pubkey_field_accepts_four_segments() {
+        use base64::engine::general_purpose::STANDARD as B64;
+        use base64::Engine;
+        // Build a syntactically valid 3-segment field, then append an agent token.
+        let dummy_32 = [0u8; 32];
+        let dummy_64 = [0u8; 64];
+        let eph_b64 = B64.encode(dummy_32);
+        let id_b64 = B64.encode(dummy_32);
+        let sig_b64 = B64.encode(dummy_64);
+        let agent_token = "miru-agent.some.payload";
+
+        let four_part = format!("{}:{}:{}:{}", eph_b64, id_b64, sig_b64, agent_token);
+        let three_part = format!("{}:{}:{}", eph_b64, id_b64, sig_b64);
+
+        // Both forms must be accepted.
+        assert!(
+            parse_pubkey_field(&four_part).is_ok(),
+            "4-segment (agent) pubkey field must be accepted"
+        );
+        assert!(
+            parse_pubkey_field(&three_part).is_ok(),
+            "3-segment (viewer) pubkey field must still be accepted"
+        );
+
+        // A 2-segment field must be rejected.
+        let two_part = format!("{}:{}", eph_b64, id_b64);
+        assert!(parse_pubkey_field(&two_part).is_err());
     }
 }
