@@ -421,7 +421,10 @@ mod tests {
         let n22 = nh(&l2, &l2); // self-hash (RFC 6962 would promote l2 unchanged)
         let expected = nh(&n01, &n22);
 
-        assert_eq!(root, expected, "odd-leaf self-hash strategy changed unexpectedly");
+        assert_eq!(
+            root, expected,
+            "odd-leaf self-hash strategy changed unexpectedly"
+        );
 
         // Inclusion proofs still verify correctly with this strategy.
         for i in 0..3u64 {

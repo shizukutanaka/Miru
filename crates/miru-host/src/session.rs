@@ -21,6 +21,7 @@ use tracing::{error, info, warn};
 use crate::{
     agent_handler::AgentHandler, backpressure::FrameController, capture_loop,
     input_handler::InputHandler, metrics::SessionMetrics, qos::QosController,
+    recording::SessionRecorder,
 };
 
 #[derive(Clone)]
@@ -188,6 +189,23 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         capturer,
     )?;
 
+    // Optional session recording (MIRU_RECORD_DIR=<dir> enables it).
+    let mut recorder: Option<SessionRecorder> = if let Ok(dir) = std::env::var("MIRU_RECORD_DIR") {
+        let sid = result.session_id.to_string().replace('-', "");
+        match SessionRecorder::create(std::path::Path::new(&dir), &sid) {
+            Ok(r) => {
+                info!("Session recording enabled → {}", dir);
+                Some(r)
+            }
+            Err(e) => {
+                warn!("Recording init failed (non-fatal): {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // 7. Main loop
     let mut input_handler = InputHandler::new();
     let mut ping_ticker = time::interval(Duration::from_secs(1));
@@ -206,6 +224,11 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                 if let Msg::VideoFrame(ref vf) = msg {
                     metrics.on_video_frame(vf.data.len() as u64);
                     bp.on_send();
+                    if let Some(rec) = recorder.as_mut() {
+                        if let Err(e) = rec.record_frame(vf) {
+                            warn!("Record frame failed (non-fatal): {}", e);
+                        }
+                    }
                 }
                 if relay.send_msg(&msg).await.is_err() { break; }
             }
@@ -253,6 +276,20 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     }
 
     info!("Session {} ended", result.session_id);
+
+    // Finalize recording (flush + log summary).
+    if let Some(rec) = recorder.take() {
+        match rec.finalize() {
+            Ok(s) => info!(
+                "Recording saved: {} ({} frames, {:.1} MB, {:.1}s)",
+                s.path.display(),
+                s.frame_count,
+                s.bytes as f64 / 1024.0 / 1024.0,
+                s.duration.as_secs_f64(),
+            ),
+            Err(e) => warn!("Recording finalize failed: {}", e),
+        }
+    }
 
     // 8. Transparency anchoring — record an immutable, signed commitment of
     //    this session's metadata. Posted to Rekor if MIRU_REKOR_URL is set.
