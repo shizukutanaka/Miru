@@ -82,7 +82,7 @@ fn capture_frame(disp: u8) -> Result<Vec<u8>> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         match cap.next_frame().context("next_frame")? {
-            Some(frame) => return encode_png(&frame.data, frame.width, frame.height),
+            Some(frame) => return encode_png(&frame.data, frame.width, frame.height, frame.format),
             None => {
                 if std::time::Instant::now() > deadline {
                     bail!("capture timeout: no frame within 2s");
@@ -93,14 +93,34 @@ fn capture_frame(disp: u8) -> Result<Vec<u8>> {
     }
 }
 
-fn encode_png(data: &[u8], w: u32, h: u32) -> Result<Vec<u8>> {
+fn encode_png(data: &[u8], w: u32, h: u32, format: miru_capture::frame::PixelFormat) -> Result<Vec<u8>> {
+    use miru_capture::frame::PixelFormat;
     use std::io::Cursor;
+
+    // Normalise to RGBA before PNG encoding. The platform capturers commonly
+    // return BGRA32 (X11, DXGI, CGDisplay) which has R and B swapped relative
+    // to RGBA.  Without this conversion the PNG written to the AI agent has
+    // incorrect colours on every platform except those that natively produce
+    // Rgba32.
+    let rgba_buf: Vec<u8>;
+    let rgba: &[u8] = match format {
+        PixelFormat::Rgba32 => data,
+        PixelFormat::Bgra32 => {
+            rgba_buf = data
+                .chunks_exact(4)
+                .flat_map(|px| [px[2], px[1], px[0], px[3]]) // B,G,R,A → R,G,B,A
+                .collect();
+            &rgba_buf
+        }
+        other => bail!("encode_png: unsupported pixel format {:?}", other),
+    };
+
     let mut out = Vec::new();
     let mut enc = png::Encoder::new(Cursor::new(&mut out), w, h);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     let mut writer = enc.write_header().context("png header")?;
-    writer.write_image_data(data).context("png data")?;
+    writer.write_image_data(rgba).context("png data")?;
     drop(writer);
     Ok(out)
 }
