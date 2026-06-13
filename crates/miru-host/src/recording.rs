@@ -7,7 +7,8 @@
 //!   - Recording is **opt-in** by the host (never enabled by default)
 //!   - Both peers see a "● REC" indicator in the toolbar
 //!   - The first 30 seconds get a watermarked banner so the recording is detected
-//!   - Files are encrypted at rest with a host-supplied passphrase
+//!   - Files are written in plaintext (v0.1). At-rest encryption with a host-
+//!     supplied passphrase is planned for v0.3 (see roadmap.md).
 //!
 //! This satisfies common compliance requirements (HIPAA / SOX / ISO 27001)
 //! while staying out of the way for casual use.
@@ -62,9 +63,14 @@ impl SessionRecorder {
     }
 
     pub fn record_frame(&mut self, frame: &VideoFrame) -> Result<()> {
-        // Frame format: [16-byte header][payload]
-        //   header: u8 codec | u8 keyframe | u8 reserved×2 | u32 width | u32 height | u64 ts_ms
-        //   followed by u32 LE length, then payload
+        // Frame format: [24-byte header][payload]
+        //   Offset  0: u8  codec (1=AV1 2=H265 3=H264 4=VP9 5=VP8 6=JPEG)
+        //   Offset  1: u8  keyframe flag
+        //   Offset  2: u8  reserved (×2)
+        //   Offset  4: u32 LE width
+        //   Offset  8: u32 LE height
+        //   Offset 12: u64 LE timestamp_ms
+        //   Offset 20: u32 LE payload length
         let mut hdr = [0u8; 24];
         hdr[0] = match frame.codec {
             miru_common::message::VideoCodec::Av1 => 1,
