@@ -63,4 +63,42 @@ mod tests {
             );
         }
     }
+
+    /// JPEG codec encodes a synthetic I420 frame and returns a valid JPEG.
+    /// Verifies buffer sizing and JPEG magic bytes.
+    #[test]
+    fn jpeg_encode_produces_valid_jpeg() {
+        let (w, h) = (64u32, 48u32);
+        let y_size = (w * h) as usize;
+        let uv_size = y_size / 4;
+        let y = vec![128u8; y_size];
+        let u = vec![128u8; uv_size];
+        let v = vec![128u8; uv_size];
+
+        let jpeg =
+            crate::jpeg::i420_to_jpeg_raw(&y, &u, &v, w, h, 80).expect("JPEG encode");
+        assert!(
+            jpeg.len() > 4 && jpeg[0] == 0xFF && jpeg[1] == 0xD8 && jpeg[2] == 0xFF,
+            "output does not start with JPEG SOI marker"
+        );
+    }
+
+    /// JPEG encode+Encoder roundtrip: Encoder wraps i420_to_jpeg and returns an EncodedPacket.
+    #[test]
+    fn jpeg_encoder_roundtrip() {
+        use miru_common::message::VideoCodec;
+        let (w, h) = (64u32, 48u32);
+        let mut enc = Encoder::new(VideoCodec::Jpeg, w, h, 30, 500).expect("create encoder");
+        let i420 = vec![128u8; (w * h + w * h / 2) as usize];
+        let packet = enc
+            .encode(&i420, w, h, 0, true)
+            .expect("encode")
+            .expect("packet");
+        assert!(packet.keyframe, "first JPEG frame must be keyframe");
+        assert!(
+            !packet.data.is_empty(),
+            "encoded packet must be non-empty"
+        );
+        assert_eq!(packet.data[0], 0xFF, "packet must start with JPEG SOI");
+    }
 }

@@ -1,6 +1,6 @@
 # Unwrap / expect Triage
 
-Status: **24 production unwrap/expect calls** — all verified Category A or B.
+Status: **21 production unwrap/expect calls** — all verified Category A or B.
 Category C (genuine runtime failures) has been eliminated.
 
 ## Category definitions
@@ -11,7 +11,7 @@ Category C (genuine runtime failures) has been eliminated.
 
 ## Inventory
 
-### A: Provably safe (14 sites)
+### A: Provably safe (18 sites)
 
 | File | Line | Reason |
 |------|------|--------|
@@ -54,7 +54,7 @@ cannot fail at that point. Category C is permanently banned.
 ## CI enforcement
 
 `.github/workflows/ci.yml` `crypto-gate` job checks:
-- Budget ≤ 24 unwrap/expect in production (excludes tests)
+- Budget ≤ 21 unwrap/expect in production (excludes tests)
 - No non-strict `.verify()` in production
 - No `danger_accept_invalid_*` APIs
 - `SessionCipher` must not derive `Clone`
