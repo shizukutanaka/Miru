@@ -106,11 +106,14 @@ impl Bucket {
         }
 
         // Refill tokens that accrued since last attempt.
+        // Advance last_refill by exactly (refill_every * refilled), not by the full
+        // elapsed time — this carries the sub-token remainder forward so it counts
+        // toward the next refill rather than being silently discarded.
         let elapsed = now.duration_since(self.last_refill);
         let refilled = (elapsed.as_nanos() / self.policy.refill_every.as_nanos().max(1)) as u32;
         if refilled > 0 {
             self.tokens = (self.tokens + refilled).min(self.policy.burst);
-            self.last_refill = now;
+            self.last_refill += self.policy.refill_every * refilled;
         }
 
         if self.tokens == 0 {
@@ -197,6 +200,39 @@ mod tests {
         sleep(Duration::from_millis(120));
         // Should now succeed again
         assert!(rl.try_consume(Capability::ScreenRead).is_ok());
+    }
+
+    /// Regression: the old code set last_refill = now after each refill, discarding
+    /// the sub-token remainder. Over time this caused the effective refill rate to be
+    /// measurably lower than the configured rate (up to ~20% loss).
+    #[test]
+    fn sub_token_remainder_is_preserved() {
+        // Use a policy where the mismatch is easy to observe:
+        // burst=3, refill_every=100ms. After exhausting the bucket we wait
+        // 250ms. The correct refill is 2 tokens (200ms worth) with 50ms carried
+        // forward. A second wait of 60ms should then yield 1 more token (50+60>100).
+        // With the buggy code: last_refill = now discards the 50ms, so the second
+        // wait of 60ms only adds 0 tokens (60 < 100), leaving the bucket at 2.
+        let mut bucket = Bucket::new(Policy {
+            burst: 3,
+            refill_every: Duration::from_millis(100),
+            daily_max: 1000,
+        });
+        // Drain the bucket.
+        for _ in 0..3 {
+            assert!(bucket.try_consume().is_ok());
+        }
+        assert!(bucket.try_consume().is_err());
+
+        // Wait 250ms → should credit 2 tokens (50ms sub-token remainder carried).
+        sleep(Duration::from_millis(260));
+        assert!(bucket.try_consume().is_ok(), "first refilled token");
+        assert!(bucket.try_consume().is_ok(), "second refilled token");
+        assert!(bucket.try_consume().is_err(), "third not yet due");
+
+        // Wait 60ms more. With the fix, the 50ms carried + 60ms new = 110ms ≥ 100ms → +1 token.
+        sleep(Duration::from_millis(70));
+        assert!(bucket.try_consume().is_ok(), "sub-token remainder must carry forward");
     }
 
     #[test]

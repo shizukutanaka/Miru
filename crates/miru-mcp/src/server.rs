@@ -291,6 +291,13 @@ impl McpServer {
             .get("text")
             .and_then(|v| v.as_str())
             .context("text missing")?;
+        const KEY_TYPE_MAX_CHARS: usize = 4096;
+        if text.chars().count() > KEY_TYPE_MAX_CHARS {
+            bail!(
+                "key_type: text exceeds maximum of {} characters",
+                KEY_TYPE_MAX_CHARS
+            );
+        }
         self.gate(
             Capability::KeyType,
             json!({"len": text.len()}), // don't log raw text in audit
@@ -359,6 +366,13 @@ impl McpServer {
             .get("text")
             .and_then(|v| v.as_str())
             .context("text missing")?;
+        const CLIPBOARD_WRITE_MAX_BYTES: usize = 1024 * 1024; // 1 MiB, matching JSON schema maxLength
+        if text.len() > CLIPBOARD_WRITE_MAX_BYTES {
+            bail!(
+                "clipboard_write: text exceeds maximum of {} bytes",
+                CLIPBOARD_WRITE_MAX_BYTES
+            );
+        }
         self.gate(
             Capability::ClipboardWrite,
             json!({"len": text.len()}),
