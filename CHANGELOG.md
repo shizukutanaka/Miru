@@ -22,7 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   map virtual device coordinates to physical screen pixels on any resolution
 - **Relay token validation**: relay server now rejects connections with unknown tokens
   (those not pre-registered by the rendezvous server); prevents resource exhaustion via
-  fabricated tokens; unknown token logs a warning and drops the WebSocket immediately
+  fabricated tokens; unknown token logs a warning and drops the WebSocket immediately;
+  relay_e2e tests updated to use full rendezvous flow + new `relay_rejects_unknown_token` test
 - **Capture loop clean exit**: `capture_loop` thread now exits on `TrySendError::Disconnected`
   (receiver dropped = session ended) rather than running forever after session teardown;
   distinguishes backpressure (`Full`) from termination (`Disconnected`)
