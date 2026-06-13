@@ -210,16 +210,17 @@ fn btn_code(btn: &MouseButton) -> u16 {
 }
 
 pub fn set_clipboard(text: &str) -> Result<()> {
-    // Use xclip or xdotool as subprocess — no pure Rust X11 clipboard yet
+    set_clipboard_raw(text.as_bytes(), "text/plain")
+}
+
+pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
     std::process::Command::new("xclip")
-        .args(["-selection", "clipboard"])
+        .args(["-selection", "clipboard", "-t", mime_type])
         .stdin(std::process::Stdio::piped())
         .spawn()
         .and_then(|mut c| {
-            // stdin is guaranteed Some because we set Stdio::piped above,
-            // but handle the impossible None defensively.
             if let Some(stdin) = c.stdin.as_mut() {
-                stdin.write_all(text.as_bytes())?;
+                stdin.write_all(data)?;
             }
             c.wait()
         })

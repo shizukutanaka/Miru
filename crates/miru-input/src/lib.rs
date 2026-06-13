@@ -24,6 +24,10 @@ pub fn set_clipboard(text: &str) -> Result<()> {
     platform::set_clipboard(text)
 }
 
+pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
+    platform::set_clipboard_raw(data, mime_type)
+}
+
 pub fn get_clipboard() -> Result<String> {
     platform::get_clipboard()
 }

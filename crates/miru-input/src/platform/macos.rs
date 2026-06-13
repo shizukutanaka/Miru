@@ -143,6 +143,16 @@ pub fn set_clipboard(text: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
+    if mime_type.starts_with("text/") {
+        let text = String::from_utf8_lossy(data);
+        set_clipboard(&text)
+    } else {
+        tracing::warn!("Clipboard format '{}' not supported on macOS (text only)", mime_type);
+        Ok(())
+    }
+}
+
 pub fn get_clipboard() -> Result<String> {
     let out = std::process::Command::new("pbpaste").output()?;
     Ok(String::from_utf8_lossy(&out.stdout).to_string())

@@ -169,51 +169,75 @@ pub struct HostConfig {
     pub config_dir: PathBuf,
 }
 
+const SIGNAL_BACKOFF_MAX_SECS: u64 = 120;
+
 pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) -> Result<()> {
-    let mut signal = SignalClient::connect(
-        &signal_url,
-        &device_id,
-        Some(config.identity.verifying_key.as_bytes()),
-    )
-    .await?;
-    info!("Signal: registered as {}", device_id);
-    info!(
-        "Identity fingerprint: {}",
-        config.identity.pubkey_fingerprint()
-    );
+    let mut backoff_secs = 5u64;
 
     loop {
-        match signal.next_event().await {
-            Some(SignalEvent::Registered {
-                device_id: did,
-                relay_addr,
-            }) => {
-                info!("Device ID: {}  relay: {:?}", did, relay_addr);
+        let mut signal = match SignalClient::connect(
+            &signal_url,
+            &device_id,
+            Some(config.identity.verifying_key.as_bytes()),
+        )
+        .await
+        {
+            Ok(s) => {
+                backoff_secs = 5;
+                s
             }
-            Some(SignalEvent::IncomingConnection {
-                token,
-                relay_addr,
-                relay_port,
-            }) => {
-                info!("Incoming → relay {}:{}", relay_addr, relay_port);
-                let url = format!("ws://{relay_addr}:{relay_port}");
-                let cfg = config.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_viewer(url, token, cfg).await {
-                        error!("Session: {}", e);
-                    }
-                });
+            Err(e) => {
+                warn!("Signal connect failed: {}; retrying in {}s", e, backoff_secs);
+                time::sleep(Duration::from_secs(backoff_secs)).await;
+                backoff_secs = (backoff_secs * 2).min(SIGNAL_BACKOFF_MAX_SECS);
+                continue;
             }
-            Some(SignalEvent::Disconnected) => {
-                warn!("Signal disconnected — retry in 5s");
-                time::sleep(Duration::from_secs(5)).await;
-                break;
+        };
+        info!("Signal: registered as {}", device_id);
+        info!("Identity fingerprint: {}", config.identity.pubkey_fingerprint());
+
+        let reconnect = loop {
+            match signal.next_event().await {
+                Some(SignalEvent::Registered {
+                    device_id: did,
+                    relay_addr,
+                }) => {
+                    info!("Device ID: {}  relay: {:?}", did, relay_addr);
+                }
+                Some(SignalEvent::IncomingConnection {
+                    token,
+                    relay_addr,
+                    relay_port,
+                }) => {
+                    info!("Incoming → relay {}:{}", relay_addr, relay_port);
+                    let url = format!("ws://{relay_addr}:{relay_port}");
+                    let cfg = config.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_viewer(url, token, cfg).await {
+                            error!("Session: {}", e);
+                        }
+                    });
+                }
+                Some(SignalEvent::Disconnected) => {
+                    warn!("Signal disconnected — reconnecting in {}s", backoff_secs);
+                    break true;
+                }
+                Some(SignalEvent::Error { code, message }) => {
+                    error!("Signal error {}: {}", code, message);
+                }
+                None => {
+                    warn!("Signal stream ended — reconnecting in {}s", backoff_secs);
+                    break true;
+                }
+                _ => {}
             }
-            Some(SignalEvent::Error { code, message }) => {
-                error!("Signal error {}: {}", code, message);
-            }
-            None => break,
-            _ => {}
+        };
+
+        if reconnect {
+            time::sleep(Duration::from_secs(backoff_secs)).await;
+            backoff_secs = (backoff_secs * 2).min(SIGNAL_BACKOFF_MAX_SECS);
+        } else {
+            break;
         }
     }
     Ok(())

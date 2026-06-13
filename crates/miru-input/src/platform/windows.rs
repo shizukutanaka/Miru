@@ -128,6 +128,16 @@ pub fn set_clipboard(text: &str) -> Result<()> {
     cli_clipboard::set_contents(text.to_string()).map_err(|e| anyhow::anyhow!("clipboard set: {e}"))
 }
 
+pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
+    if mime_type.starts_with("text/") {
+        let text = String::from_utf8_lossy(data);
+        set_clipboard(&text)
+    } else {
+        tracing::warn!("Clipboard format '{}' not supported on Windows (text only)", mime_type);
+        Ok(())
+    }
+}
+
 pub fn get_clipboard() -> Result<String> {
     cli_clipboard::get_contents().map_err(|e| anyhow::anyhow!("clipboard get: {e}"))
 }

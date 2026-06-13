@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Signal server auto-reconnect** in `miru-host`: `session::run()` now loops on
+  disconnect with exponential backoff (5 → 10 → 20 → … → 120 s cap); connect
+  failures also retry with backoff rather than exiting; host stays alive through
+  transient signal-server outages
+- **HTML and image clipboard sync**: `ClipboardFormat::Html` and `ClipboardFormat::Image`
+  now forwarded to host clipboard via `miru_input::set_clipboard_raw(data, mime_type)`;
+  Linux uses `xclip -t <mime>` for native MIME clipboard; macOS/Windows fall through to
+  text for `text/*` and warn-and-skip for binary formats
 - XRandR 1.5 multi-monitor enumeration in `miru-capture` (Linux): `displays()` now
   returns per-CRTC `DisplayInfo` with real names and dimensions via
   `randr::get_monitors`; `next_frame()` captures only the selected monitor's region

@@ -50,7 +50,8 @@ impl InputHandler {
                 let text = String::from_utf8_lossy(&sync.data);
                 miru_input::set_clipboard(&text)
             }
-            _ => Ok(()), // TODO: image/html clipboard
+            ClipboardFormat::Html => miru_input::set_clipboard_raw(&sync.data, "text/html"),
+            ClipboardFormat::Image => miru_input::set_clipboard_raw(&sync.data, "image/png"),
         }
     }
 }
