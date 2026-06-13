@@ -20,7 +20,7 @@ use tracing::{error, info, warn};
 
 use crate::{
     agent_handler::AgentHandler, backpressure::FrameController, capture_loop,
-    input_handler::InputHandler, metrics::SessionMetrics, qos::QosController,
+    input_handler::InputHandler, metrics::SessionMetrics, qos_bbr::BbrQos,
     recording::SessionRecorder,
 };
 
@@ -177,7 +177,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     let capturer = create_capturer()?;
 
     // 6. Start capture loop
-    let qos = Arc::new(Mutex::new(QosController::new(60, 5000)));
+    let qos = Arc::new(Mutex::new(BbrQos::new(60, 5000)));
     let (fps, br) = {
         let q = qos.lock();
         (q.fps(), q.bitrate_kbps())
@@ -214,6 +214,8 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 7. Main loop
     let mut input_handler = InputHandler::new();
     let mut ping_ticker = time::interval(Duration::from_secs(1));
+    // Bytes sent since last ping tick — used to estimate delivery rate for BBR.
+    let mut bytes_since_ping: u64 = 0;
     let metrics = SessionMetrics::new(
         result.session_id,
         B64.encode(config.identity.verifying_key.as_bytes()),
@@ -227,6 +229,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
             // Outgoing: video frames from capture loop
             Ok(msg) = cap_rx.recv_async() => {
                 if let Msg::VideoFrame(ref vf) = msg {
+                    bytes_since_ping += vf.data.len() as u64;
                     metrics.on_video_frame(vf.data.len() as u64);
                     bp.on_send();
                     if let Some(rec) = recorder.as_mut() {
@@ -256,15 +259,9 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     }
                     Some(Msg::Pong(p)) => {
                         let rtt = now_ms().saturating_sub(p.ts) as u32;
-                        // ACK one in-flight frame per Pong (conservative but correct).
                         bp.on_ack(1);
-                        // Scope the lock so the MutexGuard is dropped before .await.
-                        // parking_lot::MutexGuard is !Send — holding it across await
-                        // would prevent tokio::spawn from accepting this future.
-                        let update = qos.lock().update(rtt, 0.0);
-                        if let Some(u) = update {
-                            let _ = relay.send_msg(&Msg::QosUpdate(u)).await;
-                        }
+                        // Feed RTT into BBR (µs precision).
+                        qos.lock().on_rtt(rtt.saturating_mul(1_000));
                     }
                     Some(Msg::Close(reason)) => {
                         info!("Viewer closed: {} {}", reason.code, reason.reason);
@@ -275,6 +272,18 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                 }
             }
             _ = ping_ticker.tick() => {
+                // Feed observed delivery rate (bytes in the last second → kbps).
+                let kbps = (bytes_since_ping * 8 / 1024) as u32;
+                bytes_since_ping = 0;
+                let bbr_update = {
+                    let mut q = qos.lock();
+                    q.on_delivery(kbps.max(100));
+                    q.tick()
+                    // MutexGuard drops here — before any await
+                };
+                if let Some(u) = bbr_update {
+                    let _ = relay.send_msg(&Msg::QosUpdate(u)).await;
+                }
                 let _ = relay.send_msg(&Msg::Ping(miru_common::message::Ping { ts: now_ms() })).await;
             }
         }

@@ -14,8 +14,8 @@ mod capture_loop;
 mod headless;
 mod input_handler;
 mod metrics;
-mod qos;
 #[allow(dead_code)]
+mod qos;
 mod qos_bbr;
 mod recording;
 #[allow(dead_code)]
