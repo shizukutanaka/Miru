@@ -6,6 +6,7 @@
 
 use anyhow::Result;
 use core_graphics::{
+    display::CGDisplay,
     event::{
         CGEvent, CGEventFlags, CGEventTapLocation, CGEventType, CGKeyCode, CGMouseButton,
         ScrollEventUnit,
@@ -91,9 +92,12 @@ pub fn inject(event: &InputEvent) -> Result<()> {
 }
 
 fn screen_point(x: f32, y: f32) -> CGPoint {
-    // x, y are 0.0–1.0 normalized — scale to primary screen resolution
-    // TODO: query actual screen size via CGDisplay
-    CGPoint::new((x * 2560.0) as f64, (y * 1440.0) as f64)
+    // x, y are 0.0–1.0 normalized — scale to primary display resolution.
+    let bounds = CGDisplay::main().bounds();
+    CGPoint::new(
+        x as f64 * bounds.size.width,
+        y as f64 * bounds.size.height,
+    )
 }
 
 fn modifier_flags(mods: u8) -> CGEventFlags {

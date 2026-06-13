@@ -62,6 +62,12 @@ export const api = {
     invoke<boolean>("revoke_peer", { deviceId }),
   sessionStats: () => invoke<SessionStats>("session_stats"),
 
+  issueAgentToken: (label: string, ttlMins: number, capabilities: string[]) =>
+    invoke<{ token: string; fingerprint: string; expires_at: number }>(
+      "issue_agent_token",
+      { args: { label, ttl_mins: ttlMins, capabilities } }
+    ),
+
   onSessionEvent: (cb: (e: SessionEvent) => void): Promise<UnlistenFn> =>
     listen<SessionEvent>("session-event", (e) => cb(e.payload)),
   onVideoFrame: (cb: (e: VideoFrameEvent) => void): Promise<UnlistenFn> =>

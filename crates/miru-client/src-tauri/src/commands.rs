@@ -142,7 +142,7 @@ use std::collections::HashSet;
 #[derive(serde::Deserialize)]
 pub struct IssueTokenArgs {
     pub label: String,
-    pub ttl_hours: u64,
+    pub ttl_mins: u64,
     pub capabilities: Vec<String>,
 }
 
@@ -165,13 +165,12 @@ pub fn issue_agent_token(
     if label.chars().count() > 64 {
         return Err("label too long (max 64 chars)".into());
     }
-    // Hard cap: 15 minutes. See miru_agent::token::MAX_TTL_SECS.
-    // We accept input in minutes (not hours) to match the cap granularity.
-    if args.ttl_hours == 0 {
+    // Hard cap: 15 minutes (see miru_agent::token::MAX_TTL_SECS).
+    if args.ttl_mins == 0 {
         return Err("ttl required".into());
     }
-    if args.ttl_hours > 1 {
-        return Err("ttl exceeds policy cap (max 15 min — please use shorter sessions)".into());
+    if args.ttl_mins > 15 {
+        return Err("ttl exceeds policy cap (max 15 min)".into());
     }
     let caps: HashSet<Capability> = args
         .capabilities
@@ -200,7 +199,7 @@ pub fn issue_agent_token(
         identity,
         label.to_string(),
         caps,
-        std::time::Duration::from_secs(args.ttl_hours * 3600),
+        std::time::Duration::from_secs(args.ttl_mins * 60),
         None,
     );
     Ok(IssuedToken {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "../lib/tauri";
 
 interface Capability {
   id: string;
@@ -32,10 +33,12 @@ interface Props {
 
 export function AgentTokenIssue({ onIssued, onCancel }: Props) {
   const [label, setLabel] = useState("claude-code-session");
-  const [ttlHours, setTtlHours] = useState(1);
+  const [ttlMins, setTtlMins] = useState(15);
   const [selected, setSelected] = useState<Set<string>>(new Set(DEFAULT_CAPS));
   const [issued, setIssued] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [issuing, setIssuing] = useState(false);
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -45,14 +48,20 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
   };
 
   const issue = async () => {
-    // TODO: invoke Tauri command `issue_agent_token`
-    // For now, mock the response
-    const mockToken = `miru-agent.${btoa(JSON.stringify({
-      sub: label,
-      caps: Array.from(selected),
-      ttl: ttlHours * 3600,
-    }))}.MOCK_SIGNATURE`;
-    setIssued(mockToken);
+    setError(null);
+    setIssuing(true);
+    try {
+      const result = await api.issueAgentToken(
+        label.trim(),
+        ttlMins,
+        Array.from(selected),
+      );
+      setIssued(result.token);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setIssuing(false);
+    }
   };
 
   const copyToken = async () => {
@@ -76,7 +85,7 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
           </div>
 
           <div className="dialog-warning">
-            このトークンは {ttlHours} 時間で自動失効します。
+            このトークンは {ttlMins} 分で自動失効します。
             紛失しても再発行可能。漏洩した場合は「信頼済みデバイス」から取り消し。
           </div>
 
@@ -123,15 +132,14 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
         </div>
 
         <div className="field">
-          <label>有効期限</label>
+          <label>有効期限 (最大 15 分)</label>
           <select
-            value={ttlHours}
-            onChange={(e) => setTtlHours(Number(e.target.value))}
+            value={ttlMins}
+            onChange={(e) => setTtlMins(Number(e.target.value))}
           >
-            <option value={1}>1時間</option>
-            <option value={4}>4時間</option>
-            <option value={8}>8時間</option>
-            <option value={24}>24時間</option>
+            <option value={5}>5分</option>
+            <option value={10}>10分</option>
+            <option value={15}>15分</option>
           </select>
         </div>
 
@@ -157,14 +165,16 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
           いつでも「信頼済みデバイス」一覧から無効化できます。
         </div>
 
+        {error && <div className="error-msg" style={{ color: "var(--danger, #e05)" }}>{error}</div>}
+
         <div className="dialog-actions">
           <button className="button-ghost" onClick={onCancel}>キャンセル</button>
           <button
             className="button-primary"
             onClick={issue}
-            disabled={selected.size === 0 || !label.trim()}
+            disabled={selected.size === 0 || !label.trim() || issuing}
           >
-            発行
+            {issuing ? "発行中..." : "発行"}
           </button>
         </div>
       </div>

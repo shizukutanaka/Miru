@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Agent token issuance wired**: `AgentTokenIssue` UI now calls the real
+  `issue_agent_token` Tauri command instead of mocking a token; error and loading
+  states displayed; TTL field renamed `ttl_mins` (was `ttl_hours`), options changed
+  to 5/10/15 min matching the 15-minute hard cap enforced by `miru_agent`
 - **Linux uinput absolute mouse positioning**: replaced hardcoded 1920×1080 screen size
   with a resolution-independent 0-65535 coordinate space (same as Windows convention);
   adds `UI_ABS_SETUP` ioctl to configure ABS axis ranges so X11/Wayland can correctly
