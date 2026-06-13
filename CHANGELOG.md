@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a resolution-independent 0-65535 coordinate space (same as Windows convention);
   adds `UI_ABS_SETUP` ioctl to configure ABS axis ranges so X11/Wayland can correctly
   map virtual device coordinates to physical screen pixels on any resolution
+- **Rendezvous server keepalive**: 30-second server-initiated WebSocket ping detects
+  dead connections and triggers immediate registry cleanup rather than waiting for
+  OS-level TCP timeout (minutes to hours); handles client Pong response silently
 - **Relay token validation**: relay server now rejects connections with unknown tokens
   (those not pre-registered by the rendezvous server); prevents resource exhaustion via
   fabricated tokens; unknown token logs a warning and drops the WebSocket immediately;

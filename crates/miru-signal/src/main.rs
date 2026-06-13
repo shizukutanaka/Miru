@@ -134,9 +134,14 @@ async fn rendezvous_handler(ws: WebSocketUpgrade, State(s): State<AppState>) -> 
     ws.on_upgrade(move |sock| rendezvous_session(sock, s))
 }
 
+/// Interval between server-initiated WebSocket pings.
+const RENDEZVOUS_PING_INTERVAL: Duration = Duration::from_secs(30);
+
 async fn rendezvous_session(mut sock: WebSocket, state: AppState) {
     let (tx, mut rx) = mpsc::channel::<Msg>(32);
     let mut my_id: Option<String> = None;
+    let mut ping_ticker = tokio::time::interval(RENDEZVOUS_PING_INTERVAL);
+    ping_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     loop {
         tokio::select! {
@@ -155,7 +160,14 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState) {
                         }
                     }
                     Some(Ok(Message::Ping(d))) => { let _ = sock.send(Message::Pong(d)).await; }
+                    Some(Ok(Message::Pong(_))) => {} // keepalive echo
                     _ => break,
+                }
+            }
+            // Server-initiated keepalive ping to detect dead connections.
+            _ = ping_ticker.tick() => {
+                if sock.send(Message::Ping(vec![])).await.is_err() {
+                    break;
                 }
             }
         }
