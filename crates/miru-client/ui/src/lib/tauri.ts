@@ -68,4 +68,17 @@ export const api = {
     listen<VideoFrameEvent>("video-frame", (e) => cb(e.payload)),
   onQosUpdate: (cb: (e: { fps: number; bitrate_kbps: number; quality: number }) => void): Promise<UnlistenFn> =>
     listen<{ fps: number; bitrate_kbps: number; quality: number }>("qos-update", (e) => cb(e.payload)),
+  onDisplayList: (cb: (displays: DisplayInfo[]) => void): Promise<UnlistenFn> =>
+    listen<{ displays: DisplayInfo[] }>("display-list", (e) => cb(e.payload.displays)),
+  selectDisplay: (index: number) =>
+    invoke<void>("select_display", { index }),
 };
+
+export interface DisplayInfo {
+  index: number;
+  width: number;
+  height: number;
+  refresh_hz: number;
+  name: string;
+  primary: boolean;
+}

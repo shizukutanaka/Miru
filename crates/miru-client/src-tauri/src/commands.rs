@@ -107,6 +107,14 @@ pub async fn send_clipboard(text: String, state: State<'_, AppState>) -> Result<
 }
 
 #[tauri::command]
+pub async fn select_display(index: u8, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .send_select_display(index)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn list_trusted_peers(state: State<'_, AppState>) -> Vec<TrustedPeer> {
     state.list_peers()
 }

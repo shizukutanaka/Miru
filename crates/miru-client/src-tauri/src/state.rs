@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use miru_auth::{AclStore, DeviceIdentity, TrustedPeer};
-use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, Msg};
+use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, Msg, SelectDisplay};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -105,6 +105,16 @@ impl AppState {
         let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
         if let Some(tx) = tx {
             tx.send(Msg::InputEvent(evt))
+                .await
+                .map_err(|_| anyhow::anyhow!("session closed"))?;
+        }
+        Ok(())
+    }
+
+    pub async fn send_select_display(&self, index: u8) -> Result<()> {
+        let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
+        if let Some(tx) = tx {
+            tx.send(Msg::SelectDisplay(SelectDisplay { index }))
                 .await
                 .map_err(|_| anyhow::anyhow!("session closed"))?;
         }

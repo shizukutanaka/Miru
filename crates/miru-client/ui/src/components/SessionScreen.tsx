@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, SessionStats } from "../lib/tauri";
+import { api, SessionStats, DisplayInfo } from "../lib/tauri";
+import { DisplayTabs } from "./DisplayTabs";
 
 interface Props {
   onDisconnect: () => void;
@@ -16,6 +17,8 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [hostQos, setHostQos] = useState<{ fps: number; bitrate_kbps: number; quality: number } | null>(null);
+  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
+  const [selectedDisplay, setSelectedDisplay] = useState(0);
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -57,6 +60,9 @@ export function SessionScreen({ onDisconnect }: Props) {
 
     api.onQosUpdate((q) => setHostQos(q)).then((fn) => (unlistenQos = fn));
 
+    let unlistenDisplays: (() => void) | null = null;
+    api.onDisplayList((d) => setDisplays(d)).then((fn) => (unlistenDisplays = fn));
+
     const statsInterval = setInterval(async () => {
       try { setStats(await api.sessionStats()); } catch {}
     }, 500);
@@ -65,6 +71,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       unlistenVideo?.();
       unlistenStatus?.();
       unlistenQos?.();
+      unlistenDisplays?.();
       clearInterval(statsInterval);
     };
   }, [onDisconnect]);
@@ -151,6 +158,11 @@ export function SessionScreen({ onDisconnect }: Props) {
     onDisconnect();
   };
 
+  const handleSelectDisplay = async (index: number) => {
+    setSelectedDisplay(index);
+    try { await api.selectDisplay(index); } catch {}
+  };
+
   const handleFullscreen = () => {
     const stage = stageRef.current;
     if (!stage) return;
@@ -191,6 +203,8 @@ export function SessionScreen({ onDisconnect }: Props) {
           )}
         </div>
       </div>
+
+      <DisplayTabs displays={displays} selected={selectedDisplay} onSelect={handleSelectDisplay} />
 
       <div className="toolbar">
         <span className="status-pill">

@@ -3,7 +3,7 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use miru_auth::{AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer};
-use miru_capture::create_capturer;
+use miru_capture::{create_capturer, ScreenCapturer as _};
 use miru_common::{
     message::{AudioCodec, Features, FileTransfer, Msg, Role},
     session::DeviceId,
@@ -314,17 +314,38 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 5. Build a fresh capturer for this session
     let capturer = create_capturer()?;
 
-    // 6. Start capture loop
+    // Send DisplayList so the viewer knows which displays are available.
+    let display_list: Vec<miru_common::message::DisplayInfo> = capturer
+        .displays()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|d| miru_common::message::DisplayInfo {
+            index: d.index,
+            width: d.width,
+            height: d.height,
+            refresh_hz: d.refresh_hz,
+            name: d.name,
+            primary: d.primary,
+        })
+        .collect();
+    let _ = relay
+        .send_msg(&Msg::DisplayList(miru_common::message::DisplayList {
+            displays: display_list,
+        }))
+        .await;
+
+    // 6. Start capture loop (display 0 by default)
     let qos = Arc::new(Mutex::new(BbrQos::new(60, 5000)));
     let (fps, br) = {
         let q = qos.lock();
         (q.fps(), q.bitrate_kbps())
     };
     let bp = Arc::new(FrameController::new());
-    let cap_rx = capture_loop::start(
+    let mut current_display_idx: u8 = 0;
+    let mut cap_rx = capture_loop::start(
         capture_loop::CaptureConfig {
             codec: result.selected_video_codec.clone(),
-            display_idx: 0,
+            display_idx: current_display_idx,
             target_fps: fps,
             bitrate_kbps: br,
             frame_controller: bp.clone(),
@@ -412,6 +433,37 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     }
                     Some(Msg::ClipboardSync(s)) if matches!(permission, Permission::Full) => {
                         let _ = input_handler.handle_clipboard(&s);
+                    }
+                    Some(Msg::SelectDisplay(sel)) => {
+                        if sel.index != current_display_idx {
+                            info!("Display switch: {} → {}", current_display_idx, sel.index);
+                            match create_capturer() {
+                                Ok(new_capturer) => {
+                                    let (fps, br) = {
+                                        let q = qos.lock();
+                                        (q.fps(), q.bitrate_kbps())
+                                    };
+                                    match capture_loop::start(
+                                        capture_loop::CaptureConfig {
+                                            codec: result.selected_video_codec.clone(),
+                                            display_idx: sel.index,
+                                            target_fps: fps,
+                                            bitrate_kbps: br,
+                                            frame_controller: bp.clone(),
+                                        },
+                                        new_capturer,
+                                    ) {
+                                        Ok(new_rx) => {
+                                            // Drop old cap_rx; capture thread sees send fail and exits.
+                                            cap_rx = new_rx;
+                                            current_display_idx = sel.index;
+                                        }
+                                        Err(e) => warn!("Display switch failed: {e}"),
+                                    }
+                                }
+                                Err(e) => warn!("Display switch: capturer create failed: {e}"),
+                            }
+                        }
                     }
                     Some(Msg::FileTransfer(ft)) if ft_cfg.is_some() => {
                         if let Some(cfg) = ft_cfg.as_ref() {

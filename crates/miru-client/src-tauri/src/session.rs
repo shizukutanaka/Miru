@@ -246,6 +246,9 @@ pub async fn run(
                             let _ = tx.try_send(af);
                         }
                     }
+                    Ok(Some(Msg::DisplayList(dl))) => {
+                        let _ = app.emit("display-list", &dl);
+                    }
                     Ok(Some(Msg::QosUpdate(u))) => {
                         // Log host-side QoS adjustments; UI can display these.
                         info!(
