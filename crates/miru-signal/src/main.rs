@@ -338,6 +338,10 @@ async fn process_rdv_msg(
                         .await;
 
                     // Respond to viewer — include host's public address if known.
+                    // relay: false tells the viewer it MAY attempt QUIC P2P directly;
+                    // relay: true means the host has no known public address and the
+                    // viewer must use the relay. The viewer always receives a relay
+                    // token too, so it can fall back regardless.
                     let (host_pub_addr, host_pub_port) = {
                         let entry_ref = state.registry.get(&req.target_id);
                         entry_ref
@@ -345,12 +349,13 @@ async fn process_rdv_msg(
                             .map(|e| (e.pub_addr.clone(), e.pub_port))
                             .unwrap_or((None, None))
                     };
+                    let must_relay = host_pub_addr.is_none();
                     let _ = tx
                         .send(Msg::ConnectAck(ConnectAck {
                             target_id: target,
                             host_addr: host_pub_addr,
                             host_port: host_pub_port,
-                            relay: true,
+                            relay: must_relay,
                         }))
                         .await;
 

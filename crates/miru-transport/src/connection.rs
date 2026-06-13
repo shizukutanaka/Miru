@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use miru_common::{crypto::SessionCipher, message::Msg};
+use rmp_serde;
 use std::sync::{
     atomic::{AtomicU32, Ordering},
     Arc,
@@ -51,7 +52,7 @@ impl Connection {
     }
 
     pub async fn send(&self, msg: &Msg) -> Result<()> {
-        let json = serde_json::to_vec(msg)?;
+        let json = rmp_serde::to_vec_named(msg)?;
         let encrypted = self.tx_cipher.encrypt(&json)?;
 
         // Frame: [4-byte LE length][payload]
@@ -75,7 +76,7 @@ impl Connection {
                 }
                 let payload = &frame[4..];
                 let plain = self.rx_cipher.decrypt(payload)?;
-                let msg: Msg = serde_json::from_slice(&plain)?;
+                let msg: Msg = rmp_serde::from_slice(&plain)?;
                 Ok(Some(msg))
             }
         }

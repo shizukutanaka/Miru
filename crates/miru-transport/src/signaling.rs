@@ -31,8 +31,12 @@ pub enum SignalEvent {
     },
     ConnectAck {
         target_id: String,
+        /// True → must use relay; False → may attempt QUIC P2P first.
         relay: bool,
-        relay_addr: Option<String>,
+        /// Host's STUN-discovered public IP (None if behind symmetric NAT).
+        host_addr: Option<String>,
+        /// Host's STUN-discovered public port.
+        host_port: Option<u16>,
     },
     Error {
         code: u16,
@@ -111,7 +115,8 @@ impl SignalClient {
                             Msg::ConnectAck(ack) => SignalEvent::ConnectAck {
                                 target_id: ack.target_id,
                                 relay: ack.relay,
-                                relay_addr: ack.host_addr,
+                                host_addr: ack.host_addr,
+                                host_port: ack.host_port,
                             },
                             Msg::Error(e) => SignalEvent::Error {
                                 code: e.code,

@@ -14,6 +14,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tracing::info;
 
 use miru_common::{crypto::SessionCipher, message::Msg};
+use rmp_serde;
 
 /// QUIC stream IDs used by Miru. Each direction of a session type gets
 /// its own unidirectional QUIC stream, identified by these IDs.
@@ -143,7 +144,7 @@ impl QuicSendStream {
     /// Send an encrypted message.
     /// Frame format: [4-byte LE length][encrypted payload]
     pub async fn send_msg(&mut self, msg: &Msg) -> Result<()> {
-        let json = serde_json::to_vec(msg)?;
+        let json = rmp_serde::to_vec_named(msg)?;
         let ct = self.cipher.encrypt(&json)?;
         let len = ct.len() as u32;
         self.stream.write_all(&len.to_le_bytes()).await?;
@@ -180,7 +181,7 @@ impl QuicRecvStream {
         let mut buf = vec![0u8; len];
         self.stream.read_exact(&mut buf).await?;
         let plain = self.cipher.decrypt(&buf)?;
-        let msg = serde_json::from_slice(&plain)?;
+        let msg = rmp_serde::from_slice(&plain)?;
         Ok(Some(msg))
     }
 

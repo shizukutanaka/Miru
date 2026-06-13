@@ -73,11 +73,19 @@ pub async fn run(
     let mut host_pub_addr: Option<String> = None;
     let (relay_addr, relay_port, token) = loop {
         match signal.next_event().await {
-            Some(SignalEvent::ConnectAck { relay_addr: pub_addr, .. }) => {
-                // relay_addr here holds the host's STUN address (None if behind sym-NAT).
-                host_pub_addr = pub_addr;
+            Some(SignalEvent::ConnectAck { host_addr, host_port, relay, .. }) => {
+                // Compose addr:port for a directly usable socket address string.
+                host_pub_addr = match (host_addr, host_port) {
+                    (Some(a), Some(p)) => Some(format!("{}:{}", a, p)),
+                    (Some(a), None) => Some(a),
+                    _ => None,
+                };
                 if let Some(ref a) = host_pub_addr {
-                    info!("Host public addr (direct path available): {}", a);
+                    info!(
+                        "Host public addr: {} ({})",
+                        a,
+                        if relay { "relay required" } else { "direct path may be possible — not yet wired" }
+                    );
                 }
             }
             Some(SignalEvent::IncomingConnection {
