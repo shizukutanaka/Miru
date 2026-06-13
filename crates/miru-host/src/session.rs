@@ -652,7 +652,11 @@ async fn check_or_pair(
     let pubkey_b64 = B64.encode(pubkey);
     let mut acl = config.acl.lock();
     match acl.check(device_str, &pubkey_b64) {
-        TrustDecision::Trusted(p) => Ok(p),
+        TrustDecision::Trusted(p) => {
+            acl.touch(device_str, now_unix());
+            let _ = acl.save(&config.config_dir.join("acl.json"));
+            Ok(p)
+        }
         TrustDecision::Unknown => {
             // v0.1 behavior: auto-accept on first connection (TOFU — Trust On First Use).
             // The fingerprint is printed prominently so the user can verify out-of-band.

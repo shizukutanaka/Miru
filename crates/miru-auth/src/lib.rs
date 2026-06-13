@@ -183,6 +183,13 @@ impl AclStore {
         self.peers.insert(peer.device_id.clone(), peer);
     }
 
+    /// Update the `last_seen` timestamp for a known peer (call on every successful reconnect).
+    pub fn touch(&mut self, device_id: &str, now: u64) {
+        if let Some(peer) = self.peers.get_mut(device_id) {
+            peer.last_seen = now;
+        }
+    }
+
     pub fn revoke(&mut self, device_id: &str) -> bool {
         self.peers.remove(device_id).is_some()
     }
@@ -284,6 +291,26 @@ mod tests {
     /// device_id would pass check() because both sides of the comparison
     /// evaluate to the same device_id string — making TOFU pinning a no-op
     /// and enabling impersonation by any passive eavesdropper on the signal.
+    #[test]
+    fn acl_touch_updates_last_seen() {
+        let mut acl = AclStore::default();
+        acl.trust(TrustedPeer {
+            device_id: "dev1".into(),
+            pubkey_b64: "key1".into(),
+            fingerprint: "AB:CD".into(),
+            permission: Permission::Control,
+            first_seen: 1000,
+            last_seen: 1000,
+            friendly_name: None,
+        });
+        acl.touch("dev1", 9999);
+        let peer = acl.list().into_iter().find(|p| p.device_id == "dev1").unwrap();
+        assert_eq!(peer.last_seen, 9999, "touch must update last_seen");
+        assert_eq!(peer.first_seen, 1000, "touch must not change first_seen");
+        // touching unknown device is a no-op
+        acl.touch("no-such-device", 9999); // must not panic
+    }
+
     #[test]
     fn acl_rejects_device_id_impersonation() {
         let alice_id = DeviceIdentity::generate();
