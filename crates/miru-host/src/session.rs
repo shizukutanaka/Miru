@@ -97,7 +97,12 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         multi_monitor: true,
     };
 
-    let result = host_handshake(&mut relay, &config.identity.signing_key, host_features).await?;
+    let result = time::timeout(
+        Duration::from_secs(15),
+        host_handshake(&mut relay, &config.identity.signing_key, host_features),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("handshake timed out after 15 s"))??;
     info!(
         "Handshake complete: session={} codec={:?}",
         result.session_id, result.selected_video_codec
