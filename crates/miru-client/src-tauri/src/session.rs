@@ -17,7 +17,7 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{mpsc, oneshot};
+use tokio::{sync::{mpsc, oneshot}, time};
 use tracing::{info, warn};
 
 use crate::state::SessionStats;
@@ -106,7 +106,12 @@ pub async fn run(
         ..Default::default()
     };
 
-    let result = viewer_handshake(&mut relay, &identity.signing_key, viewer_features).await?;
+    let result = time::timeout(
+        std::time::Duration::from_secs(15),
+        viewer_handshake(&mut relay, &identity.signing_key, viewer_features),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("handshake timed out after 15 s"))??;
     let host_fpr = pubkey_fingerprint(&result.peer_identity_pubkey);
     info!(
         "Handshake complete: codec={:?} host_fpr={}",
@@ -186,12 +191,29 @@ pub async fn run(
                             Err(e) => warn!("decode: {}", e),
                         }
                     }
-                    Ok(Some(Msg::Pong(p))) => {
+                    Ok(Some(Msg::Ping(p))) => {
+                        // Echo Pong back so the host can measure RTT.
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .unwrap_or_default().as_millis() as u64;
                         let rtt = now.saturating_sub(p.ts) as u32;
                         stats.lock().rtt_ms = rtt;
+                        let _ = relay.send_msg(&Msg::Pong(miru_common::message::Pong {
+                            ts: p.ts,
+                            server_ts: now,
+                        })).await;
+                    }
+                    Ok(Some(Msg::QosUpdate(u))) => {
+                        // Log host-side QoS adjustments; UI can display these.
+                        info!(
+                            "QoS update from host: fps={} bitrate={}kbps quality={}",
+                            u.fps, u.bitrate_kbps, u.quality
+                        );
+                        let _ = app.emit("qos-update", serde_json::json!({
+                            "fps": u.fps,
+                            "bitrate_kbps": u.bitrate_kbps,
+                            "quality": u.quality,
+                        }));
                     }
                     Ok(Some(Msg::Close(reason))) => {
                         info!("Host closed: {} {}", reason.code, reason.reason);
