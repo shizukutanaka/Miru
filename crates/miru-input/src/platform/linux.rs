@@ -44,10 +44,14 @@ struct InputEventRaw {
 static UINPUT: Lazy<Mutex<Option<UinputDevice>>> =
     Lazy::new(|| Mutex::new(UinputDevice::new().ok()));
 
+// Use a resolution-independent 0-65535 coordinate space for ABS events,
+// same as the Windows MOUSEEVENTF_ABSOLUTE convention. The compositor
+// maps these to actual screen pixels via the axis calibration reported
+// in UI_ABS_SETUP, so no hardcoded screen resolution is needed.
+const ABS_MAX: i32 = 65535;
+
 struct UinputDevice {
     fd: RawFd,
-    screen_w: i32,
-    screen_h: i32,
 }
 
 impl UinputDevice {
@@ -82,10 +86,6 @@ impl UinputDevice {
             libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_Y as libc::c_int);
             libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_WHEEL as libc::c_int);
 
-            // Detect screen resolution
-            let screen_w = 1920i32;
-            let screen_h = 1080i32;
-
             // Enable absolute axes (for absolute mouse positioning)
             libc::ioctl(fd, UI_SET_ABSBIT as libc::c_ulong, ABS_X as libc::c_int);
             libc::ioctl(fd, UI_SET_ABSBIT as libc::c_ulong, ABS_Y as libc::c_int);
@@ -107,13 +107,44 @@ impl UinputDevice {
 
             const UI_DEV_SETUP: libc::c_ulong = 0x405c5503;
             libc::ioctl(fd, UI_DEV_SETUP, &setup as *const _);
+
+            // Configure ABS axis ranges so X11/Wayland can map [0, ABS_MAX]
+            // to actual screen coordinates — resolution-independent.
+            #[repr(C)]
+            struct InputAbsinfo {
+                value: i32,
+                minimum: i32,
+                maximum: i32,
+                fuzz: i32,
+                flat: i32,
+                resolution: i32,
+            }
+            #[repr(C)]
+            struct UinputAbsSetup {
+                code: u16,
+                _pad: u16,
+                absinfo: InputAbsinfo,
+            }
+            const UI_ABS_SETUP: libc::c_ulong = 0x40186504;
+            for code in [ABS_X, ABS_Y] {
+                let abs_setup = UinputAbsSetup {
+                    code,
+                    _pad: 0,
+                    absinfo: InputAbsinfo {
+                        value: 0,
+                        minimum: 0,
+                        maximum: ABS_MAX,
+                        fuzz: 0,
+                        flat: 0,
+                        resolution: 0,
+                    },
+                };
+                libc::ioctl(fd, UI_ABS_SETUP, &abs_setup as *const _);
+            }
+
             libc::ioctl(fd, UI_DEV_CREATE as libc::c_ulong);
 
-            Ok(Self {
-                fd,
-                screen_w,
-                screen_h,
-            })
+            Ok(Self { fd })
         }
     }
 
@@ -139,8 +170,8 @@ impl UinputDevice {
     }
 
     fn mouse_move_abs(&self, x: f32, y: f32) {
-        let abs_x = (x * self.screen_w as f32) as i32;
-        let abs_y = (y * self.screen_h as f32) as i32;
+        let abs_x = (x * ABS_MAX as f32) as i32;
+        let abs_y = (y * ABS_MAX as f32) as i32;
         self.write_event(EV_ABS, ABS_X, abs_x);
         self.write_event(EV_ABS, ABS_Y, abs_y);
         self.syn();

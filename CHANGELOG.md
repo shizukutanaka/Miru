@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Linux uinput absolute mouse positioning**: replaced hardcoded 1920×1080 screen size
+  with a resolution-independent 0-65535 coordinate space (same as Windows convention);
+  adds `UI_ABS_SETUP` ioctl to configure ABS axis ranges so X11/Wayland can correctly
+  map virtual device coordinates to physical screen pixels on any resolution
 - **Relay token validation**: relay server now rejects connections with unknown tokens
   (those not pre-registered by the rendezvous server); prevents resource exhaustion via
   fabricated tokens; unknown token logs a warning and drops the WebSocket immediately
