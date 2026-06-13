@@ -46,17 +46,20 @@ pub fn start(
     std::thread::Builder::new()
         .name("miru-capture".to_string())
         .spawn(move || {
+            use std::sync::atomic::Ordering;
+
             // Select display
             if let Err(e) = capturer.select_display(display_idx) {
                 warn!("select display {}: {}", display_idx, e);
             }
 
-            // Create encoder — get display size from first frame
-            let frame_interval = Duration::from_secs_f64(1.0 / fps as f64);
             let mut encoder: Option<Encoder> = None;
             let mut seq: u64 = 0;
             let mut last_frame = Instant::now();
             let mut force_keyframe = true;
+            // Track last-seen QoS values so we only call update_bitrate on change.
+            let mut cur_fps = fps;
+            let mut cur_bitrate = bitrate;
 
             info!(
                 "Capture loop started: display={} fps={} bitrate={}kbps codec={:?}",
@@ -64,7 +67,24 @@ pub fn start(
             );
 
             loop {
-                // Rate limiting
+                // Re-read QoS targets every frame — written by session loop via apply_qos().
+                // This is how BBR tick results actually reach the encoder.
+                let new_fps = fc.target_fps.load(Ordering::Relaxed);
+                let new_bitrate = fc.target_bitrate_kbps.load(Ordering::Relaxed);
+                if new_fps > 0 && new_fps != cur_fps {
+                    cur_fps = new_fps;
+                }
+                if new_bitrate > 0 && new_bitrate != cur_bitrate {
+                    cur_bitrate = new_bitrate;
+                    // Update the live encoder without re-initialising it
+                    // (avoids a keyframe disruption just to change bitrate).
+                    if let Some(ref mut enc) = encoder {
+                        enc.update_bitrate(cur_bitrate);
+                    }
+                }
+
+                // Rate limiting — uses dynamic cur_fps set by BBR.
+                let frame_interval = Duration::from_secs_f64(1.0 / cur_fps.max(1) as f64);
                 let elapsed = last_frame.elapsed();
                 if elapsed < frame_interval {
                     std::thread::sleep(frame_interval - elapsed);
@@ -88,10 +108,9 @@ pub fn start(
                 last_frame = Instant::now();
 
                 // Lazy encoder init (need frame dimensions from first frame).
-                // get_or_insert_with can't propagate Results so we use a match.
                 if encoder.is_none() {
                     info!("Encoder init: {}×{} {:?}", frame.width, frame.height, codec);
-                    match Encoder::new(codec.clone(), frame.width, frame.height, fps, bitrate) {
+                    match Encoder::new(codec.clone(), frame.width, frame.height, cur_fps, cur_bitrate) {
                         Ok(enc) => {
                             encoder = Some(enc);
                         }

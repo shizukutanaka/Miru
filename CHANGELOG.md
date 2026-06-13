@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **BBR QoS adaptation was inert** (Socratic: the QoS loop computed new fps/bitrate
+  every second but only sent `QosUpdate` to the viewer for display — the host's
+  own encoder ran at the initial fixed fps/bitrate for the entire session).
+  Fixed by adding `target_fps: AtomicU8` and `target_bitrate_kbps: AtomicU32` to
+  `FrameController`, seeded from the initial BBR values. The session loop now calls
+  `bp.apply_qos(u.fps, u.bitrate_kbps)` on every BBR tick result. The capture
+  thread reads these atomics every frame and calls `encoder.update_bitrate()` when
+  the value changes. FPS changes update `frame_interval` in-place. No encoder
+  restart needed (avoids keyframe disruption on every adaptation).
+
 ### Performance
 - **Recording uses binary container instead of per-frame JPEG files**: the old
   approach wrote one `{:08}.jpg` file per frame — 18,000 files per 10-min 30fps

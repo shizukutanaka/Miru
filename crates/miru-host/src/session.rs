@@ -387,7 +387,11 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         let q = qos.lock();
         (q.fps(), q.bitrate_kbps())
     };
-    let bp = Arc::new(FrameController::new());
+    // FrameController is seeded with the initial BBR values and updated
+    // live via apply_qos() whenever BBR tick fires. The capture loop
+    // reads target_fps and target_bitrate_kbps each frame so that QoS
+    // changes propagate without restarting the encoder thread.
+    let bp = Arc::new(FrameController::new(fps, br));
     let mut current_display_idx: u8 = 0;
     let mut cap_rx = capture_loop::start(
         capture_loop::CaptureConfig {
@@ -575,6 +579,10 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     // MutexGuard drops here — before any await
                 };
                 if let Some(u) = bbr_update {
+                    // Push new fps/bitrate to the capture thread via shared atomics.
+                    // This is what makes BBR adaptation actually affect the encoder;
+                    // previously QosUpdate was only sent to the viewer for display.
+                    bp.apply_qos(u.fps, u.bitrate_kbps);
                     let _ = relay.send_msg(&Msg::QosUpdate(u)).await;
                 }
                 let _ = relay.send_msg(&Msg::Ping(miru_common::message::Ping { ts: now_ms() })).await;

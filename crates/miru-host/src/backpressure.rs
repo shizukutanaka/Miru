@@ -15,10 +15,10 @@
 //! GPU cycles (5-50ms each). Skip-at-encoder is second-best. Skip-at-network
 //! is worst (we already paid encode cost).
 
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Maximum number of in-flight frames before backpressure kicks in.
 /// Tuned for ~1 RTT @ 60fps + small buffer = 3-5 frames.
@@ -38,16 +38,37 @@ pub struct FrameController {
     sent: AtomicU64,
     /// Last keyframe-request timestamp (so we don't spam).
     last_keyframe_request: Mutex<Option<Instant>>,
+    /// BBR-controlled target FPS — written by session loop, read by capture thread.
+    /// 0 means "use initial value" (not yet set by BBR).
+    pub target_fps: AtomicU8,
+    /// BBR-controlled target bitrate (kbps) — written by session loop, read by capture thread.
+    /// 0 means "use initial value".
+    pub target_bitrate_kbps: AtomicU32,
 }
 
 impl FrameController {
-    pub fn new() -> Self {
+    pub fn new(initial_fps: u8, initial_bitrate_kbps: u32) -> Self {
         Self {
             in_flight: AtomicI32::new(0),
             captured: AtomicU64::new(0),
             skipped: AtomicU64::new(0),
             sent: AtomicU64::new(0),
             last_keyframe_request: Mutex::new(None),
+            target_fps: AtomicU8::new(initial_fps),
+            target_bitrate_kbps: AtomicU32::new(initial_bitrate_kbps),
+        }
+    }
+
+    /// Update QoS parameters from BBR tick. Called from the session loop;
+    /// the capture thread picks these up on the next frame iteration.
+    pub fn apply_qos(&self, fps: u8, bitrate_kbps: u32) {
+        let old_fps = self.target_fps.swap(fps, Ordering::Relaxed);
+        let old_br = self.target_bitrate_kbps.swap(bitrate_kbps, Ordering::Relaxed);
+        if old_fps != fps || old_br != bitrate_kbps {
+            info!(
+                "QoS applied to capture: {}fps {}kbps → {}fps {}kbps",
+                old_fps, old_br, fps, bitrate_kbps
+            );
         }
     }
 
@@ -145,7 +166,7 @@ mod tests {
 
     #[test]
     fn no_skip_when_keeping_up() {
-        let c = FrameController::new();
+        let c = FrameController::new(30, 2000);
         for _ in 0..10 {
             assert!(c.should_capture());
             c.on_send();
@@ -157,7 +178,7 @@ mod tests {
 
     #[test]
     fn skip_when_lagging() {
-        let c = FrameController::new();
+        let c = FrameController::new(30, 2000);
         // Fill in-flight
         for _ in 0..MAX_IN_FLIGHT {
             assert!(c.should_capture());
@@ -171,7 +192,7 @@ mod tests {
 
     #[test]
     fn keyframe_request_cooldown() {
-        let c = FrameController::new();
+        let c = FrameController::new(30, 2000);
         for _ in 0..10 {
             c.on_send();
         }
