@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, TrustedPeer } from "../lib/tauri";
+import { api, LanPeer, TrustedPeer } from "../lib/tauri";
 
 interface Props {
   onConnect: () => void;
@@ -14,9 +14,14 @@ export function ConnectScreen({ onConnect }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [peers, setPeers] = useState<TrustedPeer[]>([]);
+  const [lanPeers, setLanPeers] = useState<LanPeer[]>([]);
 
   useEffect(() => {
     api.listTrustedPeers().then(setPeers);
+    const scanLan = () => api.discoverLanPeers().then(setLanPeers).catch(() => {});
+    scanLan();
+    const interval = setInterval(scanLan, 3000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleConnect = async () => {
@@ -41,12 +46,13 @@ export function ConnectScreen({ onConnect }: Props) {
     }
   };
 
-  const handleQuickConnect = async (peer: TrustedPeer) => {
-    setDeviceId(peer.device_id);
+  const handleQuickConnect = async (targetId: string) => {
+    setDeviceId(targetId);
     setError(null);
     setConnecting(true);
+    localStorage.setItem("miru.signal", signalUrl);
     try {
-      await api.connect(peer.device_id, signalUrl);
+      await api.connect(targetId, signalUrl);
       onConnect();
     } catch (e) {
       setError(String(e));
@@ -106,6 +112,27 @@ export function ConnectScreen({ onConnect }: Props) {
 
         {error && <div className="error-banner">{error}</div>}
 
+        {lanPeers.length > 0 && (
+          <div className="peers-list">
+            <h3>LAN上のデバイス</h3>
+            {lanPeers.map((p) => (
+              <div key={p.device_id} className="peer-row">
+                <div className="peer-info">
+                  <div className="peer-id">{p.friendly_name || p.device_id}</div>
+                  <div className="peer-fpr">{p.addresses[0] ?? ""}</div>
+                </div>
+                <button
+                  className="button-ghost"
+                  onClick={() => handleQuickConnect(p.device_id)}
+                  disabled={connecting}
+                >
+                  接続
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {peers.length > 0 && (
           <div className="peers-list">
             <h3>信頼済みデバイス</h3>
@@ -117,7 +144,7 @@ export function ConnectScreen({ onConnect }: Props) {
                 </div>
                 <button
                   className="button-ghost"
-                  onClick={() => handleQuickConnect(p)}
+                  onClick={() => handleQuickConnect(p.device_id)}
                   disabled={connecting}
                 >
                   接続

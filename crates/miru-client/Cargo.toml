@@ -27,6 +27,7 @@ miru-audio = { path = "../miru-audio" }
 miru-agent = { path = "../miru-agent" }
 miru-transparency = { path = "../miru-transparency" }
 miru-constellation = { path = "../miru-constellation" }
+miru-discovery = { path = "../miru-discovery" }
 
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

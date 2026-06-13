@@ -30,6 +30,7 @@ pub struct AppState {
     config_dir: PathBuf,
     session: Arc<Mutex<Option<ActiveSession>>>,
     stats: Arc<Mutex<SessionStats>>,
+    discovery: Arc<Mutex<Option<miru_discovery::Discovery>>>,
 }
 
 struct ActiveSession {
@@ -56,7 +57,10 @@ impl AppState {
             });
         let acl = AclStore::load(&config_dir.join("acl.json")).unwrap_or_default();
 
-        info!("Viewer fingerprint: {}", identity.pubkey_fingerprint());
+        let fingerprint = identity.pubkey_fingerprint();
+        info!("Viewer fingerprint: {}", fingerprint);
+
+        let discovery = start_discovery(&fingerprint);
 
         Self {
             identity: Arc::new(identity),
@@ -64,6 +68,7 @@ impl AppState {
             config_dir,
             session: Arc::new(Mutex::new(None)),
             stats: Arc::new(Mutex::new(SessionStats::default())),
+            discovery: Arc::new(Mutex::new(discovery)),
         }
     }
 
@@ -346,6 +351,28 @@ impl AppState {
             .collect()
     }
 
+    pub fn discover_lan_peers(&self) -> Vec<crate::commands::LanPeer> {
+        let guard = self.discovery.lock();
+        let Some(ref disc) = *guard else { return vec![] };
+        disc.snapshot(None)
+            .into_iter()
+            .map(|p| crate::commands::LanPeer {
+                device_id: p.device_id,
+                friendly_name: p.friendly_name,
+                addresses: p.addresses.iter().map(|a| a.to_string()).collect(),
+                port: p.port,
+                form_factor: match p.form_factor {
+                    miru_constellation::FormFactor::Laptop => "laptop",
+                    miru_constellation::FormFactor::Phone => "phone",
+                    miru_constellation::FormFactor::Tablet => "tablet",
+                    miru_constellation::FormFactor::Server => "server",
+                    _ => "desktop",
+                }
+                .into(),
+            })
+            .collect()
+    }
+
     pub fn list_recordings(&self) -> Vec<crate::commands::RecordingSummary> {
         let dir = self.config_dir.join("recordings");
         if !dir.exists() {
@@ -389,6 +416,41 @@ impl AppState {
         }
         out.sort_by(|a, b| b.start_ts_ms.cmp(&a.start_ts_ms));
         out
+    }
+}
+
+/// Start mDNS discovery (browse + advertise). Non-fatal if unavailable.
+fn start_discovery(fingerprint: &str) -> Option<miru_discovery::Discovery> {
+    use miru_constellation::{DeviceCapabilities, FormFactor};
+    use miru_discovery::{Discovery, LocalAdvertisement};
+
+    let advert = LocalAdvertisement {
+        device_id: fingerprint.to_string(),
+        constellation_pubkey: String::new(),
+        friendly_name: format!("Miru Viewer ({})", fingerprint),
+        form_factor: FormFactor::Desktop,
+        port: 0, // viewer doesn't serve inbound connections
+        capabilities: DeviceCapabilities {
+            displays: vec![],
+            has_microphone: false,
+            has_speakers: true,
+            has_camera: false,
+            has_hw_encode: false,
+            battery_pct: None,
+            form_factor: FormFactor::Desktop,
+            friendly_name: String::new(),
+            os_family: std::env::consts::OS.to_string(),
+        },
+    };
+    match Discovery::start(advert) {
+        Ok(d) => {
+            info!("mDNS discovery started");
+            Some(d)
+        }
+        Err(e) => {
+            tracing::warn!("mDNS discovery unavailable (non-fatal): {}", e);
+            None
+        }
     }
 }
 

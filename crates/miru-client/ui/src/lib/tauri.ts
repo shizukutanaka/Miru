@@ -83,6 +83,7 @@ export const api = {
     listen<string>("clipboard-sync", (e) => cb(e.payload)),
   selectDisplay: (index: number) =>
     invoke<void>("select_display", { index }),
+  discoverLanPeers: () => invoke<LanPeer[]>("discover_lan_peers"),
 };
 
 export interface DisplayInfo {
@@ -92,4 +93,12 @@ export interface DisplayInfo {
   refresh_hz: number;
   name: string;
   primary: boolean;
+}
+
+export interface LanPeer {
+  device_id: string;
+  friendly_name: string;
+  addresses: string[];
+  port: number;
+  form_factor: string;
 }

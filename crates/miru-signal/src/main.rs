@@ -7,6 +7,7 @@
 use anyhow::Result;
 use axum::{
     extract::{
+        connect_info::ConnectInfo,
         ws::{Message, WebSocket, WebSocketUpgrade},
         Query, State,
     },
@@ -17,17 +18,29 @@ use axum::{
 use dashmap::DashMap;
 use miru_common::message::{ConnectAck, Msg, RegisterAck, RelayOffer};
 use serde::Deserialize;
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{net::{IpAddr, SocketAddr}, sync::Arc, time::{Duration, Instant}};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
+/// Per-IP bucket for Connect request rate limiting.
+struct ConnectBucket {
+    count: u32,
+    window_start: Instant,
+}
+
+/// Max Connect requests per IP per window.
+const CONNECT_RATE_LIMIT: u32 = 20;
+const CONNECT_RATE_WINDOW: Duration = Duration::from_secs(60);
+
 #[derive(Clone)]
 struct AppState {
     registry: Arc<DashMap<String, DeviceEntry>>,
     relay_sessions: Arc<DashMap<String, RelaySlot>>,
+    /// Per-IP rate limiter for Connect requests (prevents connection flooding).
+    connect_rate: Arc<DashMap<IpAddr, ConnectBucket>>,
     max_devices: usize,
     max_relay_sessions: usize,
     /// Port the relay WebSocket server is listening on (for advertising to peers).
@@ -76,9 +89,29 @@ impl AppState {
         Self {
             registry: Arc::new(DashMap::new()),
             relay_sessions: Arc::new(DashMap::new()),
+            connect_rate: Arc::new(DashMap::new()),
             max_devices,
             max_relay_sessions,
             relay_port,
+        }
+    }
+
+    /// Returns true if the IP is within rate limit, false if it should be blocked.
+    fn check_connect_rate(&self, ip: IpAddr) -> bool {
+        let now = Instant::now();
+        let mut entry = self.connect_rate.entry(ip).or_insert_with(|| ConnectBucket {
+            count: 0,
+            window_start: now,
+        });
+        if now.duration_since(entry.window_start) >= CONNECT_RATE_WINDOW {
+            entry.count = 1;
+            entry.window_start = now;
+            true
+        } else if entry.count < CONNECT_RATE_LIMIT {
+            entry.count += 1;
+            true
+        } else {
+            false
         }
     }
 }
@@ -119,7 +152,10 @@ async fn main() -> Result<()> {
     info!("Rendezvous: {}", rdv_addr);
     info!("Relay:      {}", relay_addr);
 
-    tokio::try_join!(run_server(rdv, rdv_addr), run_server(relay, relay_addr),)?;
+    tokio::try_join!(
+        run_server_with_connect_info(rdv, rdv_addr),
+        run_server(relay, relay_addr),
+    )?;
     Ok(())
 }
 
@@ -128,16 +164,27 @@ async fn run_server(app: Router, addr: SocketAddr) -> Result<()> {
     axum::serve(listener, app).await.map_err(Into::into)
 }
 
+async fn run_server_with_connect_info(app: Router, addr: SocketAddr) -> Result<()> {
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .map_err(Into::into)
+}
+
 // ─── Rendezvous ───────────────────────────────────────────────────────────────
 
-async fn rendezvous_handler(ws: WebSocketUpgrade, State(s): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(move |sock| rendezvous_session(sock, s))
+async fn rendezvous_handler(
+    ws: WebSocketUpgrade,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    State(s): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |sock| rendezvous_session(sock, s, peer.ip()))
 }
 
 /// Interval between server-initiated WebSocket pings.
 const RENDEZVOUS_PING_INTERVAL: Duration = Duration::from_secs(30);
 
-async fn rendezvous_session(mut sock: WebSocket, state: AppState) {
+async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<Msg>(32);
     let mut my_id: Option<String> = None;
     let mut ping_ticker = tokio::time::interval(RENDEZVOUS_PING_INTERVAL);
@@ -155,7 +202,7 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState) {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<Msg>(&text) {
-                            Ok(m) => process_rdv_msg(&state, m, &tx, &mut my_id).await,
+                            Ok(m) => process_rdv_msg(&state, m, &tx, &mut my_id, peer_ip).await,
                             Err(e) => warn!("parse error: {}", e),
                         }
                     }
@@ -185,6 +232,7 @@ async fn process_rdv_msg(
     msg: Msg,
     tx: &mpsc::Sender<Msg>,
     my_id: &mut Option<String>,
+    peer_ip: IpAddr,
 ) {
     match msg {
         Msg::Register(reg) => {
@@ -223,7 +271,17 @@ async fn process_rdv_msg(
         }
         Msg::Connect(req) => {
             let target = req.target_id.clone();
-            info!("Connect request → {}", target);
+            if !state.check_connect_rate(peer_ip) {
+                warn!("Rate limit exceeded for {} — dropping Connect to {}", peer_ip, target);
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 429,
+                        message: "too many requests — retry in 60s".to_string(),
+                    }))
+                    .await;
+                return;
+            }
+            info!("Connect request {} → {}", peer_ip, target);
 
             match state.registry.get(&target) {
                 Some(entry) => {

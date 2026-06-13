@@ -34,6 +34,7 @@ fn main() {
             commands::issue_agent_token,
             commands::audit_summary,
             commands::audit_entries,
+            commands::discover_lan_peers,
             commands::constellation_devices,
             commands::list_recordings,
         ])

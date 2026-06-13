@@ -276,6 +276,22 @@ pub fn audit_entries(
         .map_err(|e| e.to_string())
 }
 
+// ─── LAN discovery ───────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct LanPeer {
+    pub device_id: String,
+    pub friendly_name: String,
+    pub addresses: Vec<String>,
+    pub port: u16,
+    pub form_factor: String,
+}
+
+#[tauri::command]
+pub fn discover_lan_peers(state: tauri::State<'_, AppState>) -> Vec<LanPeer> {
+    state.discover_lan_peers()
+}
+
 // ─── Constellation ───────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
