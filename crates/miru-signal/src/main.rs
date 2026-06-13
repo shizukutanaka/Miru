@@ -30,6 +30,8 @@ struct AppState {
     relay_sessions: Arc<DashMap<String, RelaySlot>>,
     max_devices: usize,
     max_relay_sessions: usize,
+    /// Port the relay WebSocket server is listening on (for advertising to peers).
+    relay_port: u16,
 }
 
 struct DeviceEntry {
@@ -62,7 +64,7 @@ struct RelaySlot {
 }
 
 impl AppState {
-    fn new() -> Self {
+    fn new(relay_port: u16) -> Self {
         let max_devices = std::env::var("MIRU_MAX_DEVICES")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -76,6 +78,7 @@ impl AppState {
             relay_sessions: Arc::new(DashMap::new()),
             max_devices,
             max_relay_sessions,
+            relay_port,
         }
     }
 }
@@ -90,7 +93,11 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let state = AppState::new();
+    let relay_port: u16 = std::env::var("MIRU_RELAY_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(21117);
+    let state = AppState::new(relay_port);
 
     let rdv = Router::new()
         .route("/ws", get(rendezvous_handler))
@@ -106,10 +113,6 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(21115);
-    let relay_port: u16 = std::env::var("MIRU_RELAY_PORT")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(21117);
     let rdv_addr: SocketAddr = format!("0.0.0.0:{rdv_port}").parse()?;
     let relay_addr: SocketAddr = format!("0.0.0.0:{relay_port}").parse()?;
 
@@ -198,9 +201,10 @@ async fn process_rdv_msg(
                 .send(Msg::RegisterAck(RegisterAck {
                     device_id: reg.device_id,
                     relay_addr: Some(format!(
-                        "{}:21117",
+                        "{}:{}",
                         std::env::var("MIRU_PUBLIC_HOST")
-                            .unwrap_or_else(|_| "localhost".to_string())
+                            .unwrap_or_else(|_| "localhost".to_string()),
+                        state.relay_port,
                     )),
                 }))
                 .await;
@@ -246,7 +250,7 @@ async fn process_rdv_msg(
                         .tx
                         .send(Msg::Relay(RelayOffer {
                             relay_addr: public_host.clone(),
-                            relay_port: 21117,
+                            relay_port: state.relay_port,
                             token: token.clone(),
                         }))
                         .await;
@@ -265,7 +269,7 @@ async fn process_rdv_msg(
                     let _ = tx
                         .send(Msg::Relay(RelayOffer {
                             relay_addr: public_host,
-                            relay_port: 21117,
+                            relay_port: state.relay_port,
                             token,
                         }))
                         .await;
