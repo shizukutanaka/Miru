@@ -138,6 +138,18 @@ impl McpServer {
         )?;
         let png = self.bridge.capture_screen(display).await?;
 
+        // Optional sub-region crop (normalized 0-1 coordinates).
+        let png = if let Some(region) = args.get("region") {
+            let rx = region.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let ry = region.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let rw = region.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let rh = region.get("height").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            crop_png_region(&png, rx as f32, ry as f32, rw as f32, rh as f32)
+                .unwrap_or(png) // on failure, fall back to full capture
+        } else {
+            png
+        };
+
         // Provenance tagging (defense against Visual Prompt Injection,
         // arXiv:2506.02456). We cannot stop a malicious instruction embedded in
         // the pixels from reaching the model — the literature shows model-level
@@ -443,6 +455,36 @@ fn parse_key(s: &str) -> Result<u32> {
         "F12" => 0x7B,
         _ => bail!("unknown key: {s}"),
     })
+}
+
+/// Crop a PNG image to a normalized sub-region.
+/// Returns None on any image processing error (caller falls back to full image).
+fn crop_png_region(png: &[u8], rx: f32, ry: f32, rw: f32, rh: f32) -> Option<Vec<u8>> {
+    use image::ImageReader;
+    use std::io::Cursor;
+
+    let img = ImageReader::new(Cursor::new(png))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+
+    let full_w = img.width() as f32;
+    let full_h = img.height() as f32;
+
+    let x = (rx.clamp(0.0, 1.0) * full_w) as u32;
+    let y = (ry.clamp(0.0, 1.0) * full_h) as u32;
+    let w = (rw.clamp(0.0, 1.0) * full_w) as u32;
+    let h = (rh.clamp(0.0, 1.0) * full_h) as u32;
+    let w = w.min(img.width().saturating_sub(x)).max(1);
+    let h = h.min(img.height().saturating_sub(y)).max(1);
+
+    let cropped = img.crop_imm(x, y, w, h);
+    let mut out = Vec::new();
+    cropped
+        .write_to(&mut Cursor::new(&mut out), image::ImageFormat::Png)
+        .ok()?;
+    Some(out)
 }
 
 #[cfg(test)]

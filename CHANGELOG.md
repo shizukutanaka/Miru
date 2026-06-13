@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **OpenUrl protocol message**: new `Msg::OpenUrl(OpenUrlRequest)` lets the MCP
+  (or future viewer UI) ask the host to open a URL in its default browser; handled
+  in Full-permission sessions via the `open` crate; `RemoteBridge.open_url()` now
+  sends the message instead of returning an error; only http(s) URLs accepted
+- **MCP ClipboardRead auto-approved**: the MCP confirmation policy now auto-approves
+  `Capability::ClipboardRead` (non-destructive, requires explicitly minted token);
+  previously auto-denied; `miru_clipboard_read` tool description updated accordingly
+- **STUN host public address in ConnectAck**: host runs STUN on startup (5 s timeout,
+  non-fatal); public addr/port included in `Register` message; signal server stores it
+  per-device and populates `ConnectAck.host_addr`/`host_port`; viewer captures it and
+  shows "経路: リレー (直接: ip:port)" in the session overlay — sets up future direct path
+- **Linux text injection**: `InputKind::Text` now works on Linux by writing to clipboard
+  via `xclip` then injecting `Ctrl+V` via uinput; previously a no-op warning stub;
+  enables the MCP's `miru_key_type` tool on Linux hosts
 - **Viewer-initiated clipboard pull**: new `RequestClipboard` protocol message lets the viewer
   explicitly request the host's current clipboard text; "クリップボード受信" toolbar button sends
   the request and the host responds immediately via `ClipboardSync`; `miru-mcp` remote bridge

@@ -28,6 +28,13 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
   const [hostPubAddr, setHostPubAddr] = useState<string | null>(null);
 
+  const connQuality: "good" | "warn" | "poor" =
+    stats.rtt_ms > 300 || stats.packet_loss_pct > 10
+      ? "poor"
+      : stats.rtt_ms > 150 || stats.packet_loss_pct > 3
+      ? "warn"
+      : "good";
+
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
   if (!imgRef.current) imgRef.current = new Image();
@@ -285,6 +292,14 @@ export function SessionScreen({ onDisconnect }: Props) {
       </div>
 
       <DisplayTabs displays={displays} selected={selectedDisplay} onSelect={handleSelectDisplay} />
+
+      {status === "connected" && connQuality !== "good" && (
+        <div className={`quality-banner quality-${connQuality}`}>
+          {connQuality === "poor"
+            ? `接続が不安定 — RTT ${stats.rtt_ms}ms / 損失 ${stats.packet_loss_pct.toFixed(1)}%`
+            : `接続状態が低下 — RTT ${stats.rtt_ms}ms`}
+        </div>
+      )}
 
       <input
         ref={fileInputRef}
