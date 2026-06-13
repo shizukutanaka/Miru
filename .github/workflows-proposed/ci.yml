@@ -119,6 +119,8 @@ jobs:
           echo "✅ host registered"
       - name: MCP LocalBridge E2E
         run: cargo test -p miru-mcp --test local_bridge_e2e
+      - name: X11 capture + XRandR enumeration
+        run: cargo test -p miru-capture --test x11_capture
       - name: Security integration
         run: cargo test -p miru-agent --test security_integration
       - name: Signal relay forwarding E2E

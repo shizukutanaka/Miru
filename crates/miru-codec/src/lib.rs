@@ -31,21 +31,36 @@ pub struct DecodedFrame {
     pub timestamp_ms: u64,
 }
 
+/// Codecs this build can actually ENCODE, in negotiation priority order.
+///
+/// Deliberately excludes hardware codecs (H264/H265/AV1): `probe_hw()` can
+/// detect the silicon, but `HwEncoderBackend::encode` is still a stub, so
+/// advertising them would let a viewer negotiate a codec whose session dies
+/// on the first frame. Re-add them when the FFmpeg backend lands (v0.2+).
 pub fn available_codecs() -> Vec<VideoCodec> {
-    let mut codecs: Vec<VideoCodec> = Vec::new();
+    // JPEG fallback always available (no external codec dep).
+    // vpx feature adds VP9/VP8 (royalty-free, software-encoded).
+    // HW codecs (H264/H265/AV1) excluded until the FFmpeg backend lands.
     #[cfg(feature = "vpx")]
-    {
-        codecs.push(VideoCodec::Vp9);
-        codecs.push(VideoCodec::Vp8);
-    }
-    for hw in probe_hw() {
-        for c in hw.codecs() {
-            if !codecs.contains(c) {
-                codecs.push(c.clone());
-            }
+    return vec![VideoCodec::Vp9, VideoCodec::Vp8, VideoCodec::Jpeg];
+    #[cfg(not(feature = "vpx"))]
+    vec![VideoCodec::Jpeg]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every advertised codec must be constructible by Encoder::new —
+    /// otherwise codec negotiation can select a codec that fails at the
+    /// first frame.
+    #[test]
+    fn advertised_codecs_are_encodable() {
+        for codec in available_codecs() {
+            assert!(
+                Encoder::new(codec.clone(), 640, 480, 30, 2000).is_ok(),
+                "advertised codec {codec:?} cannot actually be constructed"
+            );
         }
     }
-    // JPEG fallback always available (no external codec dep).
-    codecs.push(VideoCodec::Jpeg);
-    codecs
 }

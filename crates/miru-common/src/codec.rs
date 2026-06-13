@@ -27,6 +27,31 @@ pub fn negotiate(
         .cloned()
 }
 
+/// Audio codec negotiation priority: Opus (low-latency, great quality)
+/// over raw PCM (always decodable, high bandwidth).
+pub const AUDIO_CODEC_PRIORITY: &[crate::message::AudioCodec] = &[
+    crate::message::AudioCodec::Opus,
+    crate::message::AudioCodec::Pcm,
+];
+
+/// Select best common audio codec, mirroring [`negotiate`] for video.
+///
+/// When either side advertises no audio codecs (empty slice) we fall back to
+/// PCM — the universally-decodable baseline.  This preserves backward
+/// compatibility with older peers that pre-date the `audio_codecs` field.
+pub fn negotiate_audio(
+    host: &[crate::message::AudioCodec],
+    viewer: &[crate::message::AudioCodec],
+) -> Option<crate::message::AudioCodec> {
+    if host.is_empty() || viewer.is_empty() {
+        return Some(crate::message::AudioCodec::Pcm);
+    }
+    AUDIO_CODEC_PRIORITY
+        .iter()
+        .find(|c| host.contains(c) && viewer.contains(c))
+        .cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -61,5 +86,22 @@ mod tests {
     #[test]
     fn no_common_codec_returns_none() {
         assert_eq!(negotiate(&[Av1], &[H264]), None);
+    }
+
+    #[test]
+    fn audio_prefers_opus() {
+        use crate::message::AudioCodec::*;
+        assert_eq!(negotiate_audio(&[Opus, Pcm], &[Pcm, Opus]), Some(Opus));
+        assert_eq!(negotiate_audio(&[Opus, Pcm], &[Pcm]), Some(Pcm));
+        assert_eq!(negotiate_audio(&[Opus], &[Pcm]), None);
+    }
+
+    #[test]
+    fn audio_empty_list_falls_back_to_pcm() {
+        use crate::message::AudioCodec::*;
+        // Either side omitting audio_codecs (backward compat) → PCM baseline.
+        assert_eq!(negotiate_audio(&[], &[Opus]), Some(Pcm));
+        assert_eq!(negotiate_audio(&[Opus], &[]), Some(Pcm));
+        assert_eq!(negotiate_audio(&[], &[]), Some(Pcm));
     }
 }

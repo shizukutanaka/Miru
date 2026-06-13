@@ -216,9 +216,17 @@ async fn main() -> Result<()> {
         if std::env::var("DISPLAY").is_ok() || std::env::var("MIRU_FORCE_LOCAL").is_ok() {
             info!("LocalBridge: real capture/input on display {}", disp_idx);
             Arc::new(miru_mcp::local_bridge::LocalBridge::new(disp_idx))
-        } else {
-            info!("StubBridge: $DISPLAY not set (export DISPLAY=:0 for real ops)");
+        } else if std::env::var("MIRU_ALLOW_STUB").is_ok() {
+            // Opt-in only: the stub returns fake data (1x1 PNG, no-op input),
+            // which is useful for protocol testing but must never silently
+            // masquerade as a real session.
+            warn!("StubBridge: MIRU_ALLOW_STUB set — ALL operations return fake data");
             Arc::new(stub::StubBridge::new(args.host_id, args.signal))
+        } else {
+            bail!(
+                "no display available: set DISPLAY (e.g. :0) for real capture/input, \
+                 or MIRU_ALLOW_STUB=1 to explicitly run with fake stub responses"
+            );
         };
 
     let server = Arc::new(McpServer::new(session, bridge));

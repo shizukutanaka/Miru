@@ -93,9 +93,24 @@ struct X11Capturer {
     shm_seg: u32, // x11rb shm::Seg is just u32
     shm_id: i32,
     shm_ptr: *mut u8,
+    /// Full root-window dimensions (the SHM buffer is sized for these,
+    /// so any monitor sub-region is guaranteed to fit).
     width: u32,
     height: u32,
     current_display: u8,
+    /// XRandR monitor geometries, refreshed in displays(). Empty when the
+    /// server lacks RandR 1.5 — capture then falls back to the full root.
+    monitors: Vec<MonitorGeometry>,
+}
+
+#[derive(Debug, Clone)]
+struct MonitorGeometry {
+    x: i16,
+    y: i16,
+    width: u16,
+    height: u16,
+    name: String,
+    primary: bool,
 }
 
 unsafe impl Send for X11Capturer {}
@@ -126,7 +141,7 @@ impl X11Capturer {
         shm::attach(&conn, shm_seg, shm_id as u32, false)?;
         conn.flush()?;
 
-        Ok(Self {
+        let mut capturer = Self {
             conn,
             screen_num,
             shm_seg,
@@ -135,12 +150,76 @@ impl X11Capturer {
             width,
             height,
             current_display: 0,
-        })
+            monitors: Vec::new(),
+        };
+        capturer.refresh_monitors();
+        Ok(capturer)
+    }
+
+    /// Query XRandR 1.5 monitors. Best-effort: on failure (old server,
+    /// no RandR) `monitors` stays empty and we capture the full root.
+    fn refresh_monitors(&mut self) {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::randr;
+
+        let root = self.conn.setup().roots[self.screen_num].root;
+        let reply = match randr::get_monitors(&self.conn, root, true).map(|c| c.reply()) {
+            Ok(Ok(r)) => r,
+            _ => {
+                warn!("XRandR get_monitors unavailable — exposing the full root as one display");
+                self.monitors.clear();
+                return;
+            }
+        };
+
+        self.monitors = reply
+            .monitors
+            .iter()
+            .map(|m| {
+                let name = x11rb::protocol::xproto::get_atom_name(&self.conn, m.name)
+                    .ok()
+                    .and_then(|c| c.reply().ok())
+                    .map(|r| String::from_utf8_lossy(&r.name).into_owned())
+                    .unwrap_or_else(|| "unknown".to_string());
+                MonitorGeometry {
+                    x: m.x,
+                    y: m.y,
+                    width: m.width,
+                    height: m.height,
+                    name,
+                    primary: m.primary,
+                }
+            })
+            .collect();
+        info!(
+            "XRandR: {} monitor(s): {:?}",
+            self.monitors.len(),
+            self.monitors.iter().map(|m| &m.name).collect::<Vec<_>>()
+        );
     }
 
     fn displays(&self) -> Result<Vec<DisplayInfo>> {
         use x11rb::connection::Connection;
-        // TODO: query XRandR for multi-monitor info
+
+        if !self.monitors.is_empty() {
+            return Ok(self
+                .monitors
+                .iter()
+                .enumerate()
+                .map(|(i, m)| DisplayInfo {
+                    index: i as u8,
+                    width: m.width as u32,
+                    height: m.height as u32,
+                    // RandR monitors don't carry a refresh rate directly;
+                    // reporting the common default until mode lookup lands.
+                    refresh_hz: 60,
+                    name: m.name.clone(),
+                    primary: m.primary,
+                })
+                .collect());
+        }
+
+        // Fallback: single full-root display.
         let screen = &self.conn.setup().roots[self.screen_num];
         Ok(vec![DisplayInfo {
             index: 0,
@@ -153,9 +232,24 @@ impl X11Capturer {
     }
 
     fn select_display(&mut self, index: u8) -> Result<()> {
-        // XRandR CRTC selection — simplified for now
+        self.refresh_monitors();
+        if !self.monitors.is_empty() && (index as usize) >= self.monitors.len() {
+            bail!(
+                "display index {} out of range ({} monitor(s) present)",
+                index,
+                self.monitors.len()
+            );
+        }
         self.current_display = index;
         Ok(())
+    }
+
+    /// Capture region for the selected display: (x, y, w, h).
+    fn capture_region(&self) -> (i16, i16, u16, u16) {
+        match self.monitors.get(self.current_display as usize) {
+            Some(m) => (m.x, m.y, m.width, m.height),
+            None => (0, 0, self.width as u16, self.height as u16),
+        }
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>> {
@@ -164,14 +258,15 @@ impl X11Capturer {
 
         let screen = &self.conn.setup().roots[self.screen_num];
         let root = screen.root;
+        let (x, y, w, h) = self.capture_region();
 
         let cookie = shm::get_image(
             &self.conn,
             root,
-            0,
-            0,
-            self.width as u16,
-            self.height as u16,
+            x,
+            y,
+            w,
+            h,
             !0u32, // all planes
             2,     // ZPixmap
             self.shm_seg,
@@ -179,7 +274,9 @@ impl X11Capturer {
         )?;
         let _reply = cookie.reply()?;
 
-        let size = (self.width * self.height * 4) as usize;
+        // The SHM buffer was sized for the full root, so any monitor
+        // sub-region (w*h <= root w*h) fits.
+        let size = (w as usize) * (h as usize) * 4;
         let data = unsafe { std::slice::from_raw_parts(self.shm_ptr, size) };
         let bytes = Bytes::copy_from_slice(data);
 
@@ -190,13 +287,13 @@ impl X11Capturer {
 
         Ok(Some(RawFrame {
             display_idx: self.current_display,
-            width: self.width,
-            height: self.height,
-            stride: self.width * 4,
+            width: w as u32,
+            height: h as u32,
+            stride: w as u32 * 4,
             format: PixelFormat::Bgra32,
             data: bytes,
             timestamp_ms: ts,
-            dirty_rects: RawFrame::full_dirty(self.width, self.height),
+            dirty_rects: RawFrame::full_dirty(w as u32, h as u32),
         }))
     }
 }

@@ -14,7 +14,7 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use miru_common::{
-    codec::negotiate,
+    codec::{negotiate, negotiate_audio},
     crypto::{KeyPair, SessionCipher},
     message::{AudioCodec, Features, Hello, HelloAck, Msg, Role, VideoCodec},
 };
@@ -169,9 +169,11 @@ pub async fn host_handshake<C: MsgChannel>(
     vk.verify_strict(&challenge, &viewer_sig)
         .map_err(|_| anyhow::anyhow!("viewer signature invalid"))?;
 
-    // 3. Codec negotiation
+    // 3. Codec negotiation (video + audio)
     let codec = negotiate(&host_features.codecs, &hello.features.codecs)
         .ok_or_else(|| anyhow::anyhow!("no common codec"))?;
+    let audio_codec = negotiate_audio(&host_features.audio_codecs, &hello.features.audio_codecs)
+        .ok_or_else(|| anyhow::anyhow!("no common audio codec"))?;
 
     // 4. Generate host ephemeral + sign
     let ephemeral = KeyPair::generate();
@@ -201,7 +203,7 @@ pub async fn host_handshake<C: MsgChannel>(
         ),
         encrypted_key: vec![],
         selected_codec: codec.clone(),
-        selected_audio: AudioCodec::Opus,
+        selected_audio: audio_codec.clone(),
     }))
     .await?;
 
@@ -211,7 +213,7 @@ pub async fn host_handshake<C: MsgChannel>(
         session_id,
         peer_identity_pubkey: viewer_identity,
         selected_video_codec: codec,
-        selected_audio_codec: AudioCodec::Opus,
+        selected_audio_codec: audio_codec,
         peer_role: hello.role,
         peer_pubkey_field: hello.pubkey,
     })
