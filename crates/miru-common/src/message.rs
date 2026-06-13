@@ -243,7 +243,9 @@ pub struct VideoFrame {
     pub display_idx: u8,
     pub keyframe: bool,
     pub codec: VideoCodec,
-    /// Encoded payload (may be encrypted at transport layer)
+    /// Encoded payload — annotated serde_bytes so binary formats (rmp-serde)
+    /// use native bytes type instead of a JSON integer array.
+    #[serde(with = "serde_bytes")]
     pub data: Vec<u8>,
     pub width: u32,
     pub height: u32,
@@ -264,6 +266,7 @@ pub struct VideoFrame {
 pub struct AudioFrame {
     pub seq: u64,
     pub codec: AudioCodec,
+    #[serde(with = "serde_bytes")]
     pub data: Vec<u8>,
     pub sample_rate: u32,
     pub channels: u8,
@@ -305,6 +308,7 @@ pub enum MouseButton {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClipboardSync {
     pub format: ClipboardFormat,
+    #[serde(with = "serde_bytes")]
     pub data: Vec<u8>,
 }
 
@@ -330,6 +334,7 @@ pub enum FileTransfer {
     Chunk {
         id: Uuid,
         offset: u64,
+        #[serde(with = "serde_bytes")]
         data: Vec<u8>,
     },
     Done {
@@ -423,4 +428,73 @@ pub struct CloseReason {
 pub struct ErrorMsg {
     pub code: u16,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that MessagePack encoding of a VideoFrame is substantially
+    /// more compact than JSON for the binary data payload.
+    ///
+    /// JSON serializes Vec<u8> as an integer array: `[0,255,128,…]`
+    /// — roughly 3 chars per byte = 3× overhead on the payload.
+    /// MessagePack + serde_bytes uses a native bytes type with a small header.
+    #[test]
+    fn msgpack_is_smaller_than_json_for_video_frames() {
+        let payload_size = 30_000usize; // typical VP9 P-frame
+        let frame = VideoFrame {
+            seq: 42,
+            display_idx: 0,
+            keyframe: false,
+            codec: VideoCodec::Vp9,
+            data: vec![0xAB; payload_size],
+            width: 1920,
+            height: 1080,
+            timestamp_ms: 12_345,
+            color_primaries: ColorPrimaries::Bt709,
+            transfer: TransferFunction::Bt709,
+            color_range: ColorRange::Limited,
+            hdr_metadata: None,
+        };
+
+        let msg = Msg::VideoFrame(frame);
+        let json_size = serde_json::to_vec(&msg).unwrap().len();
+        let msgpack_size = rmp_serde::to_vec_named(&msg).unwrap().len();
+
+        // msgpack should be < 40% of JSON size for a large binary payload
+        let ratio = msgpack_size as f64 / json_size as f64;
+        assert!(
+            ratio < 0.40,
+            "msgpack ({msgpack_size}B) should be <40% of JSON ({json_size}B), got ratio={ratio:.2}"
+        );
+        // sanity: msgpack must still contain roughly the payload bytes
+        assert!(msgpack_size > payload_size, "msgpack must not magically shrink the data");
+    }
+
+    #[test]
+    fn video_frame_roundtrips_via_msgpack() {
+        let original = VideoFrame {
+            seq: 7,
+            display_idx: 1,
+            keyframe: true,
+            codec: VideoCodec::Jpeg,
+            data: vec![0xFF, 0xD8, 0x00, 0x01, 0x02],
+            width: 640,
+            height: 480,
+            timestamp_ms: 999,
+            color_primaries: ColorPrimaries::Bt709,
+            transfer: TransferFunction::Bt709,
+            color_range: ColorRange::Limited,
+            hdr_metadata: None,
+        };
+        let msg = Msg::VideoFrame(original.clone());
+        let encoded = rmp_serde::to_vec_named(&msg).unwrap();
+        let decoded: Msg = rmp_serde::from_slice(&encoded).unwrap();
+        let Msg::VideoFrame(rt) = decoded else { panic!("wrong variant") };
+        assert_eq!(rt.seq, original.seq);
+        assert_eq!(rt.data, original.data);
+        assert_eq!(rt.width, original.width);
+        assert_eq!(rt.codec, original.codec);
+    }
 }

@@ -79,11 +79,16 @@ impl RelayTransport {
     }
 
     /// Send a message — encrypted if cipher is installed, plaintext otherwise (handshake).
+    ///
+    /// Uses MessagePack (rmp-serde with named fields) instead of JSON.
+    /// Binary payloads (VideoFrame.data, AudioFrame.data) are serialized as
+    /// MessagePack bytes type rather than JSON integer arrays, reducing wire
+    /// size ~3x for video frames (e.g. 90KB JSON → 30KB msgpack for a 30KB VP9 frame).
     pub async fn send_msg(&self, msg: &Msg) -> Result<()> {
-        let json = serde_json::to_vec(msg)?;
+        let encoded = rmp_serde::to_vec_named(msg)?;
         let payload = match self.tx_cipher.lock().await.as_ref() {
-            Some(c) => c.encrypt(&json)?,
-            None => json,
+            Some(c) => c.encrypt(&encoded)?,
+            None => encoded,
         };
         let mut frame = (payload.len() as u32).to_le_bytes().to_vec();
         frame.extend(payload);
@@ -119,7 +124,7 @@ impl RelayTransport {
                     Some(c) => c.decrypt(payload)?,
                     None => payload.to_vec(),
                 };
-                Ok(Some(serde_json::from_slice(&plain)?))
+                Ok(Some(rmp_serde::from_slice(&plain)?))
             }
         }
     }

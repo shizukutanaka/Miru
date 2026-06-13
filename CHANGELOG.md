@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **Relay protocol switched from JSON to MessagePack** (ADR 0015): `relay.rs`
+  was serializing messages with `serde_json`, which encodes `Vec<u8>` as a JSON
+  integer array `[0,255,…]` — ~3× size inflation on every VP9/JPEG/audio frame.
+  Switched to `rmp-serde` (MessagePack); binary payloads now use MessagePack's
+  native bytes type. Added `#[serde(with = "serde_bytes")]` to `VideoFrame.data`,
+  `AudioFrame.data`, `ClipboardSync.data`, and `FileTransfer::Chunk.data`.
+  Net effect: ~3× reduction in relay wire traffic for video (e.g. 90KB JSON →
+  ~31KB msgpack for a 30KB VP9 P-frame). Verified by `msgpack_is_smaller_than_json_for_video_frames` test.
+  No API change — the relay server forwards bytes opaquely; no signal server changes needed.
+
 ### Security
 - **Fix: TOFU pubkey pinning was a no-op** (ADR 0014): `check_or_pair` in
   `miru-host` was passing `device_id` as `pubkey_b64` to both `AclStore::check`
