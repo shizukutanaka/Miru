@@ -30,6 +30,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Rekor anchoring at session end
 - Merkle tree RFC 6962 deviation pinned by test (`merkle_odd_leaf_self_hash_is_stable`):
   documents and locks the intentional self-hash strategy for odd leaves
+- **mDNS discovery** wired into `miru-host`: announces on LAN via `_miru._tcp.local.`
+  at startup; `miru-discovery` crate now uses `String` device_id (matching
+  `miru-common::session::DeviceId`) instead of `Uuid`, resolving the type mismatch
+- **BBR-style congestion control** replaces AIMD `QosController` in session loop:
+  `BbrQos` tracks 10-second rolling min-RTT and max-delivery-rate windows, drives
+  bitrate through Startup → Drain → ProbeBW → ProbeRTT phases; fed from Pong RTT
+  (µs precision) and per-second delivery rate estimated from frame bytes sent
+- **File transfer receive** wired into host session loop for `Permission::Full` peers:
+  validates temp paths via `safe_fs::resolve_safe_path()`, sanitizes filenames,
+  verifies SHA-256 hash on completion; saves to `MIRU_FILE_TRANSFER_DIR` (default
+  `~/Downloads/Miru/`); aborts cleanly delete the temp file
+- **Multi-monitor display switching**: host sends `Msg::DisplayList` after cipher
+  install; viewer UI shows `DisplayTabs` for hosts with 2+ displays; `SelectDisplay`
+  restarts the capture loop on a new capturer (old thread exits when channel closes)
+- **Opus audio playback** wired in viewer: `AudioDecoder` + `AudioPlayer` run on a
+  dedicated `std::thread` (cpal::Stream is !Send); session loop forwards
+  `Msg::AudioFrame` via `sync_channel(16)` non-blocking; lazy-inits on first frame
+- `Msg::DisplayList` emitted to "display-list" Tauri event; `select_display(index)`
+  Tauri command sends `Msg::SelectDisplay` through session cmd channel
+- Viewer UI: host fingerprint shown in overlay (blue monospace, hover tooltip for
+  out-of-band verification); QoS row shows host-reported fps/bitrate/quality
+- GitHub Actions workflows activated: lint, MSRV, test (ubuntu/windows/macos),
+  crypto-gate (unwrap budget ≤ 21, strict Ed25519, no TLS bypass, SessionCipher
+  !Clone), signal integration test, coverage
 
 ### Fixed
 - `available_codecs()` no longer advertises HW codecs (H264/H265/AV1) whose
@@ -38,6 +62,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StubBridge` in `miru-mcp` now requires explicit `MIRU_ALLOW_STUB=1` env var;
   without it the server exits with a clear error rather than silently returning
   fake 1×1 PNG frames and no-op input
+- **Ping/Pong protocol corrected**: viewer was handling `Msg::Pong` (never sent by
+  host) instead of `Msg::Ping`; fix echoes `Msg::Pong{ts, server_ts}` so the host's
+  BBR RTT measurement works correctly
+- **15-second handshake timeout** added to both host and viewer to prevent sessions
+  hanging indefinitely on unresponsive peers
+- Signal server `relay_port` was hardcoded to `21117` in 3 places despite
+  `MIRU_RELAY_PORT` env var; now stored in `AppState.relay_port` and used consistently
+- **QoS updates** emitted to viewer UI via "qos-update" Tauri event; viewer handles
+  `Msg::QosUpdate` from host BBR controller
 
 ---
 
