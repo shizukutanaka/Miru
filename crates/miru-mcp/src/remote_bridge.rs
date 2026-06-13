@@ -204,6 +204,11 @@ impl HostBridge for RemoteBridge {
     }
 
     async fn read_clipboard(&self) -> Result<String> {
+        // Clear any stale cached value before sending the request. Without this,
+        // the polling loop below would immediately return whatever the host
+        // pushed in a previous request, not the response to this one.
+        *self.latest_clipboard.lock() = None;
+
         // Ask the host to push its current clipboard; wait up to 2s for the response.
         self.relay.send_msg(&Msg::RequestClipboard).await.context("send RequestClipboard")?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
