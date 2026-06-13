@@ -622,13 +622,13 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     //    Non-fatal: anchoring failure must never break session teardown.
     if let Ok(rekor_url) = std::env::var("MIRU_REKOR_URL") {
         let metadata = metrics.snapshot();
-        // Host-only commitment (single-signer for v0.1; co-signing in v1.0).
-        let commitment = miru_transparency::CoSignedCommitment::new(
-            &metadata,
-            &config.identity.signing_key,
-            &config.identity.signing_key,
-        );
-        match miru_transparency::rekor::submit_to_rekor(&rekor_url, &metadata, &commitment).await {
+        // Host-only attestation: the viewer's signing key is never available
+        // server-side. Co-signing requires a 2-round protocol (planned v1.0).
+        let attestation =
+            miru_transparency::HostOnlyAttestation::new(&metadata, &config.identity.signing_key);
+        match miru_transparency::rekor::submit_host_to_rekor(&rekor_url, &metadata, &attestation)
+            .await
+        {
             Ok(entry) => info!(
                 "Session anchored in Rekor: index={} uuid={}",
                 entry.log_index, entry.uuid

@@ -10,7 +10,7 @@
 //! prove the commitment existed at a particular point in time without trusting
 //! Miru, the host, or the viewer.
 
-use crate::{CoSignedCommitment, SessionMetadata};
+use crate::{CoSignedCommitment, HostOnlyAttestation, SessionMetadata};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -48,6 +48,109 @@ pub fn build_statement(
             "viewer_signature": commitment.viewer_signature_b64,
             "nonce": commitment.nonce_b64,
         },
+    })
+}
+
+/// Build the in-toto statement for a host-only attestation.
+///
+/// The predicate includes `"signer": "host_only"` so verifiers know that
+/// only the host signature should be checked — there is no viewer signature.
+pub fn build_host_statement(
+    metadata: &SessionMetadata,
+    attestation: &HostOnlyAttestation,
+) -> serde_json::Value {
+    json!({
+        "_type": "https://in-toto.io/Statement/v0.1",
+        "subject": [{
+            "name": format!("miru-session/{}", metadata.session_id),
+            "digest": {
+                "sha256": attestation.commitment_b64,
+            },
+        }],
+        "predicateType": PREDICATE_TYPE,
+        "predicate": {
+            "signer": "host_only",
+            "session_id": metadata.session_id,
+            "host_pubkey": metadata.host_pubkey_b64,
+            "viewer_pubkey": metadata.viewer_pubkey_b64,
+            "codec": metadata.codec,
+            "started_at": metadata.started_at,
+            "ended_at": metadata.ended_at,
+            "video_frames": metadata.video_frames,
+            "total_bytes": metadata.total_bytes,
+            "relayed": metadata.relayed,
+            "host_signature": attestation.host_signature_b64,
+            "nonce": attestation.nonce_b64,
+        },
+    })
+}
+
+/// Post a host-only session attestation to a Rekor transparency log.
+///
+/// Non-fatal by design — Rekor unavailability must not prevent session teardown.
+pub async fn submit_host_to_rekor(
+    rekor_url: &str,
+    metadata: &SessionMetadata,
+    attestation: &HostOnlyAttestation,
+) -> anyhow::Result<RekorEntry> {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    let statement = build_host_statement(metadata, attestation);
+    let statement_b64 = B64.encode(serde_json::to_vec(&statement)?);
+
+    let body = serde_json::json!({
+        "kind": "intoto",
+        "apiVersion": "0.0.1",
+        "spec": {
+            "content": {
+                "envelope": statement_b64,
+                "hash": {
+                    "algorithm": "sha256",
+                    "value": hex_sha256(serde_json::to_vec(&statement)?.as_slice()),
+                }
+            }
+        }
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent(concat!("miru-transparency/", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
+    let resp = client
+        .post(format!(
+            "{}/api/v1/log/entries",
+            rekor_url.trim_end_matches('/')
+        ))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Rekor POST failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        anyhow::bail!("Rekor returned {}: {}", status, &text[..text.len().min(200)]);
+    }
+
+    let map: serde_json::Map<String, serde_json::Value> = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Rekor response parse: {e}"))?;
+
+    let (uuid, entry_body) = map
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Rekor returned empty map"))?;
+
+    Ok(RekorEntry {
+        log_index: entry_body["logIndex"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("missing logIndex"))?,
+        uuid,
+        log_id: entry_body["logID"].as_str().unwrap_or("").to_string(),
+        integrated_time: entry_body["integratedTime"].as_i64().unwrap_or(0),
     })
 }
 

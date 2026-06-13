@@ -126,6 +126,67 @@ impl CoSignedCommitment {
     }
 }
 
+// ─── Host-only attestation ────────────────────────────────────────────────────
+
+/// Single-signer attestation produced by the host alone.
+///
+/// Used in v0.1 where the viewer's signing key is not available server-side
+/// (as it should be — the viewer holds its own private key). A co-signed
+/// commitment requires a 2-round protocol where the viewer sends its signature
+/// back after session end; that is planned for v1.0.
+///
+/// Rekor entries using this type are marked `"signer": "host_only"` so
+/// verifiers know to check only the host signature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostOnlyAttestation {
+    /// 32-byte commitment hash, base64.
+    pub commitment_b64: String,
+    /// Random nonce that was hashed with the metadata, base64.
+    pub nonce_b64: String,
+    /// Host's Ed25519 signature over the commitment bytes.
+    pub host_signature_b64: String,
+}
+
+impl HostOnlyAttestation {
+    pub fn new(metadata: &SessionMetadata, host_key: &SigningKey) -> Self {
+        let mut nonce = [0u8; 32];
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce).expect("rand");
+        let commitment = metadata.commitment(&nonce);
+        let host_sig: Signature = host_key.sign(&commitment);
+        Self {
+            commitment_b64: B64.encode(commitment),
+            nonce_b64: B64.encode(nonce),
+            host_signature_b64: B64.encode(host_sig.to_bytes()),
+        }
+    }
+
+    /// Verify that:
+    ///   - The commitment matches SHA256(metadata || nonce)
+    ///   - The host signature is valid against `metadata.host_pubkey_b64`
+    pub fn verify_host(&self, metadata: &SessionMetadata) -> Result<()> {
+        let nonce_v = B64.decode(&self.nonce_b64)?;
+        if nonce_v.len() != 32 {
+            bail!("nonce length");
+        }
+        let mut nonce = [0u8; 32];
+        nonce.copy_from_slice(&nonce_v);
+
+        let expected = metadata.commitment(&nonce);
+        let actual_v = B64.decode(&self.commitment_b64)?;
+        if actual_v != expected {
+            bail!("commitment hash mismatch — metadata or nonce was altered");
+        }
+
+        let host_pub = decode_pubkey(&metadata.host_pubkey_b64)?;
+        let host_sig = decode_sig(&self.host_signature_b64)?;
+        host_pub
+            .verify_strict(&expected, &host_sig)
+            .map_err(|_| anyhow::anyhow!("host signature invalid"))?;
+
+        Ok(())
+    }
+}
+
 // ─── Merkle tree of commitments ───────────────────────────────────────────────
 
 /// In-memory Merkle tree. For the public log we'd use Sigstore's Rekor format;
@@ -315,6 +376,40 @@ mod tests {
         meta.video_frames += 1;
         let c2 = meta.commitment(&nonce);
         assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn host_only_attestation_verifies() {
+        let host_key = SigningKey::generate(&mut OsRng);
+        let viewer_key = SigningKey::generate(&mut OsRng);
+        let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
+        let att = HostOnlyAttestation::new(&meta, &host_key);
+        assert!(att.verify_host(&meta).is_ok());
+    }
+
+    #[test]
+    fn host_only_rejects_altered_metadata() {
+        let host_key = SigningKey::generate(&mut OsRng);
+        let viewer_key = SigningKey::generate(&mut OsRng);
+        let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
+        let att = HostOnlyAttestation::new(&meta, &host_key);
+        let mut altered = meta.clone();
+        altered.total_bytes += 1;
+        assert!(att.verify_host(&altered).is_err());
+    }
+
+    #[test]
+    fn host_only_rejects_wrong_host_key() {
+        let host_key = SigningKey::generate(&mut OsRng);
+        let wrong_key = SigningKey::generate(&mut OsRng);
+        let viewer_key = SigningKey::generate(&mut OsRng);
+        // metadata says host_pubkey = host_key.verifying_key(), but we sign with wrong_key
+        let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
+        let att = HostOnlyAttestation::new(&meta, &wrong_key);
+        assert!(
+            att.verify_host(&meta).is_err(),
+            "wrong signing key must not verify"
+        );
     }
 
     #[test]
