@@ -414,7 +414,9 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         let _ = input_handler.handle_clipboard(&s);
                     }
                     Some(Msg::FileTransfer(ft)) if ft_cfg.is_some() => {
-                        handle_file_transfer(ft, &mut file_transfers, ft_cfg.as_ref().unwrap());
+                        if let Some(cfg) = ft_cfg.as_ref() {
+                            handle_file_transfer(ft, &mut file_transfers, cfg);
+                        }
                     }
                     Some(Msg::Pong(p)) => {
                         let rtt = now_ms().saturating_sub(p.ts) as u32;
