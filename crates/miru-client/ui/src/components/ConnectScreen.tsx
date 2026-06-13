@@ -8,7 +8,7 @@ interface Props {
 export function ConnectScreen({ onConnect }: Props) {
   const [deviceId, setDeviceId] = useState("");
   const [signalUrl, setSignalUrl] = useState(
-    localStorage.getItem("miru.signal") || "ws://signal.miru.app:21115/ws",
+    localStorage.getItem("miru.signal") || "ws://localhost:21115/ws",
   );
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -46,13 +46,15 @@ export function ConnectScreen({ onConnect }: Props) {
     }
   };
 
-  const handleQuickConnect = async (targetId: string) => {
+  const handleQuickConnect = async (targetId: string, overrideSignal?: string) => {
     setDeviceId(targetId);
     setError(null);
     setConnecting(true);
-    localStorage.setItem("miru.signal", signalUrl);
+    const url = overrideSignal ?? signalUrl;
+    if (overrideSignal) setSignalUrl(overrideSignal);
+    localStorage.setItem("miru.signal", url);
     try {
-      await api.connect(targetId, signalUrl);
+      await api.connect(targetId, url);
       onConnect();
     } catch (e) {
       setError(String(e));
@@ -123,7 +125,11 @@ export function ConnectScreen({ onConnect }: Props) {
                 </div>
                 <button
                   className="button-ghost"
-                  onClick={() => handleQuickConnect(p.device_id)}
+                  onClick={() => {
+                    const addr = p.addresses[0];
+                    const lanSignal = addr ? `ws://${addr}:${p.port}/ws` : undefined;
+                    handleQuickConnect(p.device_id, lanSignal);
+                  }}
                   disabled={connecting}
                 >
                   接続

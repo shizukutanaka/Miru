@@ -92,19 +92,18 @@ pub async fn run(
             .await?;
 
     // 5. Handshake
+    // Advertise only codecs the Rust-side decoder can actually handle.
+    // HW codecs (AV1/H264/H265) are listed only when the `vpx` feature is
+    // enabled; the WebCodecs fallback (v0.3) will broaden this.
     let viewer_features = Features {
-        codecs: vec![
-            VideoCodec::Av1,
-            VideoCodec::H265,
-            VideoCodec::H264,
-            VideoCodec::Vp9,
-            VideoCodec::Vp8,
-        ],
-        audio_codecs: vec![AudioCodec::Opus],
-        hw_decode: true,
+        codecs: miru_codec::available_codecs(),
+        audio_codecs: vec![AudioCodec::Opus, AudioCodec::Pcm],
+        hw_decode: false,
+        hw_encode: false,
         clipboard: true,
         file_transfer: true,
         audio: true,
+        multi_monitor: true,
         ..Default::default()
     };
 
