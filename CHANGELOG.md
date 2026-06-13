@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **File transfer from viewer to host**: `send_file` Tauri command accepts file name +
+  base64 bytes, sanitizes filename, computes SHA-256 hash via `ring::digest`, sends
+  `FileTransfer::Start → Chunk* → Done` sequence in 256 KB chunks; viewer UI adds
+  hidden file input + "ファイル送信" toolbar button (100 MB limit, disabled during
+  transfer and when not connected); host-side receive path already existed (Full permission)
 - **Viewer session stats: bitrate and packet loss**: `bitrate_kbps` computed from bytes
   received per second; `packet_loss_pct` estimated from `VideoFrame.seq` gaps; both
   updated each second alongside fps; overlay shows BW kbps row always and PKT% row when

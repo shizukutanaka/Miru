@@ -57,6 +57,9 @@ export const api = {
   sendClipboard: (text: string) =>
     invoke<void>("send_clipboard", { text }),
 
+  sendFile: (name: string, dataB64: string) =>
+    invoke<void>("send_file", { name, dataB64 }),
+
   listTrustedPeers: () => invoke<TrustedPeer[]>("list_trusted_peers"),
   revokePeer: (deviceId: string) =>
     invoke<boolean>("revoke_peer", { deviceId }),

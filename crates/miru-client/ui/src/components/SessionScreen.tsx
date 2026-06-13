@@ -9,6 +9,7 @@ interface Props {
 export function SessionScreen({ onDisconnect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [stats, setStats] = useState<SessionStats>({
     fps: 0, bitrate_kbps: 0, rtt_ms: 0,
     bytes_recv: 0, frames_decoded: 0, packet_loss_pct: 0,
@@ -20,6 +21,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [hostQos, setHostQos] = useState<{ fps: number; bitrate_kbps: number; quality: number } | null>(null);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [selectedDisplay, setSelectedDisplay] = useState(0);
+  const [fileSending, setFileSending] = useState(false);
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -190,6 +192,31 @@ export function SessionScreen({ onDisconnect }: Props) {
     } catch {}
   };
 
+  const handleFileSend = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so same file can be re-sent
+    e.target.value = "";
+    if (file.size > 100 * 1024 * 1024) {
+      alert("ファイルサイズが 100 MB を超えています");
+      return;
+    }
+    setFileSending(true);
+    try {
+      const buf = await file.arrayBuffer();
+      // Convert to base64
+      const bytes = new Uint8Array(buf);
+      let binary = "";
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      const b64 = btoa(binary);
+      await api.sendFile(file.name, b64);
+    } catch (err) {
+      console.error("File send failed:", err);
+    } finally {
+      setFileSending(false);
+    }
+  };
+
   return (
     <div className="session">
       <div className="video-stage" ref={stageRef}>
@@ -223,6 +250,13 @@ export function SessionScreen({ onDisconnect }: Props) {
 
       <DisplayTabs displays={displays} selected={selectedDisplay} onSelect={handleSelectDisplay} />
 
+      <input
+        ref={fileInputRef}
+        type="file"
+        style={{ display: "none" }}
+        onChange={handleFileSend}
+      />
+
       <div className="toolbar">
         <span className="status-pill">
           <span className={`status-dot ${
@@ -238,6 +272,12 @@ export function SessionScreen({ onDisconnect }: Props) {
         </span>
         <div className="toolbar-spacer" />
         <button onClick={handleClipboardSync}>クリップボード送信</button>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={fileSending || status !== "connected"}
+        >
+          {fileSending ? "送信中..." : "ファイル送信"}
+        </button>
         <button onClick={handleFullscreen}>フルスクリーン</button>
         <button className="danger" onClick={handleDisconnect}>切断</button>
       </div>

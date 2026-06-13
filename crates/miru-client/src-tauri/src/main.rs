@@ -25,6 +25,7 @@ fn main() {
             commands::disconnect,
             commands::send_input,
             commands::send_clipboard,
+            commands::send_file,
             commands::select_display,
             commands::list_trusted_peers,
             commands::revoke_peer,

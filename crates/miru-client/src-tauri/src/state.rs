@@ -2,7 +2,10 @@
 
 use anyhow::Result;
 use miru_auth::{AclStore, DeviceIdentity, TrustedPeer};
-use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, Msg, SelectDisplay};
+use miru_common::message::{
+    ClipboardFormat, ClipboardSync, FileTransfer, InputEvent, Msg, SelectDisplay,
+};
+use uuid::Uuid;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -173,6 +176,51 @@ impl AppState {
             .await
             .map_err(|_| anyhow::anyhow!("session closed"))?;
         }
+        Ok(())
+    }
+
+    pub async fn send_file_transfer(&self, name: String, data: Vec<u8>) -> Result<()> {
+        let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
+        let tx = match tx {
+            Some(t) => t,
+            None => anyhow::bail!("no active session"),
+        };
+
+        // Compute SHA-256 hash
+        let digest = ring::digest::digest(&ring::digest::SHA256, &data);
+        let hash = digest
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+
+        let id = Uuid::new_v4();
+        let size = data.len() as u64;
+
+        tx.send(Msg::FileTransfer(FileTransfer::Start {
+            id,
+            name,
+            size,
+            hash,
+        }))
+        .await
+        .map_err(|_| anyhow::anyhow!("session closed"))?;
+
+        const CHUNK_SIZE: usize = 256 * 1024;
+        for (i, chunk) in data.chunks(CHUNK_SIZE).enumerate() {
+            tx.send(Msg::FileTransfer(FileTransfer::Chunk {
+                id,
+                offset: (i * CHUNK_SIZE) as u64,
+                data: chunk.to_vec(),
+            }))
+            .await
+            .map_err(|_| anyhow::anyhow!("session closed"))?;
+        }
+
+        tx.send(Msg::FileTransfer(FileTransfer::Done { id }))
+            .await
+            .map_err(|_| anyhow::anyhow!("session closed"))?;
+
         Ok(())
     }
 

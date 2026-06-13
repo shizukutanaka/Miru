@@ -106,6 +106,36 @@ pub async fn send_clipboard(text: String, state: State<'_, AppState>) -> Result<
     state.send_clipboard(text).await.map_err(|e| e.to_string())
 }
 
+/// Send a file to the connected host. `data_b64` is the base64-encoded file bytes.
+/// Max 100 MB — larger files should use dedicated transfer mechanisms.
+#[tauri::command]
+pub async fn send_file(
+    name: String,
+    data_b64: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    use base64::Engine as _;
+    if name.trim().is_empty() {
+        return Err("filename required".into());
+    }
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(&data_b64)
+        .map_err(|e| format!("base64 decode: {e}"))?;
+    if data.len() > 100 * 1024 * 1024 {
+        return Err("file exceeds 100 MB limit".into());
+    }
+    // Sanitize filename: keep printable ASCII excluding path separators
+    let safe_name = name
+        .chars()
+        .filter(|&c| c.is_ascii() && !matches!(c, '/' | '\\' | '\0'))
+        .take(255)
+        .collect::<String>();
+    state
+        .send_file_transfer(safe_name, data)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn select_display(index: u8, state: State<'_, AppState>) -> Result<(), String> {
     state
