@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Performance
+- **Recording uses binary container instead of per-frame JPEG files**: the old
+  approach wrote one `{:08}.jpg` file per frame — 18,000 files per 10-min 30fps
+  session — causing inode/metadata overhead of ~144MB and `readdir()` slowdown.
+  Now writes `frames.bin` (concatenated JPEG data) + `offsets.bin` (12-byte
+  `(offset:u64, size:u32)` index per frame). `get_recording_frame(idx)` seeks
+  to `idx*12` in `offsets.bin`, reads offset+size, seeks in `frames.bin` — O(1)
+  random access preserved. Both files are kept open for the session duration;
+  `write_recording_frame` holds the lock only while appending (~µs per frame).
 - **Relay protocol switched from JSON to MessagePack** (ADR 0015): `relay.rs`
   was serializing messages with `serde_json`, which encodes `Vec<u8>` as a JSON
   integer array `[0,255,…]` — ~3× size inflation on every VP9/JPEG/audio frame.

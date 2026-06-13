@@ -355,18 +355,42 @@ pub async fn run(
     Ok(())
 }
 
-/// Write a JPEG frame to the active recording directory (if any).
-/// Non-blocking: takes lock briefly, writes file without holding it.
+/// Append a JPEG frame to the active recording's binary container.
+///
+/// Container format:
+///   frames.bin  — raw JPEG frames concatenated back-to-back
+///   offsets.bin — [(offset: u64 LE, size: u32 LE); frame_count] (12 bytes/frame)
+///
+/// Both files are kept open for the session; O(1) random-access is enabled
+/// by offsets.bin. Eliminates the per-frame inode overhead of the old
+/// individual-file approach (~144MB of filesystem overhead at 30fps for 10min).
 fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &[u8]) {
-    let frame_path = {
-        let mut guard = recording.lock();
-        let Some(ref mut rec) = *guard else { return };
-        let idx = rec.frame_count;
-        rec.frame_count += 1;
-        rec.dir.join("frames").join(format!("{:08}.jpg", idx))
-    };
-    // Write outside the lock so we don't hold it during I/O.
-    let _ = std::fs::write(&frame_path, jpeg);
+    use std::io::Write;
+    let mut guard = recording.lock();
+    let Some(ref mut rec) = *guard else { return };
+
+    // Compute byte offset where this frame starts.
+    let offset: u64 = rec
+        .frames_file
+        .metadata()
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let size = jpeg.len() as u32;
+
+    // Write index entry first (so a crash mid-frame-write doesn't leave a
+    // dangling offset pointing beyond EOF).
+    let mut entry = [0u8; 12];
+    entry[..8].copy_from_slice(&offset.to_le_bytes());
+    entry[8..12].copy_from_slice(&size.to_le_bytes());
+    if rec.offsets_file.write_all(&entry).is_err() {
+        return;
+    }
+
+    if rec.frames_file.write_all(jpeg).is_err() {
+        return;
+    }
+
+    rec.frame_count += 1;
 }
 
 /// Extract (width, height) from a JPEG SOF0/SOF2 marker without fully decoding.

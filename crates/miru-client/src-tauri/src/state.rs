@@ -29,6 +29,11 @@ pub struct RecordingState {
     pub session_id: String,
     pub start_ts_ms: u64,
     pub frame_count: u64,
+    /// Open handle to frames.bin — raw JPEG frames concatenated back-to-back.
+    pub(crate) frames_file: std::fs::File,
+    /// Open handle to offsets.bin — [(offset: u64, size: u32); frame_count].
+    /// 12 bytes per frame, enables O(1) random-access to frames.bin.
+    pub(crate) offsets_file: std::fs::File,
 }
 
 pub struct AppState {
@@ -396,13 +401,30 @@ impl AppState {
     pub fn start_recording(&self) -> Result<String> {
         let session_id = Uuid::new_v4().to_string();
         let dir = self.config_dir.join("recordings").join(&session_id);
-        std::fs::create_dir_all(dir.join("frames"))?;
+        std::fs::create_dir_all(&dir)?;
+
+        // Two-file container: frames.bin (JPEG data) + offsets.bin (index).
+        // Replaces individual per-frame .jpg files; eliminates inode overhead
+        // (e.g. 18,000 × 8KB inode blocks for a 10-min 30fps session).
+        let frames_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(dir.join("frames.bin"))?;
+        let offsets_file = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(dir.join("offsets.bin"))?;
+
         let start_ts_ms = now_unix() * 1000;
         *self.recording.lock() = Some(RecordingState {
             dir,
             session_id: session_id.clone(),
             start_ts_ms,
             frame_count: 0,
+            frames_file,
+            offsets_file,
         });
         info!("Recording started: {}", session_id);
         Ok(session_id)
@@ -416,9 +438,12 @@ impl AppState {
         };
         let duration_ms = now_unix() * 1000 - rec.start_ts_ms;
         let frame_count = rec.frame_count;
+
+        // Flush and close the container files before measuring size.
+        drop(rec.frames_file);
+        drop(rec.offsets_file);
         let size_bytes = dir_size(&rec.dir);
 
-        // Write metadata
         let meta = serde_json::json!({
             "session_id": rec.session_id,
             "start_ts_ms": rec.start_ts_ms,
@@ -440,11 +465,25 @@ impl AppState {
 
     pub fn get_recording_frame(&self, recording_path: &str, frame_idx: u64) -> Result<String> {
         use base64::{engine::general_purpose::STANDARD as B64, Engine};
-        let path = std::path::Path::new(recording_path)
-            .join("frames")
-            .join(format!("{:08}.jpg", frame_idx));
-        let data = std::fs::read(&path)?;
-        Ok(B64.encode(&data))
+        use std::io::{Read, Seek, SeekFrom};
+
+        let base = std::path::Path::new(recording_path);
+
+        // Read (offset, size) from offsets.bin — 12 bytes per frame.
+        let mut idx_file = std::fs::File::open(base.join("offsets.bin"))?;
+        idx_file.seek(SeekFrom::Start(frame_idx * 12))?;
+        let mut entry = [0u8; 12];
+        idx_file.read_exact(&mut entry)?;
+        let offset = u64::from_le_bytes(entry[..8].try_into().unwrap());
+        let size = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+
+        // Seek to the frame in frames.bin and read exactly `size` bytes.
+        let mut frm_file = std::fs::File::open(base.join("frames.bin"))?;
+        frm_file.seek(SeekFrom::Start(offset))?;
+        let mut jpeg = vec![0u8; size];
+        frm_file.read_exact(&mut jpeg)?;
+
+        Ok(B64.encode(&jpeg))
     }
 
     pub fn list_recordings(&self) -> Vec<crate::commands::RecordingSummary> {
