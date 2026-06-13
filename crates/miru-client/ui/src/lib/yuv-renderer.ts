@@ -1,7 +1,15 @@
 /**
  * WebGL2 YUV → RGB renderer.
  *
- * Why: JPEG decoding per frame in JavaScript is ~30ms at 1080p.
+ * ⚠️ FROZEN — not wired into the live session. See ADR 0013.
+ *   This renderer assumed the bottleneck was per-frame JPEG decode in JS.
+ *   The real bottleneck is IPC bandwidth: feeding it raw I420 over the
+ *   Tauri (JSON) bridge would cost ~124 MB/s at 1080p30 vs ~8 MB/s for the
+ *   current JPEG-over-IPC path — a ~15x regression. The correct way to drop
+ *   the double-codec is WebCodecs VideoDecoder (decode VP9 in the WebView),
+ *   at which point this file should be deleted. Kept only as reference.
+ *
+ * Why it was written: JPEG decoding per frame in JavaScript is ~30ms at 1080p.
  *      WebGL2 with Y/U/V as luminance textures + fragment shader = ~1ms.
  *
  * Pipeline:

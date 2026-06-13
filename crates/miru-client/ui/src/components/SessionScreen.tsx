@@ -35,35 +35,56 @@ export function SessionScreen({ onDisconnect }: Props) {
       ? "warn"
       : "good";
 
-  // Pre-allocate Image to reuse across frames (avoids GC pressure)
-  const imgRef = useRef<HTMLImageElement | null>(null);
-  if (!imgRef.current) imgRef.current = new Image();
   const lastFrameRef = useRef<number>(Date.now());
   const [stalled, setStalled] = useState(false);
+
+  // Decode pipeline (see ADR 0013): keep only the most recent frame and decode
+  // one at a time. createImageBitmap decodes off the main thread (no
+  // Image/data-URL main-thread jank); single-flight + latest-wins prevents a
+  // decode backlog from building latency when the CPU is constrained.
+  const pendingFrameRef = useRef<{ b64: string; w: number; h: number } | null>(null);
+  const decodingRef = useRef(false);
 
   useEffect(() => {
     let unlistenVideo: (() => void) | null = null;
     let unlistenStatus: (() => void) | null = null;
     let unlistenQos: (() => void) | null = null;
 
-    api.onVideoFrame((e) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      if (canvas.width !== e.width || canvas.height !== e.height) {
-        canvas.width = e.width;
-        canvas.height = e.height;
-        setResolution({ w: e.width, h: e.height });
+    const drainFrames = async () => {
+      if (decodingRef.current) return;
+      decodingRef.current = true;
+      try {
+        while (pendingFrameRef.current) {
+          const f = pendingFrameRef.current;
+          pendingFrameRef.current = null; // claim it; newer frames replace this slot
+          const canvas = canvasRef.current;
+          if (!canvas) break;
+          if (canvas.width !== f.w || canvas.height !== f.h) {
+            canvas.width = f.w;
+            canvas.height = f.h;
+            setResolution({ w: f.w, h: f.h });
+          }
+          try {
+            const bmp = await createImageBitmap(
+              new Blob([b64ToBytes(f.b64)], { type: "image/jpeg" }),
+            );
+            const ctx = canvas.getContext("2d");
+            ctx?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+            bmp.close();
+          } catch {
+            /* corrupt/partial frame: skip and move on to the next */
+          }
+        }
+      } finally {
+        decodingRef.current = false;
       }
+    };
 
-      const img = imgRef.current!;
-      img.onload = () => {
-        const ctx = canvas.getContext("2d");
-        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
-      };
-      img.src = `data:image/jpeg;base64,${e.jpeg_b64}`;
+    api.onVideoFrame((e) => {
+      pendingFrameRef.current = { b64: e.jpeg_b64, w: e.width, h: e.height };
       lastFrameRef.current = Date.now();
       setStalled(false);
+      void drainFrames();
     }).then((fn) => (unlistenVideo = fn));
 
     api.onSessionEvent((e) => {
@@ -421,6 +442,15 @@ export function SessionScreen({ onDisconnect }: Props) {
       </div>
     </div>
   );
+}
+
+/** Decode base64 → ArrayBuffer without an intermediate data-URL string. */
+function b64ToBytes(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const buf = new ArrayBuffer(bin.length);
+  const view = new Uint8Array(buf);
+  for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
+  return buf;
 }
 
 function fmtDuration(secs: number): string {

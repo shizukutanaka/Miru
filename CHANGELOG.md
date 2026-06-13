@@ -11,6 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Viewer frame decode off the main thread** (ADR 0013): the session canvas now
+  decodes JPEG frames via `createImageBitmap` (off-thread) instead of an `Image` +
+  data-URL (main-thread decode + GC pressure). Decoding is single-flight with
+  latest-frame-wins: frames arriving while a decode is in flight replace the
+  pending slot, so a slow/constrained CPU drops stale frames instead of building
+  an input-latency backlog
+- **ADR 0013 — viewer codec topology**: documents why the viewer keeps
+  VP9-over-network + JPEG-over-IPC rather than wiring the WebGL2 YUV renderer.
+  Feeding raw I420 over the Tauri (JSON) IPC bridge would cost ~124 MB/s at 1080p30
+  vs ~8 MB/s for JPEG — a ~15x regression, because the real bottleneck is IPC
+  bandwidth, not in-browser decode. `yuv-renderer.ts` is marked frozen; the correct
+  way to drop the double-codec is a future WebCodecs `VideoDecoder` path
+
 ### Added
 - **OpenUrl protocol message**: new `Msg::OpenUrl(OpenUrlRequest)` lets the MCP
   (or future viewer UI) ask the host to open a URL in its default browser; handled
