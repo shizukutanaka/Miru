@@ -223,11 +223,34 @@ pub fn inject(event: &InputEvent) -> Result<()> {
         InputKind::Scroll { dy, .. } => dev.scroll(*dy),
         InputKind::KeyDown { key, .. } => dev.key(*key, true),
         InputKind::KeyUp { key, .. } => dev.key(*key, false),
-        InputKind::Text { text: _text } => {
-            // Text input via KEY_A..KEY_Z — not yet implemented for uinput.
-            warn!("Text input via uinput not fully implemented");
+        InputKind::Text { text } => {
+            // Clipboard-paste: write text to clipboard, then inject Ctrl+V.
+            // Works on X11 and Wayland desktop apps.
+            // Must release the uinput lock before xclip (avoids deadlock in
+            // tests that call inject() and set_clipboard() concurrently).
+            drop(guard);
+            return inject_text(text);
         }
     }
+    Ok(())
+}
+
+/// Inject text by writing to clipboard then pressing Ctrl+V.
+fn inject_text(text: &str) -> Result<()> {
+    if let Err(e) = set_clipboard(text) {
+        warn!("Text injection: clipboard write failed: {e}");
+        return Ok(());
+    }
+    let guard = UINPUT.lock().unwrap_or_else(|p| p.into_inner());
+    let dev = guard
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("uinput not available"))?;
+    const KEY_LEFTCTRL: u32 = 29;
+    const KEY_V: u32 = 47;
+    dev.key(KEY_LEFTCTRL, true);
+    dev.key(KEY_V, true);
+    dev.key(KEY_V, false);
+    dev.key(KEY_LEFTCTRL, false);
     Ok(())
 }
 

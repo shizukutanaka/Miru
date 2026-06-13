@@ -33,6 +33,7 @@ export interface SessionEvent {
   kind: SessionStatus;
   message?: string;
   fingerprint?: string;
+  host_pub_addr?: string;
 }
 
 export const api = {

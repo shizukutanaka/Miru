@@ -49,6 +49,9 @@ struct AppState {
 
 struct DeviceEntry {
     tx: mpsc::Sender<Msg>,
+    /// STUN-discovered public address of the host (filled in from Register.pub_addr).
+    pub_addr: Option<String>,
+    pub_port: Option<u16>,
 }
 
 /// How long an issued relay token may sit completely unclaimed before the
@@ -252,11 +255,20 @@ async fn process_rdv_msg(
                     .await;
                 return;
             }
-            info!("Register: {}", reg.device_id);
+            info!(
+                "Register: {} pub={}",
+                reg.device_id,
+                reg.pub_addr.as_deref().unwrap_or("none")
+            );
             *my_id = Some(reg.device_id.clone());
-            state
-                .registry
-                .insert(reg.device_id.clone(), DeviceEntry { tx: tx.clone() });
+            state.registry.insert(
+                reg.device_id.clone(),
+                DeviceEntry {
+                    tx: tx.clone(),
+                    pub_addr: reg.pub_addr,
+                    pub_port: reg.pub_port,
+                },
+            );
             let _ = tx
                 .send(Msg::RegisterAck(RegisterAck {
                     device_id: reg.device_id,
@@ -325,12 +337,19 @@ async fn process_rdv_msg(
                         }))
                         .await;
 
-                    // Respond to viewer
+                    // Respond to viewer — include host's public address if known.
+                    let (host_pub_addr, host_pub_port) = {
+                        let entry_ref = state.registry.get(&req.target_id);
+                        entry_ref
+                            .as_ref()
+                            .map(|e| (e.pub_addr.clone(), e.pub_port))
+                            .unwrap_or((None, None))
+                    };
                     let _ = tx
                         .send(Msg::ConnectAck(ConnectAck {
                             target_id: target,
-                            host_addr: None,
-                            host_port: None,
+                            host_addr: host_pub_addr,
+                            host_port: host_pub_port,
                             relay: true,
                         }))
                         .await;

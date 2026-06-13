@@ -74,6 +74,8 @@ async fn relay_forwards_bytes_between_peers() {
     send_msg(&mut host_rdv, &Msg::Register(Register {
         device_id: host_device_id.clone(),
         pubkey: String::new(),
+        pub_addr: None,
+        pub_port: None,
     })).await;
     // Consume RegisterAck
     recv_msg(&mut host_rdv).await;
@@ -202,6 +204,8 @@ async fn oversized_relay_message_drops_connection() {
     send_msg(&mut host_rdv, &Msg::Register(Register {
         device_id: host_device_id.clone(),
         pubkey: String::new(),
+        pub_addr: None,
+        pub_port: None,
     })).await;
     recv_msg(&mut host_rdv).await; // RegisterAck
 

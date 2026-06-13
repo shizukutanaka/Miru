@@ -10,6 +10,7 @@ use miru_common::{
 };
 use miru_transport::{
     handshake::host_handshake,
+    nat::discover_public_addr,
     relay::RelayTransport,
     signaling::{SignalClient, SignalEvent},
 };
@@ -172,13 +173,35 @@ pub struct HostConfig {
 const SIGNAL_BACKOFF_MAX_SECS: u64 = 120;
 
 pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) -> Result<()> {
+    // Discover public address once (non-fatal; None → skip direct-path advertisement).
+    let pub_addr: Option<(String, u16)> = match tokio::time::timeout(
+        Duration::from_secs(5),
+        discover_public_addr("0.0.0.0:0".parse().unwrap()),
+    )
+    .await
+    {
+        Ok(Ok(addr)) => {
+            info!("STUN: public addr = {}", addr);
+            Some((addr.ip().to_string(), addr.port()))
+        }
+        Ok(Err(e)) => {
+            info!("STUN: failed ({e}) — relay-only mode");
+            None
+        }
+        Err(_) => {
+            info!("STUN: timed out — relay-only mode");
+            None
+        }
+    };
+
     let mut backoff_secs = 5u64;
 
     loop {
-        let mut signal = match SignalClient::connect(
+        let mut signal = match SignalClient::connect_with_pub_addr(
             &signal_url,
             &device_id,
             Some(config.identity.verifying_key.as_bytes()),
+            pub_addr.clone(),
         )
         .await
         {

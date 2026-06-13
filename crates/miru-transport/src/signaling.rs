@@ -42,6 +42,23 @@ pub enum SignalEvent {
 }
 
 impl SignalClient {
+    /// Connect to the signal server and register with an optional STUN-discovered
+    /// public address. Pass `pub_addr = None` to skip public address advertisement.
+    pub async fn connect_with_pub_addr(
+        signal_url: &str,
+        device_id: &DeviceId,
+        identity_pubkey: Option<&[u8; 32]>,
+        pub_addr: Option<(String, u16)>,
+    ) -> Result<Self> {
+        let client = Self::connect(signal_url, device_id, identity_pubkey).await?;
+        if let Some((addr, port)) = pub_addr {
+            client
+                .register_with_pub_addr(device_id, Some(addr), Some(port))
+                .await?;
+        }
+        Ok(client)
+    }
+
     pub async fn connect(
         signal_url: &str,
         device_id: &DeviceId,
@@ -128,9 +145,20 @@ impl SignalClient {
     }
 
     async fn register(&self, device_id: &DeviceId) -> Result<()> {
+        self.register_with_pub_addr(device_id, None, None).await
+    }
+
+    pub async fn register_with_pub_addr(
+        &self,
+        device_id: &DeviceId,
+        pub_addr: Option<String>,
+        pub_port: Option<u16>,
+    ) -> Result<()> {
         self.send(Msg::Register(Register {
             device_id: device_id.0.clone(),
             pubkey: self.identity_pubkey.clone(),
+            pub_addr,
+            pub_port,
         }))
         .await
     }

@@ -26,6 +26,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
+  const [hostPubAddr, setHostPubAddr] = useState<string | null>(null);
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -59,6 +60,7 @@ export function SessionScreen({ onDisconnect }: Props) {
         setStatus("connected");
         setStatusMessage(null);
         connectedAtRef.current = Date.now();
+        setHostPubAddr(e.host_pub_addr ?? null);
       } else if (e.kind === "reconnecting") {
         setStatus("reconnecting");
         setStatusMessage(e.message ?? null);
@@ -275,6 +277,10 @@ export function SessionScreen({ onDisconnect }: Props) {
               <span className="value fingerprint">{fingerprint}</span>
             </div>
           )}
+          <div className="stat-row" title={hostPubAddr ? `ホスト公開アドレス: ${hostPubAddr}` : "中継経由で接続"}>
+            <span className="label">経路</span>
+            <span className="value">{hostPubAddr ? `リレー (直接: ${hostPubAddr})` : "リレー"}</span>
+          </div>
         </div>
       </div>
 

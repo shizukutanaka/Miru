@@ -136,6 +136,7 @@ impl AppState {
                             kind: "reconnecting".to_string(),
                             message: Some(format!("再接続 ({attempt}/{MAX_RECONNECT_ATTEMPTS})...")),
                             fingerprint: None,
+                            host_pub_addr: None,
                         });
                         tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
                         // Re-create cmd channel for the new attempt.

@@ -36,6 +36,8 @@ pub struct SessionEvent {
     pub kind: String,
     pub message: Option<String>,
     pub fingerprint: Option<String>,
+    /// STUN-discovered public address of the host, if known ("直接" path possible).
+    pub host_pub_addr: Option<String>,
 }
 
 pub async fn run(
@@ -67,9 +69,17 @@ pub async fn run(
     // 2. Request connection
     signal.request_connect(&args.device_id, "0.0.0.0").await?;
 
-    // 3. Wait for relay offer
+    // 3. Wait for relay offer; also capture host public addr from ConnectAck.
+    let mut host_pub_addr: Option<String> = None;
     let (relay_addr, relay_port, token) = loop {
         match signal.next_event().await {
+            Some(SignalEvent::ConnectAck { relay_addr: pub_addr, .. }) => {
+                // relay_addr here holds the host's STUN address (None if behind sym-NAT).
+                host_pub_addr = pub_addr;
+                if let Some(ref a) = host_pub_addr {
+                    info!("Host public addr (direct path available): {}", a);
+                }
+            }
             Some(SignalEvent::IncomingConnection {
                 token,
                 relay_addr,
@@ -122,7 +132,7 @@ pub async fn run(
     // Install ciphers (separate keys per direction, no nonce-reuse risk)
     relay.install_ciphers(result.tx, result.rx).await;
 
-    emit_status(&app, "connected", None, Some(host_fpr));
+    emit_status_full(&app, "connected", None, Some(host_fpr), host_pub_addr);
 
     // 6. Video decoder + audio pipeline
     let mut decoder: Option<Decoder> = None;
@@ -393,12 +403,23 @@ fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
 }
 
 fn emit_status(app: &AppHandle, kind: &str, message: Option<String>, fingerprint: Option<String>) {
+    emit_status_full(app, kind, message, fingerprint, None);
+}
+
+fn emit_status_full(
+    app: &AppHandle,
+    kind: &str,
+    message: Option<String>,
+    fingerprint: Option<String>,
+    host_pub_addr: Option<String>,
+) {
     let _ = app.emit(
         "session-event",
         SessionEvent {
             kind: kind.to_string(),
             message,
             fingerprint,
+            host_pub_addr,
         },
     );
 }

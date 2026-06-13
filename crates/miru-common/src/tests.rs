@@ -131,6 +131,8 @@ mod tests {
             Msg::Register(Register {
                 device_id: "A1B2-C3D4".into(),
                 pubkey: "".into(),
+                pub_addr: None,
+                pub_port: None,
             }),
             Msg::Close(CloseReason {
                 code: 0,

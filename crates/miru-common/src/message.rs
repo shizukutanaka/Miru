@@ -131,6 +131,10 @@ pub struct HelloAck {
 pub struct Register {
     pub device_id: String,
     pub pubkey: String,
+    /// Public (STUN-discovered) address of this device, for direct-path negotiation.
+    /// None when behind symmetric NAT or when STUN failed.
+    pub pub_addr: Option<String>,
+    pub pub_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
