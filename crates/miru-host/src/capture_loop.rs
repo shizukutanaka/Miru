@@ -140,10 +140,16 @@ pub fn start(
                             hdr_metadata: None,
                         });
 
-                        if tx.try_send(msg).is_err() {
-                            // Viewer too slow — drop frame, request keyframe next time
-                            debug!("frame dropped (viewer backpressure)");
-                            force_keyframe = true;
+                        match tx.try_send(msg) {
+                            Ok(()) => {}
+                            Err(flume::TrySendError::Full(_)) => {
+                                debug!("frame dropped (viewer backpressure)");
+                                force_keyframe = true;
+                            }
+                            Err(flume::TrySendError::Disconnected(_)) => {
+                                info!("Capture channel closed — stopping capture loop");
+                                return;
+                            }
                         }
                     }
                     Ok(None) => {} // encoder buffering

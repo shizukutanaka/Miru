@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Relay token validation**: relay server now rejects connections with unknown tokens
+  (those not pre-registered by the rendezvous server); prevents resource exhaustion via
+  fabricated tokens; unknown token logs a warning and drops the WebSocket immediately
+- **Capture loop clean exit**: `capture_loop` thread now exits on `TrySendError::Disconnected`
+  (receiver dropped = session ended) rather than running forever after session teardown;
+  distinguishes backpressure (`Full`) from termination (`Disconnected`)
 - **Signal server auto-reconnect** in `miru-host`: `session::run()` now loops on
   disconnect with exponential backoff (5 → 10 → 20 → … → 120 s cap); connect
   failures also retry with backoff rather than exiting; host stays alive through

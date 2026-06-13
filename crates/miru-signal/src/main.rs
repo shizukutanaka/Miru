@@ -325,15 +325,20 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
     // Channel for receiving forwarded bytes from the other peer
     let (fwd_tx, mut fwd_rx) = mpsc::channel::<Vec<u8>>(256);
 
-    // Register this side in the relay slot
+    // Register this side in the relay slot.
+    // Only pre-registered tokens (created by the rendezvous server) are accepted;
+    // unknown tokens are rejected to prevent resource exhaustion by unauthenticated peers.
     let peer_tx = {
-        let mut slot = state
-            .relay_sessions
-            .entry(token.clone())
-            .or_insert(RelaySlot {
-                host: None,
-                viewer: None,
-            });
+        let mut slot = match state.relay_sessions.get_mut(&token) {
+            Some(s) => s,
+            None => {
+                warn!(
+                    "Relay token {}… unknown — rejecting",
+                    &token[..8.min(token.len())]
+                );
+                return;
+            }
+        };
         if is_host {
             slot.host = Some(fwd_tx.clone());
             slot.viewer.clone() // peer is viewer
