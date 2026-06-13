@@ -14,7 +14,8 @@ export function SessionScreen({ onDisconnect }: Props) {
     bytes_recv: 0, frames_decoded: 0, packet_loss_pct: 0,
   });
   const [resolution, setResolution] = useState({ w: 0, h: 0 });
-  const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "reconnecting">("connecting");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [hostQos, setHostQos] = useState<{ fps: number; bitrate_kbps: number; quality: number } | null>(null);
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
@@ -48,14 +49,20 @@ export function SessionScreen({ onDisconnect }: Props) {
     }).then((fn) => (unlistenVideo = fn));
 
     api.onSessionEvent((e) => {
-      setStatus(e.kind === "connected" ? "connected"
-        : e.kind === "disconnected" ? "disconnected"
-        : e.kind === "error" ? "disconnected"
-        : "connecting");
-      if (e.fingerprint) setFingerprint(e.fingerprint);
-      if (e.kind === "disconnected" || e.kind === "error") {
-        setTimeout(onDisconnect, 600);
+      if (e.kind === "connected") {
+        setStatus("connected");
+        setStatusMessage(null);
+      } else if (e.kind === "reconnecting") {
+        setStatus("reconnecting");
+        setStatusMessage(e.message ?? null);
+      } else if (e.kind === "disconnected" || e.kind === "error") {
+        setStatus("disconnected");
+        setStatusMessage(e.message ?? null);
+        setTimeout(onDisconnect, 1200);
+      } else {
+        setStatus("connecting");
       }
+      if (e.fingerprint) setFingerprint(e.fingerprint);
     }).then((fn) => (unlistenStatus = fn));
 
     api.onQosUpdate((q) => setHostQos(q)).then((fn) => (unlistenQos = fn));
@@ -208,8 +215,14 @@ export function SessionScreen({ onDisconnect }: Props) {
 
       <div className="toolbar">
         <span className="status-pill">
-          <span className={`status-dot ${status === "connected" ? "ok" : status === "connecting" ? "info" : "error"}`} />
+          <span className={`status-dot ${
+            status === "connected" ? "ok"
+            : status === "reconnecting" ? "warn"
+            : status === "connecting" ? "info"
+            : "error"
+          }`} />
           {status === "connected" ? "接続中"
+            : status === "reconnecting" ? (statusMessage ?? "再接続中...")
             : status === "connecting" ? "接続しています"
             : "切断"}
         </span>

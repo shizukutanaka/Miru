@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -33,6 +33,9 @@ struct ActiveSession {
     tx: mpsc::Sender<Msg>,
     cancel: tokio::sync::oneshot::Sender<()>,
 }
+
+/// Maximum number of auto-reconnect attempts on unexpected disconnect.
+const MAX_RECONNECT_ATTEMPTS: u32 = 3;
 
 impl AppState {
     pub fn new() -> Self {
@@ -68,8 +71,8 @@ impl AppState {
     pub async fn connect(&self, args: crate::commands::ConnectArgs, app: AppHandle) -> Result<()> {
         self.disconnect().await;
 
-        let (cmd_tx, cmd_rx) = mpsc::channel::<Msg>(64);
-        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+        let (cmd_tx, mut cmd_rx) = mpsc::channel::<Msg>(64);
+        let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
 
         *self.session.lock() = Some(ActiveSession {
             tx: cmd_tx,
@@ -82,13 +85,52 @@ impl AppState {
         let session_slot = Arc::clone(&self.session);
 
         tokio::spawn(async move {
-            if let Err(e) =
-                crate::session::run(args, identity, cmd_rx, cancel_rx, app_clone, stats).await
-            {
-                tracing::warn!("Session ended: {}", e);
+            let mut attempt = 0u32;
+            loop {
+                let result = crate::session::run(
+                    args.clone(),
+                    Arc::clone(&identity),
+                    cmd_rx,
+                    cancel_rx,
+                    app_clone.clone(),
+                    Arc::clone(&stats),
+                )
+                .await;
+
+                // Session slot cleared whether we reconnect or not.
+                *session_slot.lock() = None;
+
+                match result {
+                    Ok(()) => break, // clean exit (user disconnect or host close)
+                    Err(e) => {
+                        attempt += 1;
+                        if attempt > MAX_RECONNECT_ATTEMPTS {
+                            tracing::warn!("Session failed after {} attempts: {}", attempt, e);
+                            break;
+                        }
+                        let delay_secs = 1u64 << attempt; // 2, 4, 8
+                        tracing::warn!(
+                            "Session error (attempt {}/{}): {}; retrying in {}s",
+                            attempt, MAX_RECONNECT_ATTEMPTS, e, delay_secs
+                        );
+                        let _ = app_clone.emit("session-event", crate::session::SessionEvent {
+                            kind: "reconnecting".to_string(),
+                            message: Some(format!("再接続 ({attempt}/{MAX_RECONNECT_ATTEMPTS})...")),
+                            fingerprint: None,
+                        });
+                        tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                        // Re-create cmd channel for the new attempt.
+                        let (new_cmd_tx, new_cmd_rx) = mpsc::channel::<Msg>(64);
+                        let (new_cancel_tx, new_cancel_rx) = tokio::sync::oneshot::channel();
+                        *session_slot.lock() = Some(ActiveSession {
+                            tx: new_cmd_tx,
+                            cancel: new_cancel_tx,
+                        });
+                        cmd_rx = new_cmd_rx;
+                        cancel_rx = new_cancel_rx;
+                    }
+                }
             }
-            // Clear session slot when finished
-            *session_slot.lock() = None;
         });
 
         Ok(())
