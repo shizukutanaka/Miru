@@ -108,8 +108,10 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "miru_clipboard_read",
-            description: "Read the host's clipboard contents. Requires confirmation each call \
-                          (clipboard may contain sensitive data).",
+            description: "Read the host's current clipboard contents. Returns the text on the \
+                          host clipboard. The request is sent to the host and the response \
+                          arrives asynchronously (up to 2 s). Use this before miru_key_type to \
+                          inspect what was copied, or after asking the user to copy something.",
             input_schema: json!({
                 "type": "object",
                 "properties": {},

@@ -35,6 +35,7 @@ uuid = { workspace = true }
 miru-sandbox = { path = "../miru-sandbox" }
 miru-discovery = { path = "../miru-discovery" }
 miru-constellation = { path = "../miru-constellation" }
+open = "5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

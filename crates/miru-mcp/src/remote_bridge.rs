@@ -222,7 +222,15 @@ impl HostBridge for RemoteBridge {
     }
 
     async fn open_url(&self, url: &str) -> Result<()> {
-        bail!("open_url not supported on remote bridge (url={})", url)
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            bail!("open_url: only http(s) URLs allowed");
+        }
+        self.relay
+            .send_msg(&Msg::OpenUrl(miru_common::message::OpenUrlRequest {
+                url: url.to_string(),
+            }))
+            .await
+            .context("send OpenUrl")
     }
 
     async fn status(&self) -> Result<Value> {

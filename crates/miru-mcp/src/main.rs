@@ -174,10 +174,13 @@ async fn main() -> Result<()> {
     // Policy:
     //   - ScreenRead / PointerMove / PointerClick / KeyType / Scroll: AUTO-APPROVE
     //     (low-risk; this is the normal "Claude can see and type" mode)
-    //   - ShellExec / FileWrite / FileRead / OpenUrl / ClipboardWrite: AUTO-DENY in v0.1
-    //     (destructive; v0.3 adds native UI dialog via Tauri IPC)
-    // Rationale: An AI assistant that can't read the screen or type is useless.
-    // An AI assistant that can run arbitrary shell commands needs human oversight.
+    //   - ScreenRead / PointerMove / PointerClick / KeyType / KeyCombo / ClipboardRead:
+    //     AUTO-APPROVE (normal interactive assistant operations; ClipboardRead needs a
+    //     valid token which the user consciously minted — acceptable read-only access)
+    //   - ShellExec / FileWrite / FileRead / OpenUrl / ClipboardWrite: AUTO-DENY
+    //     (irreversible or wide-impact; v0.3 adds native UI dialog via Tauri IPC)
+    // Rationale: An AI assistant that can't read the screen, type, or read clipboard
+    // is too restricted to be useful. Shell execution always needs human oversight.
     let confirm: ConfirmFn = Arc::new(|req: &ConfirmRequest| {
         use miru_agent::token::Capability;
         let approved = matches!(
@@ -187,6 +190,7 @@ async fn main() -> Result<()> {
                 | Capability::PointerClick
                 | Capability::KeyType
                 | Capability::KeyCombo
+                | Capability::ClipboardRead
         );
         if approved {
             tracing::debug!(
@@ -196,7 +200,7 @@ async fn main() -> Result<()> {
             );
         } else {
             warn!(
-                "Auto-denied (destructive in v0.1): agent={} cap={:?} summary={}",
+                "Auto-denied: agent={} cap={:?} summary={}",
                 req.agent_label, req.capability, req.action_summary
             );
         }

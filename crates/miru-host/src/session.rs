@@ -526,6 +526,19 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                             })).await;
                         }
                     }
+                    Some(Msg::OpenUrl(req)) if matches!(permission, Permission::Full) => {
+                        // Only Full-permission sessions may open URLs (same as ShellExec tier).
+                        let url = req.url.trim().to_string();
+                        if url.starts_with("https://") || url.starts_with("http://") {
+                            if let Err(e) = open::that(&url) {
+                                warn!("OpenUrl failed for {url}: {e}");
+                            } else {
+                                info!("Opened URL: {url}");
+                            }
+                        } else {
+                            warn!("OpenUrl rejected non-http URL: {url}");
+                        }
+                    }
                     Some(Msg::QosHint(hint)) => {
                         // Apply viewer quality preference to QoS floor/ceiling.
                         let mut q = qos.lock();

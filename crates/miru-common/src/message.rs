@@ -87,6 +87,9 @@ pub enum Msg {
     // Clipboard pull
     RequestClipboard,
 
+    // Open URL on host's default browser
+    OpenUrl(OpenUrlRequest),
+
     // Session lifecycle
     Close(CloseReason),
     Error(ErrorMsg),
@@ -373,6 +376,14 @@ pub struct QosUpdate {
     pub fps: u8,
     pub bitrate_kbps: u32,
     pub quality: u8, // 0–100
+}
+
+// ─── Open URL ─────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenUrlRequest {
+    /// The URL to open on the host (must start with https:// or http://).
+    pub url: String,
 }
 
 // ─── QoS hint (viewer → host) ─────────────────────────────────────────────────
