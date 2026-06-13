@@ -22,7 +22,6 @@ mod recording;
 #[allow(dead_code)]
 mod safe_fs;
 mod session;
-#[allow(dead_code)]
 mod ui;
 
 use session::HostConfig;
@@ -103,6 +102,9 @@ async fn main() -> Result<()> {
             info!("HW: {} → {:?}", h.name(), h.codecs());
         }
     }
+
+    // Print startup banner (Device ID + fingerprint for out-of-band verification).
+    ui::print_banner(&device_id, &identity);
 
     let signal_url = std::env::var("MIRU_SIGNAL")
         .unwrap_or_else(|_| "ws://signal.miru.app:21115/ws".to_string());
