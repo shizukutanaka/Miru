@@ -185,7 +185,7 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
         (246, 104, "kexec_load"),
         (321, 280, "bpf"),
         (175, 105, "init_module"),
-        (313, 106, "delete_module"),
+        (176, 106, "delete_module"), // x86_64: 176 (not 313 — that is finit_module)
         (172, -1, "iopl"),
         (173, -1, "ioperm"),
         (171, 162, "setdomainname"),
