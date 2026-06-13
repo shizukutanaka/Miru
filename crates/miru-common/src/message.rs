@@ -81,7 +81,11 @@ pub enum Msg {
 
     // Quality control
     QosUpdate(QosUpdate),
+    QosHint(QosHint),
     KeyFrame,
+
+    // Clipboard pull
+    RequestClipboard,
 
     // Session lifecycle
     Close(CloseReason),
@@ -365,6 +369,20 @@ pub struct QosUpdate {
     pub fps: u8,
     pub bitrate_kbps: u32,
     pub quality: u8, // 0–100
+}
+
+// ─── QoS hint (viewer → host) ─────────────────────────────────────────────────
+
+/// Viewer preference hint that the host QoS controller takes into account.
+/// Sent when the viewer changes mode via UI; does not override network-driven adjustments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QosHint {
+    /// "quality" | "balanced" | "smooth"
+    pub mode: String,
+    /// Optional hard cap on FPS (0 = no cap).
+    pub max_fps: u8,
+    /// Optional quality floor 0–100 (0 = no floor).
+    pub min_quality: u8,
 }
 
 // ─── Misc ─────────────────────────────────────────────────────────────────────

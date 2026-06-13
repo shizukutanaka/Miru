@@ -8,7 +8,7 @@ use miru_auth::DeviceIdentity;
 use miru_codec::{i420_to_jpeg, Decoder};
 use miru_common::{
     message::{
-        AudioCodec, ClipboardSync, Features, InputEvent, Msg, VideoCodec,
+        AudioCodec, ClipboardFormat, ClipboardSync, Features, InputEvent, Msg, VideoCodec,
     },
     session::DeviceId,
 };
@@ -29,6 +29,8 @@ pub struct RemoteBridge {
     relay: Arc<RelayTransport>,
     /// Latest decoded frame as PNG bytes (updated by background receive task).
     latest_png: Arc<Mutex<Option<Vec<u8>>>>,
+    /// Latest clipboard text pushed by host (updated on ClipboardSync).
+    latest_clipboard: Arc<Mutex<Option<String>>>,
     host_device_id: String,
 }
 
@@ -98,18 +100,21 @@ impl RemoteBridge {
 
         let relay = Arc::new(relay);
         let latest_png: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
+        let latest_clipboard: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
         {
             let relay = Arc::clone(&relay);
             let latest_png = Arc::clone(&latest_png);
+            let latest_clipboard = Arc::clone(&latest_clipboard);
             tokio::spawn(async move {
-                recv_loop(relay, latest_png, video_codec).await;
+                recv_loop(relay, latest_png, latest_clipboard, video_codec).await;
             });
         }
 
         Ok(Self {
             relay,
             latest_png,
+            latest_clipboard,
             host_device_id: host_id.to_string(),
         })
     }
@@ -118,12 +123,20 @@ impl RemoteBridge {
 async fn recv_loop(
     relay: Arc<RelayTransport>,
     latest_png: Arc<Mutex<Option<Vec<u8>>>>,
+    latest_clipboard: Arc<Mutex<Option<String>>>,
     codec: VideoCodec,
 ) {
     let mut decoder: Option<Decoder> = None;
 
     loop {
         match relay.recv_msg().await {
+            Ok(Some(Msg::ClipboardSync(cs))) => {
+                if cs.format == ClipboardFormat::Text {
+                    if let Ok(text) = String::from_utf8(cs.data) {
+                        *latest_clipboard.lock() = Some(text);
+                    }
+                }
+            }
             Ok(Some(Msg::VideoFrame(vf))) => {
                 let jpeg = if vf.codec == VideoCodec::Jpeg {
                     Some(vf.data)
@@ -191,7 +204,21 @@ impl HostBridge for RemoteBridge {
     }
 
     async fn read_clipboard(&self) -> Result<String> {
-        bail!("remote clipboard read not yet supported — host pushes changes automatically")
+        // Ask the host to push its current clipboard; wait up to 2s for the response.
+        self.relay.send_msg(&Msg::RequestClipboard).await.context("send RequestClipboard")?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            {
+                let guard = self.latest_clipboard.lock();
+                if let Some(ref text) = *guard {
+                    return Ok(text.clone());
+                }
+            }
+            if std::time::Instant::now() > deadline {
+                bail!("read_clipboard: no response from host within 2s");
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
     }
 
     async fn open_url(&self, url: &str) -> Result<()> {
@@ -203,6 +230,7 @@ impl HostBridge for RemoteBridge {
             "bridge": "remote",
             "host_device_id": self.host_device_id,
             "has_frame": self.latest_png.lock().is_some(),
+            "has_clipboard": self.latest_clipboard.lock().is_some(),
         }))
     }
 }

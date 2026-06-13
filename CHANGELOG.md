@@ -12,6 +12,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Viewer-initiated clipboard pull**: new `RequestClipboard` protocol message lets the viewer
+  explicitly request the host's current clipboard text; "クリップボード受信" toolbar button sends
+  the request and the host responds immediately via `ClipboardSync`; `miru-mcp` remote bridge
+  also uses this path so AI agents can read clipboard without waiting for host-push events
+- **Viewer QoS mode hint** (`QosHint` protocol message): viewer toolbar cycles through three
+  modes — "画質重視" (quality: bitrate-biased), "バランス" (default BBR behaviour), "滑らか"
+  (smooth: FPS floor 30, bitrate capped at 70% of bottleneck bandwidth); host
+  `BbrQos::apply_hint()` persists the hint and applies it on every BBR tick; quality estimate
+  biases ±10 units to match the selected mode
+- **miru-mcp remote bridge clipboard** (`read_clipboard` now works): sends `RequestClipboard`
+  to the host, waits up to 2 s for `ClipboardSync` response; `recv_loop` captures all
+  `ClipboardSync` pushes in `latest_clipboard`; `status` payload includes `has_clipboard`
+- **Session elapsed timer in viewer**: session screen tracks elapsed seconds since "connected"
+  event; overlay shows `T mm:ss` row when a session is active; hours shown when ≥ 1 h
+- **LAN signal URL auto-fill**: viewer ConnectScreen now defaults to `ws://localhost:21115/ws`
+  (self-hosted); clicking a LAN peer auto-fills the signal URL as `ws://{peer_addr}:{port}/ws`
+  for true zero-config LAN access without manual URL entry
+- **Viewer codec advertisement fix**: viewer advertises only decodable codecs via
+  `miru_codec::available_codecs()` (VP9/VP8/JPEG with `vpx` feature; JPEG-only otherwise);
+  previously advertised AV1/H264/H265 stub decoders that would fail at first frame
+- **miru-mcp remote bridge**: `RemoteBridge` connects to a Miru host via signal server + relay,
+  maintains a live viewer session, decodes VP9/JPEG frames in a background task, returns PNG
+  via `capture_screen`; configured via `MIRU_SIGNAL` + `MIRU_HOST_DEVICE_ID` env vars
 - **Session recording with Time Travel playback**: `start_recording` / `stop_recording` Tauri
   commands; decoded JPEG frames saved to `{config_dir}/recordings/{session_id}/frames/`; metadata
   JSON written on stop; "録画" button in session toolbar; `TimelineScrubber` wired to

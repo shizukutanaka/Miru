@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            ext: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            ext: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libx11-dev libxcb1-dev libxcb-shm0-dev \
+            libxcb-randr0-dev libasound2-dev libpulse-dev pkg-config
+
+      - name: Cross-compile setup (Linux ARM)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          mkdir -p ~/.cargo
+          echo "[target.aarch64-unknown-linux-gnu]" >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
+      - name: Build
+        run: |
+          cargo build --release --locked --target ${{ matrix.target }} -p miru-host
+          cargo build --release --locked --target ${{ matrix.target }} -p miru-signal
+          cargo build --release --locked --target ${{ matrix.target }} -p miru-mcp
+
+      - name: Package (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/miru-host dist/
+          cp target/${{ matrix.target }}/release/miru-signal dist/
+          cp target/${{ matrix.target }}/release/miru-mcp dist/
+          tar -czf miru-${{ matrix.target }}.tar.gz -C dist .
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mkdir dist
+          copy target\${{ matrix.target }}\release\miru-host.exe dist\
+          copy target\${{ matrix.target }}\release\miru-signal.exe dist\
+          copy target\${{ matrix.target }}\release\miru-mcp.exe dist\
+          Compress-Archive -Path dist\* -DestinationPath miru-${{ matrix.target }}.zip
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: miru-${{ matrix.target }}
+          path: miru-${{ matrix.target }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write    # for OIDC → Sigstore keyless signing
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11  # v4.1.1
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      # Generate SBOM (CycloneDX JSON) from Cargo.lock
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked --quiet
+
+      - name: Generate SBOM
+        run: cargo cyclonedx --format json --output-file miru-sbom.cdx.json
+
+      # Sign all release artefacts with Sigstore cosign (keyless, OIDC-backed)
+      # NOTE: the previous pin was a 39-char (invalid) SHA and could never resolve.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign release artefacts
+        run: |
+          find artifacts/ -type f \( -name "*.tar.gz" -o -name "*.zip" \) | while read f; do
+            echo "Signing: $f"
+            cosign sign-blob --yes --bundle "${f}.cosign.bundle" "$f"
+          done
+          cosign sign-blob --yes --bundle miru-sbom.cdx.json.cosign.bundle miru-sbom.cdx.json
+
+      - name: Verify signatures (self-check)
+        run: |
+          find artifacts/ -type f -name "*.cosign.bundle" | while read bundle; do
+            artifact="${bundle%.cosign.bundle}"
+            echo "Verifying: $artifact"
+            cosign verify-blob \
+              --bundle "$bundle" \
+              --certificate-identity-regexp "github.com/shizukutanaka/miru" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "$artifact"
+          done
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: miru-sbom
+          path: |
+            miru-sbom.cdx.json
+            miru-sbom.cdx.json.cosign.bundle
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*
+            miru-sbom.cdx.json
+            miru-sbom.cdx.json.cosign.bundle
+          generate_release_notes: true
+          body: |
+            ## Verification
+
+            All release artefacts are signed with [Sigstore cosign](https://docs.sigstore.dev/):
+
+            ```bash
+            # Verify a release binary
+            cosign verify-blob \
+              --bundle miru-linux-x86_64.tar.gz.cosign.bundle \
+              --certificate-identity-regexp "github.com/shizukutanaka/miru" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              miru-linux-x86_64.tar.gz
+            ```
+
+            A CycloneDX SBOM (`miru-sbom.cdx.json`) is also included for dependency auditing.

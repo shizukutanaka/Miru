@@ -12,7 +12,7 @@
 //! For remote desktop the inputs are noisier than for raw data transfer
 //! (frame-rate jitter, encoder bitrate variation), so we smooth aggressively.
 
-use miru_common::message::QosUpdate;
+use miru_common::message::{QosHint, QosUpdate};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
@@ -41,6 +41,19 @@ pub struct BbrQos {
     /// Phase of the BBR cycle (Startup → Drain → ProbeBW → ProbeRTT).
     phase: Phase,
     last_adjust: Instant,
+
+    /// Viewer-requested quality hint.
+    hint_max_fps: u8,
+    hint_min_quality: u8,
+    /// "quality" → bias toward bitrate; "smooth" → bias toward fps; "balanced" → default.
+    hint_mode: HintMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HintMode {
+    Balanced,
+    Quality,
+    Smooth,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,7 +94,25 @@ impl BbrQos {
             cur_fps: initial_fps,
             phase: Phase::Startup,
             last_adjust: Instant::now(),
+            hint_max_fps: 0,
+            hint_min_quality: 0,
+            hint_mode: HintMode::Balanced,
         }
+    }
+
+    /// Apply a viewer quality hint. Persists until the next hint.
+    pub fn apply_hint(&mut self, hint: &QosHint) {
+        self.hint_max_fps = hint.max_fps;
+        self.hint_min_quality = hint.min_quality;
+        self.hint_mode = match hint.mode.as_str() {
+            "quality" => HintMode::Quality,
+            "smooth" => HintMode::Smooth,
+            _ => HintMode::Balanced,
+        };
+        tracing::info!(
+            "QoS hint applied: mode={} max_fps={} min_quality={}",
+            hint.mode, hint.max_fps, hint.min_quality
+        );
     }
 
     /// Feed a new RTT sample (microseconds).
@@ -136,16 +167,25 @@ impl BbrQos {
         self.advance_phase();
 
         // Target bitrate = pacing_gain × bottleneck bandwidth
-        let target = (self.bw_max_kbps as f32 * self.phase.pacing_gain()) as u32;
-        let target = target.clamp(500, 50_000); // 0.5–50 Mbps cap
+        let mut target = (self.bw_max_kbps as f32 * self.phase.pacing_gain()) as u32;
+
+        // Quality mode: viewer prefers bitrate over FPS — allocate more to bitrate.
+        // Smooth mode: viewer prefers FPS over bitrate — cap bitrate at 70% of BW.
+        target = match self.hint_mode {
+            HintMode::Quality => target.clamp(500, 50_000),
+            HintMode::Smooth => target.clamp(500, (self.bw_max_kbps as f32 * 0.7) as u32).max(500),
+            HintMode::Balanced => target.clamp(500, 50_000),
+        };
 
         // FPS adjusts gently — drop FPS first (drops bitrate need too) on high RTT
+        let fps_ceil = if self.hint_max_fps > 0 { self.hint_max_fps } else { 60 };
+        let fps_floor = if self.hint_mode == HintMode::Smooth { 30u8 } else { 15u8 };
         let target_fps = if self.rtt_min_us > 100_000 {
-            self.cur_fps.saturating_sub(5).max(15)
-        } else if self.rtt_min_us < 30_000 && self.cur_fps < 60 {
-            (self.cur_fps + 5).min(60)
+            self.cur_fps.saturating_sub(5).max(fps_floor)
+        } else if self.rtt_min_us < 30_000 && self.cur_fps < fps_ceil {
+            (self.cur_fps + 5).min(fps_ceil)
         } else {
-            self.cur_fps
+            self.cur_fps.min(fps_ceil)
         };
 
         let changed = target != self.cur_bitrate_kbps || target_fps != self.cur_fps;
@@ -203,7 +243,14 @@ impl BbrQos {
         // Heuristic: high BW + low RTT → high quality
         let bw_score = (self.cur_bitrate_kbps as f32 / 100.0).min(50.0);
         let rtt_penalty = (self.rtt_min_us as f32 / 1000.0 / 10.0).min(50.0);
-        (50.0 + bw_score - rtt_penalty).clamp(20.0, 95.0) as u8
+        let base = (50.0 + bw_score - rtt_penalty).clamp(20.0, 95.0) as u8;
+        // Quality mode biases the estimate upward; smooth mode downward.
+        let biased = match self.hint_mode {
+            HintMode::Quality => base.saturating_add(10).min(95),
+            HintMode::Smooth => base.saturating_sub(10).max(20),
+            HintMode::Balanced => base,
+        };
+        biased.max(self.hint_min_quality)
     }
 
     pub fn fps(&self) -> u8 {

@@ -25,6 +25,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [recording, setRecording] = useState(false);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
+  const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -199,6 +200,16 @@ export function SessionScreen({ onDisconnect }: Props) {
     } catch {}
   };
 
+  const handleRequestClipboard = async () => {
+    try { await api.requestClipboard(); } catch {}
+  };
+
+  const cycleQosMode = async () => {
+    const next = qosMode === "balanced" ? "quality" : qosMode === "quality" ? "smooth" : "balanced";
+    setQosMode(next);
+    try { await api.sendQosHint(next); } catch {}
+  };
+
   const handleToggleRecording = async () => {
     if (recording) {
       try { await api.stopRecording(); } catch {}
@@ -298,7 +309,19 @@ export function SessionScreen({ onDisconnect }: Props) {
         >
           {recording ? "録画停止" : "録画"}
         </button>
-        <button onClick={handleClipboardSync}>クリップボード送信</button>
+        <button onClick={handleClipboardSync} title="ローカルのクリップボードをホストへ送信">
+          クリップボード送信
+        </button>
+        <button onClick={handleRequestClipboard} title="ホストのクリップボードを受信" disabled={status !== "connected"}>
+          クリップボード受信
+        </button>
+        <button
+          onClick={cycleQosMode}
+          title="画質モード: 画質重視 / バランス / 滑らか"
+          disabled={status !== "connected"}
+        >
+          {qosMode === "quality" ? "画質重視" : qosMode === "smooth" ? "滑らか" : "バランス"}
+        </button>
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={fileSending || status !== "connected"}

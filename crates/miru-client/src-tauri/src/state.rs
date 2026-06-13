@@ -162,6 +162,14 @@ impl AppState {
         }
     }
 
+    pub async fn send_msg(&self, msg: Msg) -> Result<()> {
+        let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
+        if let Some(tx) = tx {
+            tx.send(msg).await.map_err(|_| anyhow::anyhow!("session closed"))?;
+        }
+        Ok(())
+    }
+
     pub async fn send_input(&self, evt: InputEvent) -> Result<()> {
         let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
         if let Some(tx) = tx {

@@ -57,6 +57,11 @@ export const api = {
   sendClipboard: (text: string) =>
     invoke<void>("send_clipboard", { text }),
 
+  requestClipboard: () => invoke<void>("request_clipboard"),
+
+  sendQosHint: (mode: "quality" | "balanced" | "smooth", maxFps = 0, minQuality = 0) =>
+    invoke<void>("send_qos_hint", { mode, maxFps, minQuality }),
+
   sendFile: (name: string, dataB64: string) =>
     invoke<void>("send_file", { name, dataB64 }),
 

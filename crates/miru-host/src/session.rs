@@ -494,6 +494,21 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                             }
                         }
                     }
+                    Some(Msg::RequestClipboard) if clipboard_enabled => {
+                        // Viewer explicitly requested clipboard content — push immediately.
+                        if let Ok(text) = miru_input::get_clipboard() {
+                            let _ = relay.send_msg(&Msg::ClipboardSync(ClipboardSync {
+                                format: miru_common::message::ClipboardFormat::Text,
+                                data: text.into_bytes(),
+                            })).await;
+                        }
+                    }
+                    Some(Msg::QosHint(hint)) => {
+                        // Apply viewer quality preference to QoS floor/ceiling.
+                        let mut q = qos.lock();
+                        q.apply_hint(&hint);
+                        // MutexGuard drops here before any await
+                    }
                     Some(Msg::FileTransfer(ft)) if ft_cfg.is_some() => {
                         if let Some(cfg) = ft_cfg.as_ref() {
                             handle_file_transfer(ft, &mut file_transfers, cfg);
