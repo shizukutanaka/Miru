@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Session recording with Time Travel playback**: `start_recording` / `stop_recording` Tauri
+  commands; decoded JPEG frames saved to `{config_dir}/recordings/{session_id}/frames/`; metadata
+  JSON written on stop; "録画" button in session toolbar; `TimelineScrubber` wired to
+  `get_recording_frame` for per-frame scrubbing with real frames (not placeholder)
+- **LAN peer discovery in viewer connect screen**: viewer starts mDNS browse at launch via
+  `miru-discovery`; `discover_lan_peers` Tauri command returns `DiscoveredPeer` snapshot;
+  ConnectScreen polls every 3 s and shows "LAN上のデバイス" section with one-click connect
+- **Signal server per-IP Connect rate limiting**: 20 requests/minute per IP; exceeded requests
+  receive `Error{code: 429}`; implemented via `ConnectInfo<SocketAddr>` extractor +
+  `DashMap<IpAddr, ConnectBucket>` with sliding 60-second window
+- **JPEG codec fast path**: viewer bypasses decode→re-encode for JPEG-codec frames, forwarding
+  host bytes directly to frontend — eliminates double-compression quality loss and ~5 ms CPU
+  overhead; VP9/VP8 re-encode quality raised from 70 → 85
 - **File transfer from viewer to host**: `send_file` Tauri command accepts file name +
   base64 bytes, sanitizes filename, computes SHA-256 hash via `ring::digest`, sends
   `FileTransfer::Start → Chunk* → Done` sequence in 256 KB chunks; viewer UI adds
