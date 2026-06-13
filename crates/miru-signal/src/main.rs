@@ -28,6 +28,8 @@ use uuid::Uuid;
 struct AppState {
     registry: Arc<DashMap<String, DeviceEntry>>,
     relay_sessions: Arc<DashMap<String, RelaySlot>>,
+    max_devices: usize,
+    max_relay_sessions: usize,
 }
 
 struct DeviceEntry {
@@ -38,6 +40,20 @@ struct DeviceEntry {
 /// slot is reaped. Generous compared to the 30s in-handler peer wait.
 const UNCLAIMED_SLOT_TTL: Duration = Duration::from_secs(60);
 
+/// Maximum number of simultaneously registered devices.
+/// Prevents memory exhaustion from a flood of fake Register messages.
+/// Tuned for typical self-hosted deployments (households / small teams).
+/// Override via MIRU_MAX_DEVICES env var.
+const DEFAULT_MAX_DEVICES: usize = 10_000;
+
+/// Maximum number of simultaneous relay sessions.
+const DEFAULT_MAX_RELAY_SESSIONS: usize = 5_000;
+
+/// Maximum binary message size forwarded by the relay (bytes).
+/// 4 MiB — larger than any realistic single frame at 4K JPEG,
+/// prevents a single session from blocking the channel with a giant blob.
+const MAX_RELAY_MSG_BYTES: usize = 4 * 1024 * 1024;
+
 /// Two-slot relay session — waits for both host and viewer to connect.
 struct RelaySlot {
     /// Raw byte sender for each side.
@@ -47,9 +63,19 @@ struct RelaySlot {
 
 impl AppState {
     fn new() -> Self {
+        let max_devices = std::env::var("MIRU_MAX_DEVICES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MAX_DEVICES);
+        let max_relay_sessions = std::env::var("MIRU_MAX_RELAY_SESSIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MAX_RELAY_SESSIONS);
         Self {
             registry: Arc::new(DashMap::new()),
             relay_sessions: Arc::new(DashMap::new()),
+            max_devices,
+            max_relay_sessions,
         }
     }
 }
@@ -147,6 +173,22 @@ async fn process_rdv_msg(
 ) {
     match msg {
         Msg::Register(reg) => {
+            // Reject if we've hit the registry cap (DoS prevention).
+            if state.registry.len() >= state.max_devices {
+                warn!(
+                    "Registry full ({}/{}) — rejecting {}",
+                    state.registry.len(),
+                    state.max_devices,
+                    reg.device_id
+                );
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 503,
+                        message: "server at capacity".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             info!("Register: {}", reg.device_id);
             *my_id = Some(reg.device_id.clone());
             state
@@ -267,6 +309,15 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
         role.as_deref().unwrap_or("?")
     );
 
+    // Reject new sessions when at capacity.
+    if state.relay_sessions.len() >= state.max_relay_sessions {
+        warn!(
+            "Relay at capacity ({}) — dropping connection",
+            state.max_relay_sessions
+        );
+        return;
+    }
+
     // Channel for receiving forwarded bytes from the other peer
     let (fwd_tx, mut fwd_rx) = mpsc::channel::<Vec<u8>>(256);
 
@@ -328,6 +379,13 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
             msg = ws_rx.next() => {
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
+                        if data.len() > MAX_RELAY_MSG_BYTES {
+                            warn!(
+                                "Relay: dropping oversized frame ({} bytes > {} limit)",
+                                data.len(), MAX_RELAY_MSG_BYTES
+                            );
+                            break;
+                        }
                         if peer_tx.send(data).await.is_err() { break }
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
