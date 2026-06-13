@@ -144,12 +144,59 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Start mDNS discovery — announce ourselves on the LAN and browse for peers.
+    // Non-fatal: a LAN without multicast or a firewall blocking mDNS must not
+    // prevent the signal-server flow from working.
+    let rdv_port: u16 = std::env::var("MIRU_RDV_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(21115);
+    let discovery = {
+        use miru_constellation::{DeviceCapabilities, FormFactor};
+        use miru_discovery::{Discovery, LocalAdvertisement};
+        let advert = LocalAdvertisement {
+            device_id: device_id.0.clone(),
+            constellation_pubkey: String::new(), // no constellation in v0.1
+            friendly_name: std::env::var("MIRU_FRIENDLY_NAME")
+                .unwrap_or_else(|_| format!("Miru Host ({device_id})")),
+            form_factor: FormFactor::Desktop,
+            port: rdv_port,
+            capabilities: DeviceCapabilities {
+                displays: vec![],
+                has_microphone: false,
+                has_speakers: false,
+                has_camera: false,
+                has_hw_encode: !miru_codec::probe_hw().is_empty(),
+                battery_pct: None,
+                form_factor: FormFactor::Desktop,
+                friendly_name: String::new(),
+                os_family: std::env::consts::OS.to_string(),
+            },
+        };
+        match Discovery::start(advert) {
+            Ok(d) => {
+                info!("mDNS discovery started (port {})", rdv_port);
+                Some(d)
+            }
+            Err(e) => {
+                tracing::warn!("mDNS discovery unavailable (non-fatal): {}", e);
+                None
+            }
+        }
+    };
+
     let config = HostConfig {
         identity,
         acl,
         config_dir,
     };
-    session::run(device_id, signal_url, config).await
+    let result = session::run(device_id, signal_url, config).await;
+
+    if let Some(d) = discovery {
+        d.shutdown();
+    }
+
+    result
 }
 
 fn load_or_create_device_id(dir: &std::path::Path) -> Result<DeviceId> {

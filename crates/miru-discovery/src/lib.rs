@@ -2,14 +2,10 @@
 //!
 //! Each Miru device announces itself on the LAN via `_miru._tcp.local.`,
 //! advertising:
-//!   - device_id (UUID)
-//!   - constellation_pubkey (base64) — devices match by constellation
+//!   - device_id (opaque string matching miru_common::session::DeviceId)
+//!   - constellation_pubkey (base64) — devices group by this
 //!   - port (signaling port the device listens on)
-//!   - friendly_name, form_factor, status
-//!
-//! Discovery happens passively (background browse). Discovered devices that
-//! belong to the same constellation are surfaced to the UI with handoff/
-//! direct-connect options.
+//!   - friendly_name, form_factor, os_family
 
 use anyhow::{Context, Result};
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -17,14 +13,14 @@ use miru_constellation::{DeviceCapabilities, FormFactor};
 use parking_lot::RwLock;
 use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 
 const SERVICE_TYPE: &str = "_miru._tcp.local.";
 
 /// What we advertise about ourselves.
 #[derive(Debug, Clone)]
 pub struct LocalAdvertisement {
-    pub device_id: Uuid,
+    /// Opaque device ID string (e.g. "ABCD-1234" from miru_common::session::DeviceId).
+    pub device_id: String,
     /// Base64 of the constellation pubkey (devices group by this).
     pub constellation_pubkey: String,
     pub friendly_name: String,
@@ -36,7 +32,7 @@ pub struct LocalAdvertisement {
 /// What we learn about peers.
 #[derive(Debug, Clone)]
 pub struct DiscoveredPeer {
-    pub device_id: Uuid,
+    pub device_id: String,
     pub constellation_pubkey: String,
     pub friendly_name: String,
     pub form_factor: FormFactor,
@@ -47,19 +43,18 @@ pub struct DiscoveredPeer {
 
 pub struct Discovery {
     daemon: ServiceDaemon,
-    /// Retained for future unregister()/re-advertise; not read in v0.1.
+    /// Retained for future unregister()/re-advertise.
     #[allow(dead_code)]
     instance_name: String,
-    peers: Arc<RwLock<HashMap<Uuid, DiscoveredPeer>>>,
+    peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>>,
 }
 
 impl Discovery {
     pub fn start(advert: LocalAdvertisement) -> Result<Self> {
         let daemon = ServiceDaemon::new().context("create mDNS daemon")?;
 
-        // Encode our advertisement as TXT records.
         let txt = [
-            ("device_id".to_string(), advert.device_id.to_string()),
+            ("device_id".to_string(), advert.device_id.clone()),
             (
                 "constellation".to_string(),
                 advert.constellation_pubkey.clone(),
@@ -80,14 +75,22 @@ impl Discovery {
             ("os".to_string(), advert.capabilities.os_family.clone()),
         ];
 
-        let instance_name = format!("miru-{}", &advert.device_id.simple().to_string()[..12]);
+        // Sanitize device_id for use as a DNS label (strip non-alphanumeric).
+        let safe_id: String = advert
+            .device_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .take(12)
+            .collect::<String>()
+            .to_lowercase();
+        let instance_name = format!("miru-{safe_id}");
         let hostname = format!("{instance_name}.local.");
 
         let info = ServiceInfo::new(
             SERVICE_TYPE,
             &instance_name,
             &hostname,
-            "", // empty IP → uses local interfaces
+            "",
             advert.port,
             &txt[..],
         )?
@@ -96,7 +99,8 @@ impl Discovery {
         daemon.register(info).context("register service")?;
         info!("Discovery: announcing as {}", instance_name);
 
-        let peers = Arc::new(RwLock::new(HashMap::new()));
+        let peers: Arc<RwLock<HashMap<String, DiscoveredPeer>>> =
+            Arc::new(RwLock::new(HashMap::new()));
         let receiver = daemon.browse(SERVICE_TYPE).context("start browse")?;
         let peers_clone = Arc::clone(&peers);
         let our_id = advert.device_id;
@@ -106,7 +110,6 @@ impl Discovery {
                 match event {
                     ServiceEvent::ServiceResolved(info) => {
                         if let Some(peer) = parse_peer(&info) {
-                            // Skip self
                             if peer.device_id == our_id {
                                 continue;
                             }
@@ -114,13 +117,14 @@ impl Discovery {
                                 "Discovery: found {} ({})",
                                 peer.friendly_name, peer.device_id
                             );
-                            peers_clone.write().insert(peer.device_id, peer);
+                            peers_clone
+                                .write()
+                                .insert(peer.device_id.clone(), peer);
                         }
                     }
                     ServiceEvent::ServiceRemoved(_, name) => {
                         debug!("Discovery: removed {}", name);
-                        // We can't easily map name back to UUID without more bookkeeping;
-                        // entries naturally age out via `prune_stale()`.
+                        // Entries age out via prune_stale().
                     }
                     _ => {}
                 }
@@ -148,7 +152,7 @@ impl Discovery {
             .collect()
     }
 
-    /// Drop peers we haven't seen in `older_than`.
+    /// Remove peers not seen within `older_than`.
     pub fn prune_stale(&self, older_than: Duration) {
         let cutoff = std::time::Instant::now()
             .checked_sub(older_than)
@@ -170,7 +174,10 @@ fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
         .map(|p| (p.key().to_string(), p.val_str().to_string()))
         .collect();
 
-    let device_id = txt.get("device_id")?.parse::<Uuid>().ok()?;
+    let device_id = txt.get("device_id")?.clone();
+    if device_id.is_empty() {
+        return None;
+    }
     let constellation_pubkey = txt.get("constellation")?.clone();
     let friendly_name = txt.get("name").cloned().unwrap_or_default();
     let form_factor = match txt.get("form").map(String::as_str) {

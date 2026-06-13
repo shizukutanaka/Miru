@@ -3328,7 +3328,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -3348,6 +3347,8 @@ dependencies = [
  "miru-capture",
  "miru-codec",
  "miru-common",
+ "miru-constellation",
+ "miru-discovery",
  "miru-input",
  "miru-sandbox",
  "miru-transparency",

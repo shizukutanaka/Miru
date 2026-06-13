@@ -33,6 +33,8 @@ ring = { workspace = true }
 base64 = "0.22"
 uuid = { workspace = true }
 miru-sandbox = { path = "../miru-sandbox" }
+miru-discovery = { path = "../miru-discovery" }
+miru-constellation = { path = "../miru-constellation" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
