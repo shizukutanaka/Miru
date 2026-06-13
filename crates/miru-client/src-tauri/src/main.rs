@@ -37,6 +37,9 @@ fn main() {
             commands::discover_lan_peers,
             commands::constellation_devices,
             commands::list_recordings,
+            commands::start_recording,
+            commands::stop_recording,
+            commands::get_recording_frame,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri app failed");

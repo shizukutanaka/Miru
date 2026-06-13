@@ -22,6 +22,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [selectedDisplay, setSelectedDisplay] = useState(0);
   const [fileSending, setFileSending] = useState(false);
+  const [recording, setRecording] = useState(false);
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -192,6 +193,15 @@ export function SessionScreen({ onDisconnect }: Props) {
     } catch {}
   };
 
+  const handleToggleRecording = async () => {
+    if (recording) {
+      try { await api.stopRecording(); } catch {}
+      setRecording(false);
+    } else {
+      try { await api.startRecording(); setRecording(true); } catch {}
+    }
+  };
+
   const handleFileSend = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -271,6 +281,14 @@ export function SessionScreen({ onDisconnect }: Props) {
             : "切断"}
         </span>
         <div className="toolbar-spacer" />
+        <button
+          onClick={handleToggleRecording}
+          className={recording ? "danger" : ""}
+          disabled={status !== "connected"}
+          title={recording ? "録画を停止" : "録画を開始"}
+        >
+          {recording ? "録画停止" : "録画"}
+        </button>
         <button onClick={handleClipboardSync}>クリップボード送信</button>
         <button
           onClick={() => fileInputRef.current?.click()}

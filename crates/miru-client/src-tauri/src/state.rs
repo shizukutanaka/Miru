@@ -24,12 +24,20 @@ pub struct SessionStats {
     pub packet_loss_pct: f32,
 }
 
+pub struct RecordingState {
+    pub dir: PathBuf,
+    pub session_id: String,
+    pub start_ts_ms: u64,
+    pub frame_count: u64,
+}
+
 pub struct AppState {
     identity: Arc<DeviceIdentity>,
     acl: Arc<Mutex<AclStore>>,
     config_dir: PathBuf,
     session: Arc<Mutex<Option<ActiveSession>>>,
     stats: Arc<Mutex<SessionStats>>,
+    pub recording: Arc<Mutex<Option<RecordingState>>>,
     discovery: Arc<Mutex<Option<miru_discovery::Discovery>>>,
 }
 
@@ -68,6 +76,7 @@ impl AppState {
             config_dir,
             session: Arc::new(Mutex::new(None)),
             stats: Arc::new(Mutex::new(SessionStats::default())),
+            recording: Arc::new(Mutex::new(None)),
             discovery: Arc::new(Mutex::new(discovery)),
         }
     }
@@ -89,6 +98,7 @@ impl AppState {
 
         let identity = Arc::clone(&self.identity);
         let stats = Arc::clone(&self.stats);
+        let recording = Arc::clone(&self.recording);
         let app_clone = app.clone();
         let session_slot = Arc::clone(&self.session);
 
@@ -102,6 +112,7 @@ impl AppState {
                     cancel_rx,
                     app_clone.clone(),
                     Arc::clone(&stats),
+                    Arc::clone(&recording),
                 )
                 .await;
 
@@ -373,6 +384,60 @@ impl AppState {
             .collect()
     }
 
+    pub fn start_recording(&self) -> Result<String> {
+        let session_id = Uuid::new_v4().to_string();
+        let dir = self.config_dir.join("recordings").join(&session_id);
+        std::fs::create_dir_all(dir.join("frames"))?;
+        let start_ts_ms = now_unix() * 1000;
+        *self.recording.lock() = Some(RecordingState {
+            dir,
+            session_id: session_id.clone(),
+            start_ts_ms,
+            frame_count: 0,
+        });
+        info!("Recording started: {}", session_id);
+        Ok(session_id)
+    }
+
+    pub fn stop_recording(&self) -> Result<crate::commands::RecordingSummary> {
+        let rec = self.recording.lock().take();
+        let rec = match rec {
+            Some(r) => r,
+            None => anyhow::bail!("no active recording"),
+        };
+        let duration_ms = now_unix() * 1000 - rec.start_ts_ms;
+        let frame_count = rec.frame_count;
+        let size_bytes = dir_size(&rec.dir);
+
+        // Write metadata
+        let meta = serde_json::json!({
+            "session_id": rec.session_id,
+            "start_ts_ms": rec.start_ts_ms,
+            "duration_ms": duration_ms,
+            "frame_count": frame_count,
+        });
+        std::fs::write(rec.dir.join("meta.json"), meta.to_string()).ok();
+        info!("Recording stopped: {} ({} frames)", rec.session_id, frame_count);
+
+        Ok(crate::commands::RecordingSummary {
+            path: rec.dir.to_string_lossy().to_string(),
+            session_id: rec.session_id,
+            start_ts_ms: rec.start_ts_ms,
+            duration_ms,
+            frame_count,
+            size_bytes,
+        })
+    }
+
+    pub fn get_recording_frame(&self, recording_path: &str, frame_idx: u64) -> Result<String> {
+        use base64::{engine::general_purpose::STANDARD as B64, Engine};
+        let path = std::path::Path::new(recording_path)
+            .join("frames")
+            .join(format!("{:08}.jpg", frame_idx));
+        let data = std::fs::read(&path)?;
+        Ok(B64.encode(&data))
+    }
+
     pub fn list_recordings(&self) -> Vec<crate::commands::RecordingSummary> {
         let dir = self.config_dir.join("recordings");
         if !dir.exists() {
@@ -382,35 +447,31 @@ impl AppState {
         if let Ok(rd) = std::fs::read_dir(&dir) {
             for entry in rd.flatten() {
                 let path = entry.path();
-                if path.extension().and_then(|s| s.to_str()) != Some("mkv") {
+                if !path.is_dir() {
                     continue;
                 }
-                let meta = match path.metadata() {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                let size = meta.len();
-                let start_ts_ms = meta
-                    .created()
+                let meta_path = path.join("meta.json");
+                if !meta_path.exists() {
+                    continue;
+                }
+                let meta: serde_json::Value = std::fs::read_to_string(&meta_path)
                     .ok()
-                    .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(serde_json::Value::Null);
 
-                let session_id = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .and_then(|s| s.split('-').nth(1))
-                    .unwrap_or("unknown")
-                    .to_string();
+                let session_id = meta["session_id"].as_str().unwrap_or("").to_string();
+                let start_ts_ms = meta["start_ts_ms"].as_u64().unwrap_or(0);
+                let duration_ms = meta["duration_ms"].as_u64().unwrap_or(0);
+                let frame_count = meta["frame_count"].as_u64().unwrap_or(0);
+                let size_bytes = dir_size(&path);
 
                 out.push(crate::commands::RecordingSummary {
                     path: path.to_string_lossy().to_string(),
                     session_id,
                     start_ts_ms,
-                    duration_ms: 0, // requires reading the recording header
-                    frame_count: 0, // ditto
-                    size_bytes: size,
+                    duration_ms,
+                    frame_count,
+                    size_bytes,
                 });
             }
         }
@@ -459,4 +520,18 @@ fn now_unix() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    let Ok(rd) = std::fs::read_dir(path) else { return 0 };
+    let mut total = 0u64;
+    for entry in rd.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            total += dir_size(&p);
+        } else if let Ok(m) = p.metadata() {
+            total += m.len();
+        }
+    }
+    total
 }

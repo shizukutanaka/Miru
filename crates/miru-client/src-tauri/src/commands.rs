@@ -325,3 +325,24 @@ pub struct RecordingSummary {
 pub fn list_recordings(state: tauri::State<'_, AppState>) -> Vec<RecordingSummary> {
     state.list_recordings()
 }
+
+#[tauri::command]
+pub fn start_recording(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    state.start_recording().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn stop_recording(state: tauri::State<'_, AppState>) -> Result<RecordingSummary, String> {
+    state.stop_recording().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_recording_frame(
+    recording_path: String,
+    frame_idx: u64,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    state
+        .get_recording_frame(&recording_path, frame_idx)
+        .map_err(|e| e.to_string())
+}

@@ -84,6 +84,11 @@ export const api = {
   selectDisplay: (index: number) =>
     invoke<void>("select_display", { index }),
   discoverLanPeers: () => invoke<LanPeer[]>("discover_lan_peers"),
+  startRecording: () => invoke<string>("start_recording"),
+  stopRecording: () => invoke<RecordingSummary>("stop_recording"),
+  listRecordings: () => invoke<RecordingSummary[]>("list_recordings"),
+  getRecordingFrame: (recordingPath: string, frameIdx: number) =>
+    invoke<string>("get_recording_frame", { recordingPath, frameIdx }),
 };
 
 export interface DisplayInfo {
@@ -101,4 +106,13 @@ export interface LanPeer {
   addresses: string[];
   port: number;
   form_factor: string;
+}
+
+export interface RecordingSummary {
+  path: string;
+  session_id: string;
+  start_ts_ms: number;
+  duration_ms: number;
+  frame_count: number;
+  size_bytes: number;
 }

@@ -21,7 +21,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::{sync::{mpsc, oneshot}, time};
 use tracing::{info, warn};
 
-use crate::state::SessionStats;
+use crate::state::{RecordingState, SessionStats};
 
 #[derive(Serialize, Clone)]
 pub struct VideoFrameEvent {
@@ -45,6 +45,7 @@ pub async fn run(
     mut cancel_rx: oneshot::Receiver<()>,
     app: AppHandle,
     stats: Arc<Mutex<SessionStats>>,
+    recording: Arc<Mutex<Option<RecordingState>>>,
 ) -> Result<()> {
     emit_status(&app, "connecting", None, None);
 
@@ -226,6 +227,7 @@ pub async fn run(
                             }
                             // Dimensions from JPEG header (parse width/height from SOF marker)
                             let (w, h) = jpeg_dimensions(&vf.data).unwrap_or((0, 0));
+                            write_recording_frame(&recording, &vf.data);
                             let _ = app.emit("video-frame", VideoFrameEvent {
                                 width: w,
                                 height: h,
@@ -275,6 +277,7 @@ pub async fn run(
 
                                 // Re-encode to JPEG at higher quality (85) for VP9/VP8 frames.
                                 if let Ok(jpeg) = i420_to_jpeg(&frame, 85) {
+                                    write_recording_frame(&recording, &jpeg);
                                     let _ = app.emit("video-frame", VideoFrameEvent {
                                         width: frame.width,
                                         height: frame.height,
@@ -341,6 +344,20 @@ pub async fn run(
 
     emit_status(&app, "disconnected", None, None);
     Ok(())
+}
+
+/// Write a JPEG frame to the active recording directory (if any).
+/// Non-blocking: takes lock briefly, writes file without holding it.
+fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &[u8]) {
+    let frame_path = {
+        let mut guard = recording.lock();
+        let Some(ref mut rec) = *guard else { return };
+        let idx = rec.frame_count;
+        rec.frame_count += 1;
+        rec.dir.join("frames").join(format!("{:08}.jpg", idx))
+    };
+    // Write outside the lock so we don't hold it during I/O.
+    let _ = std::fs::write(&frame_path, jpeg);
 }
 
 /// Extract (width, height) from a JPEG SOF0/SOF2 marker without fully decoding.
