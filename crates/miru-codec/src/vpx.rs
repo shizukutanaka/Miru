@@ -9,6 +9,7 @@ use crate::{EncodedPacket, EncoderBackend};
 
 pub struct VpxEncoder {
     ctx: vpx_codec_ctx_t,
+    cfg: vpx_codec_enc_cfg_t,
     pts: i64,
     fps_num: u32,
     fps_den: u32,
@@ -68,6 +69,7 @@ impl VpxEncoder {
 
             Ok(Self {
                 ctx,
+                cfg,
                 pts: 0,
                 fps_num: 1,
                 fps_den: fps as u32,
@@ -164,8 +166,12 @@ impl EncoderBackend for VpxEncoder {
     }
 
     fn update_bitrate(&mut self, kbps: u32) {
+        // VP8E_SET_SCREEN_CONTENT_MODE controls screen-content mode (0/1/2) — not
+        // the bitrate. The correct path is to update cfg.rc_target_bitrate and
+        // re-apply the encoder config via vpx_codec_enc_config_set.
         unsafe {
-            set_ctrl(&mut self.ctx, VP8E_SET_SCREEN_CONTENT_MODE, kbps as i32).ok();
+            self.cfg.rc_target_bitrate = kbps;
+            vpx_codec_enc_config_set(&mut self.ctx, &self.cfg);
         }
     }
 }
