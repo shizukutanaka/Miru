@@ -14,6 +14,8 @@ export function SessionScreen({ onDisconnect }: Props) {
   });
   const [resolution, setResolution] = useState({ w: 0, h: 0 });
   const [status, setStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [fingerprint, setFingerprint] = useState<string | null>(null);
+  const [hostQos, setHostQos] = useState<{ fps: number; bitrate_kbps: number; quality: number } | null>(null);
 
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
@@ -22,6 +24,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   useEffect(() => {
     let unlistenVideo: (() => void) | null = null;
     let unlistenStatus: (() => void) | null = null;
+    let unlistenQos: (() => void) | null = null;
 
     api.onVideoFrame((e) => {
       const canvas = canvasRef.current;
@@ -46,10 +49,13 @@ export function SessionScreen({ onDisconnect }: Props) {
         : e.kind === "disconnected" ? "disconnected"
         : e.kind === "error" ? "disconnected"
         : "connecting");
+      if (e.fingerprint) setFingerprint(e.fingerprint);
       if (e.kind === "disconnected" || e.kind === "error") {
         setTimeout(onDisconnect, 600);
       }
     }).then((fn) => (unlistenStatus = fn));
+
+    api.onQosUpdate((q) => setHostQos(q)).then((fn) => (unlistenQos = fn));
 
     const statsInterval = setInterval(async () => {
       try { setStats(await api.sessionStats()); } catch {}
@@ -58,6 +64,7 @@ export function SessionScreen({ onDisconnect }: Props) {
     return () => {
       unlistenVideo?.();
       unlistenStatus?.();
+      unlistenQos?.();
       clearInterval(statsInterval);
     };
   }, [onDisconnect]);
@@ -169,6 +176,18 @@ export function SessionScreen({ onDisconnect }: Props) {
           <div className="stat-row"><span className="label">RX</span><span className="value">{(stats.bytes_recv / 1024 / 1024).toFixed(1)} MB</span></div>
           {resolution.w > 0 && (
             <div className="stat-row"><span className="label">RES</span><span className="value">{resolution.w}×{resolution.h}</span></div>
+          )}
+          {hostQos && (
+            <div className="stat-row">
+              <span className="label">QoS</span>
+              <span className="value">{hostQos.fps}fps · {hostQos.bitrate_kbps}kbps · q{hostQos.quality}</span>
+            </div>
+          )}
+          {fingerprint && (
+            <div className="stat-row fingerprint-row" title="ホストの指紋 — 帯域外で確認してください">
+              <span className="label">FPR</span>
+              <span className="value fingerprint">{fingerprint}</span>
+            </div>
           )}
         </div>
       </div>

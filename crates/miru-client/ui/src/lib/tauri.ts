@@ -66,4 +66,6 @@ export const api = {
     listen<SessionEvent>("session-event", (e) => cb(e.payload)),
   onVideoFrame: (cb: (e: VideoFrameEvent) => void): Promise<UnlistenFn> =>
     listen<VideoFrameEvent>("video-frame", (e) => cb(e.payload)),
+  onQosUpdate: (cb: (e: { fps: number; bitrate_kbps: number; quality: number }) => void): Promise<UnlistenFn> =>
+    listen<{ fps: number; bitrate_kbps: number; quality: number }>("qos-update", (e) => cb(e.payload)),
 };

@@ -261,6 +261,13 @@ input {
 
 .stat-row .label { color: var(--fg-tertiary); }
 .stat-row .value { color: var(--fg-primary); }
+.stat-row.fingerprint-row .fingerprint {
+  font-family: monospace;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--accent-primary, #4a9eff);
+  cursor: help;
+}
 
 /* ─── Status pill ─── */
 
