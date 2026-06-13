@@ -24,6 +24,7 @@ use tracing::{debug, warn};
 /// Tuned for ~1 RTT @ 60fps + small buffer = 3-5 frames.
 const MAX_IN_FLIGHT: i32 = 3;
 /// Frames to skip during sustained lag (panic mode).
+#[allow(dead_code)]
 const PANIC_THRESHOLD: i32 = 8;
 
 pub struct FrameController {
@@ -82,6 +83,7 @@ impl FrameController {
 
     /// Returns true if the controller wants a keyframe (to recover from a stall).
     /// Cooldown of 1 second to avoid spam.
+    #[allow(dead_code)]
     pub fn want_keyframe(&self) -> bool {
         let in_flight = self.in_flight.load(Ordering::Relaxed);
         if in_flight < PANIC_THRESHOLD {
@@ -107,6 +109,7 @@ impl FrameController {
         }
     }
 
+    #[allow(dead_code)]
     pub fn stats(&self) -> FrameStats {
         FrameStats {
             captured: self.captured.load(Ordering::Relaxed),
@@ -118,6 +121,7 @@ impl FrameController {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub struct FrameStats {
     pub captured: u64,
     pub sent: u64,
@@ -126,6 +130,7 @@ pub struct FrameStats {
 }
 
 impl FrameStats {
+    #[allow(dead_code)]
     pub fn skip_rate(&self) -> f32 {
         if self.captured == 0 {
             return 0.0;

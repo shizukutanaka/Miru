@@ -14,8 +14,11 @@ use miru_capture::{
 };
 use miru_codec::encoder::Encoder;
 use miru_common::message::{Msg, VideoCodec, VideoFrame};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+
+use crate::backpressure::FrameController;
 
 /// Configuration for the capture loop.
 pub struct CaptureConfig {
@@ -23,6 +26,8 @@ pub struct CaptureConfig {
     pub display_idx: u8,
     pub target_fps: u8,
     pub bitrate_kbps: u32,
+    /// Shared backpressure controller — skip frames when the viewer falls behind.
+    pub frame_controller: Arc<FrameController>,
 }
 
 /// Start the capture loop in a dedicated thread.
@@ -36,6 +41,7 @@ pub fn start(
     let fps = config.target_fps;
     let bitrate = config.bitrate_kbps;
     let display_idx = config.display_idx;
+    let fc = config.frame_controller;
 
     std::thread::Builder::new()
         .name("miru-capture".to_string())
@@ -62,6 +68,11 @@ pub fn start(
                 let elapsed = last_frame.elapsed();
                 if elapsed < frame_interval {
                     std::thread::sleep(frame_interval - elapsed);
+                }
+
+                // Skip-at-capture when the viewer hasn't kept up (cheapest skip point).
+                if !fc.should_capture() {
+                    continue;
                 }
 
                 let frame = match capturer.next_frame() {

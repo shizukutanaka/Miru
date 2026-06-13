@@ -381,4 +381,53 @@ mod tests {
         // Should reject wrong leaf
         assert!(!verify_proof(&[99u8; 32], &proof, 0, &root));
     }
+
+    // ─── RFC 6962 deviation test ──────────────────────────────────────────────
+    // RFC 6962 §2.1 says odd leaves are "promoted unchanged" (carry to next
+    // level as-is). Our implementation instead hashes the odd leaf with itself:
+    //   node_hash(leaf, leaf) rather than promoting leaf unchanged.
+    // This is intentional: self-hashing eliminates proof-generation edge cases
+    // and is safe for a self-contained audit log (no CT interop needed).
+    // This test pins the exact root value so any unintentional change to the
+    // odd-leaf strategy is caught.
+    #[test]
+    fn merkle_odd_leaf_self_hash_is_stable() {
+        // 3 leaves → 2 pairs at level 0: [h(L0,L1), h(L2,L2)] → h at root.
+        // L2 is self-hashed (odd leaf), NOT promoted unchanged.
+        let mut log = MerkleLog::new();
+        log.append([0u8; 32]);
+        log.append([1u8; 32]);
+        log.append([2u8; 32]);
+        let root = log.root();
+
+        // Recompute manually to verify self-hash strategy.
+        fn lh(d: [u8; 32]) -> [u8; 32] {
+            let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
+            hasher.update(&[0x00]);
+            hasher.update(&d);
+            hasher.finish().as_ref().try_into().unwrap()
+        }
+        fn nh(l: &[u8; 32], r: &[u8; 32]) -> [u8; 32] {
+            let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
+            hasher.update(&[0x01]);
+            hasher.update(l);
+            hasher.update(r);
+            hasher.finish().as_ref().try_into().unwrap()
+        }
+        let l0 = lh([0u8; 32]);
+        let l1 = lh([1u8; 32]);
+        let l2 = lh([2u8; 32]);
+        let n01 = nh(&l0, &l1);
+        let n22 = nh(&l2, &l2); // self-hash (RFC 6962 would promote l2 unchanged)
+        let expected = nh(&n01, &n22);
+
+        assert_eq!(root, expected, "odd-leaf self-hash strategy changed unexpectedly");
+
+        // Inclusion proofs still verify correctly with this strategy.
+        for i in 0..3u64 {
+            let leaf = [i as u8; 32];
+            let proof = log.proof(i).unwrap();
+            assert!(verify_proof(&leaf, &proof, i, &root), "proof {i} failed");
+        }
+    }
 }

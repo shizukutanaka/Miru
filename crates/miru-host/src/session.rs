@@ -19,7 +19,8 @@ use tokio::time;
 use tracing::{error, info, warn};
 
 use crate::{
-    agent_handler::AgentHandler, capture_loop, input_handler::InputHandler, qos::QosController,
+    agent_handler::AgentHandler, backpressure::FrameController, capture_loop,
+    input_handler::InputHandler, metrics::SessionMetrics, qos::QosController,
 };
 
 #[derive(Clone)]
@@ -175,12 +176,14 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         let q = qos.lock();
         (q.fps(), q.bitrate_kbps())
     };
+    let bp = Arc::new(FrameController::new());
     let cap_rx = capture_loop::start(
         capture_loop::CaptureConfig {
             codec: result.selected_video_codec.clone(),
             display_idx: 0,
             target_fps: fps,
             bitrate_kbps: br,
+            frame_controller: bp.clone(),
         },
         capturer,
     )?;
@@ -188,17 +191,21 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 7. Main loop
     let mut input_handler = InputHandler::new();
     let mut ping_ticker = time::interval(Duration::from_secs(1));
-    let session_started = now_unix();
-    let mut video_frames: u64 = 0;
-    let mut total_bytes: u64 = 0;
+    let metrics = SessionMetrics::new(
+        result.session_id,
+        B64.encode(config.identity.verifying_key.as_bytes()),
+        device_str.clone(),
+        format!("{:?}", result.selected_video_codec).to_lowercase(),
+        true, // v0.1 always uses relay
+    );
 
     loop {
         tokio::select! {
             // Outgoing: video frames from capture loop
             Ok(msg) = cap_rx.recv_async() => {
                 if let Msg::VideoFrame(ref vf) = msg {
-                    video_frames += 1;
-                    total_bytes += vf.data.len() as u64;
+                    metrics.on_video_frame(vf.data.len() as u64);
+                    bp.on_send();
                 }
                 if relay.send_msg(&msg).await.is_err() { break; }
             }
@@ -221,6 +228,8 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     }
                     Some(Msg::Pong(p)) => {
                         let rtt = now_ms().saturating_sub(p.ts) as u32;
+                        // ACK one in-flight frame per Pong (conservative but correct).
+                        bp.on_ack(1);
                         // Scope the lock so the MutexGuard is dropped before .await.
                         // parking_lot::MutexGuard is !Send — holding it across await
                         // would prevent tokio::spawn from accepting this future.
@@ -249,17 +258,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     //    this session's metadata. Posted to Rekor if MIRU_REKOR_URL is set.
     //    Non-fatal: anchoring failure must never break session teardown.
     if let Ok(rekor_url) = std::env::var("MIRU_REKOR_URL") {
-        let metadata = miru_transparency::SessionMetadata {
-            session_id: result.session_id,
-            host_pubkey_b64: B64.encode(config.identity.verifying_key.as_bytes()),
-            viewer_pubkey_b64: device_str.clone(),
-            codec: format!("{:?}", result.selected_video_codec).to_lowercase(),
-            started_at: session_started,
-            ended_at: now_unix(),
-            video_frames,
-            total_bytes,
-            relayed: true, // v0.1 always uses relay
-        };
+        let metadata = metrics.snapshot();
         // Host-only commitment (single-signer for v0.1; co-signing in v1.0).
         let commitment = miru_transparency::CoSignedCommitment::new(
             &metadata,

@@ -9,14 +9,11 @@ use std::sync::Arc;
 use tracing::info;
 
 mod agent_handler;
-#[allow(dead_code)]
 mod backpressure;
 mod capture_loop;
 #[allow(dead_code)]
 mod headless;
-#[allow(dead_code)]
 mod input_handler;
-#[allow(dead_code)]
 mod metrics;
 mod qos;
 #[allow(dead_code)]
