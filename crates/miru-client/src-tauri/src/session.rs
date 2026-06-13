@@ -261,6 +261,13 @@ pub async fn run(
                             "quality": u.quality,
                         }));
                     }
+                    Ok(Some(Msg::ClipboardSync(cs))) => {
+                        if cs.format == miru_common::message::ClipboardFormat::Text {
+                            if let Ok(text) = String::from_utf8(cs.data) {
+                                let _ = app.emit("clipboard-sync", text);
+                            }
+                        }
+                    }
                     Ok(Some(Msg::Close(reason))) => {
                         info!("Host closed: {} {}", reason.code, reason.reason);
                         break;

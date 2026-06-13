@@ -5,7 +5,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use miru_auth::{AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer};
 use miru_capture::{create_capturer, ScreenCapturer as _};
 use miru_common::{
-    message::{AudioCodec, Features, FileTransfer, Msg, Role},
+    message::{AudioCodec, ClipboardFormat, ClipboardSync, Features, FileTransfer, Msg, Role},
     session::DeviceId,
 };
 use miru_transport::{
@@ -417,6 +417,11 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     let mut ping_ticker = time::interval(Duration::from_secs(1));
     // Bytes sent since last ping tick — used to estimate delivery rate for BBR.
     let mut bytes_since_ping: u64 = 0;
+    // Clipboard push: poll every second; push to viewer when content changes.
+    // Only enabled for non-view-only peers.
+    let clipboard_enabled = matches!(permission, Permission::Control | Permission::Full);
+    let mut clip_ticker = time::interval(Duration::from_secs(1));
+    let mut last_clip = String::new();
     let metrics = SessionMetrics::new(
         result.session_id,
         B64.encode(config.identity.verifying_key.as_bytes()),
@@ -522,6 +527,17 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     let _ = relay.send_msg(&Msg::QosUpdate(u)).await;
                 }
                 let _ = relay.send_msg(&Msg::Ping(miru_common::message::Ping { ts: now_ms() })).await;
+            }
+            _ = clip_ticker.tick(), if clipboard_enabled => {
+                if let Ok(text) = miru_input::get_clipboard() {
+                    if !text.is_empty() && text != last_clip {
+                        last_clip = text.clone();
+                        let _ = relay.send_msg(&Msg::ClipboardSync(ClipboardSync {
+                            format: ClipboardFormat::Text,
+                            data: text.into_bytes(),
+                        })).await;
+                    }
+                }
             }
         }
     }

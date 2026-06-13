@@ -70,6 +70,11 @@ export function SessionScreen({ onDisconnect }: Props) {
     let unlistenDisplays: (() => void) | null = null;
     api.onDisplayList((d) => setDisplays(d)).then((fn) => (unlistenDisplays = fn));
 
+    let unlistenClipboard: (() => void) | null = null;
+    api.onClipboardSync((text) => {
+      navigator.clipboard.writeText(text).catch(() => {});
+    }).then((fn) => (unlistenClipboard = fn));
+
     const statsInterval = setInterval(async () => {
       try { setStats(await api.sessionStats()); } catch {}
     }, 500);
@@ -79,6 +84,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       unlistenStatus?.();
       unlistenQos?.();
       unlistenDisplays?.();
+      unlistenClipboard?.();
       clearInterval(statsInterval);
     };
   }, [onDisconnect]);

@@ -70,6 +70,8 @@ export const api = {
     listen<{ fps: number; bitrate_kbps: number; quality: number }>("qos-update", (e) => cb(e.payload)),
   onDisplayList: (cb: (displays: DisplayInfo[]) => void): Promise<UnlistenFn> =>
     listen<{ displays: DisplayInfo[] }>("display-list", (e) => cb(e.payload.displays)),
+  onClipboardSync: (cb: (text: string) => void): Promise<UnlistenFn> =>
+    listen<string>("clipboard-sync", (e) => cb(e.payload)),
   selectDisplay: (index: number) =>
     invoke<void>("select_display", { index }),
 };

@@ -16,8 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   disconnect with exponential backoff (5 → 10 → 20 → … → 120 s cap); connect
   failures also retry with backoff rather than exiting; host stays alive through
   transient signal-server outages
-- **HTML and image clipboard sync**: `ClipboardFormat::Html` and `ClipboardFormat::Image`
-  now forwarded to host clipboard via `miru_input::set_clipboard_raw(data, mime_type)`;
+- **Bidirectional clipboard sync**: host polls clipboard every second and pushes text
+  changes to viewer via `Msg::ClipboardSync`; viewer handles the push and writes to local
+  clipboard via `navigator.clipboard.writeText()`; `ClipboardFormat` derives `PartialEq`
+- **HTML and image clipboard sync** (viewer → host): `ClipboardFormat::Html` and
+  `ClipboardFormat::Image` now forwarded via `miru_input::set_clipboard_raw(data, mime)`;
   Linux uses `xclip -t <mime>` for native MIME clipboard; macOS/Windows fall through to
   text for `text/*` and warn-and-skip for binary formats
 - XRandR 1.5 multi-monitor enumeration in `miru-capture` (Linux): `displays()` now
