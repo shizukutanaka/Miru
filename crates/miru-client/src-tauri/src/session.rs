@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
+use miru_audio::{playback::AudioPlayer, AudioDecoder, Layout};
 use miru_auth::DeviceIdentity;
 use miru_codec::{i420_to_jpeg, Decoder};
 use miru_common::{
@@ -123,8 +124,44 @@ pub async fn run(
 
     emit_status(&app, "connected", None, Some(host_fpr));
 
-    // 6. Decoder
+    // 6. Video decoder + audio pipeline
     let mut decoder: Option<Decoder> = None;
+    // Audio: cpal::Stream is !Send, so the decoder+player run on a dedicated
+    // std::thread. The session loop sends AudioFrame payloads via a channel.
+    let audio_enabled = result.selected_audio_codec == AudioCodec::Opus;
+    let audio_tx: Option<std::sync::mpsc::SyncSender<miru_common::message::AudioFrame>> =
+        if audio_enabled {
+            let (tx, rx) = std::sync::mpsc::sync_channel::<miru_common::message::AudioFrame>(16);
+            std::thread::spawn(move || {
+                let mut audio_decoder: Option<AudioDecoder> = None;
+                let mut audio_player: Option<AudioPlayer> = None;
+                for af in rx {
+                    let channels = af.channels;
+                    if audio_decoder.is_none() {
+                        if let Ok(layout) = Layout::from_channels(channels) {
+                            match (AudioDecoder::new(layout), AudioPlayer::new(channels, 48_000)) {
+                                (Ok(d), Ok(p)) => {
+                                    audio_decoder = Some(d);
+                                    audio_player = Some(p);
+                                }
+                                (Err(e), _) | (_, Err(e)) => {
+                                    warn!("Audio init failed (non-fatal): {e}");
+                                }
+                            }
+                        }
+                    }
+                    if let (Some(dec), Some(player)) = (audio_decoder.as_mut(), audio_player.as_ref()) {
+                        match dec.decode(&af) {
+                            Ok(samples) => player.push(samples),
+                            Err(e) => warn!("audio decode: {e}"),
+                        }
+                    }
+                }
+            });
+            Some(tx)
+        } else {
+            None
+        };
     let mut frame_count = 0u64;
     let mut last_stats_update = std::time::Instant::now();
 
@@ -202,6 +239,12 @@ pub async fn run(
                             ts: p.ts,
                             server_ts: now,
                         })).await;
+                    }
+                    Ok(Some(Msg::AudioFrame(af))) if audio_enabled => {
+                        if let Some(tx) = &audio_tx {
+                            // Non-blocking: drop frame on full queue (avoid latency drift)
+                            let _ = tx.try_send(af);
+                        }
                     }
                     Ok(Some(Msg::QosUpdate(u))) => {
                         // Log host-side QoS adjustments; UI can display these.
