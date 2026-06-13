@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Viewer session stats: bitrate and packet loss**: `bitrate_kbps` computed from bytes
+  received per second; `packet_loss_pct` estimated from `VideoFrame.seq` gaps; both
+  updated each second alongside fps; overlay shows BW kbps row always and PKT% row when
+  loss exceeds 0.5% (highlighted amber)
 - **Agent token issuance wired**: `AgentTokenIssue` UI now calls the real
   `issue_agent_token` Tauri command instead of mocking a token; error and loading
   states displayed; TTL field renamed `ttl_mins` (was `ttl_hours`), options changed

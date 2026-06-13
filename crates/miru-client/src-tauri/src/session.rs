@@ -164,6 +164,10 @@ pub async fn run(
         };
     let mut frame_count = 0u64;
     let mut last_stats_update = std::time::Instant::now();
+    let mut bytes_since_update: u64 = 0;
+    let mut last_seq: Option<u64> = None;
+    let mut seq_gaps: u64 = 0;
+    let mut seq_total: u64 = 0;
 
     // 7. Main loop
     loop {
@@ -187,6 +191,15 @@ pub async fn run(
             msg = relay.recv_msg() => {
                 match msg {
                     Ok(Some(Msg::VideoFrame(vf))) => {
+                        // Track sequence for packet loss estimation
+                        bytes_since_update += vf.data.len() as u64;
+                        if let Some(prev) = last_seq {
+                            let gap = vf.seq.saturating_sub(prev + 1);
+                            seq_gaps += gap;
+                            seq_total += gap + 1;
+                        }
+                        last_seq = Some(vf.seq);
+
                         // Lazy decoder init: get_or_insert_with can't propagate
                         // errors, so we use an explicit check.
                         if decoder.is_none() {
@@ -204,13 +217,24 @@ pub async fn run(
                         match dec.decode(&vf.data, vf.timestamp_ms) {
                             Ok(Some(frame)) => {
                                 frame_count += 1;
-                                // Update stats
-                                if last_stats_update.elapsed().as_secs() >= 1 {
+                                // Update stats every second
+                                let elapsed = last_stats_update.elapsed();
+                                if elapsed.as_secs() >= 1 {
+                                    let elapsed_secs = elapsed.as_secs_f32();
                                     let mut s = stats.lock();
                                     s.frames_decoded = frame_count;
-                                    s.bytes_recv += vf.data.len() as u64;
-                                    s.fps = frame_count as f32
-                                        / last_stats_update.elapsed().as_secs_f32();
+                                    s.bytes_recv += bytes_since_update;
+                                    s.fps = frame_count as f32 / elapsed_secs;
+                                    s.bitrate_kbps = ((bytes_since_update * 8) as f32
+                                        / elapsed_secs / 1000.0) as u32;
+                                    s.packet_loss_pct = if seq_total > 0 {
+                                        (seq_gaps as f32 / seq_total as f32) * 100.0
+                                    } else {
+                                        0.0
+                                    };
+                                    bytes_since_update = 0;
+                                    seq_gaps = 0;
+                                    seq_total = 0;
                                     last_stats_update = std::time::Instant::now();
                                 }
 

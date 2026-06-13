@@ -198,7 +198,11 @@ export function SessionScreen({ onDisconnect }: Props) {
         <div className="session-overlay">
           <div className="stat-row"><span className="label">FPS</span><span className="value">{stats.fps.toFixed(1)}</span></div>
           <div className="stat-row"><span className="label">RTT</span><span className="value">{stats.rtt_ms} ms</span></div>
+          <div className="stat-row"><span className="label">BW</span><span className="value">{stats.bitrate_kbps} kbps</span></div>
           <div className="stat-row"><span className="label">RX</span><span className="value">{(stats.bytes_recv / 1024 / 1024).toFixed(1)} MB</span></div>
+          {stats.packet_loss_pct > 0.5 && (
+            <div className="stat-row"><span className="label" style={{ color: "var(--warn, #f90)" }}>PKT</span><span className="value">{stats.packet_loss_pct.toFixed(1)}%</span></div>
+          )}
           {resolution.w > 0 && (
             <div className="stat-row"><span className="label">RES</span><span className="value">{resolution.w}×{resolution.h}</span></div>
           )}
