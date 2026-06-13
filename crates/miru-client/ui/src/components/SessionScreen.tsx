@@ -38,6 +38,8 @@ export function SessionScreen({ onDisconnect }: Props) {
   // Pre-allocate Image to reuse across frames (avoids GC pressure)
   const imgRef = useRef<HTMLImageElement | null>(null);
   if (!imgRef.current) imgRef.current = new Image();
+  const lastFrameRef = useRef<number>(Date.now());
+  const [stalled, setStalled] = useState(false);
 
   useEffect(() => {
     let unlistenVideo: (() => void) | null = null;
@@ -60,6 +62,8 @@ export function SessionScreen({ onDisconnect }: Props) {
         ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
       img.src = `data:image/jpeg;base64,${e.jpeg_b64}`;
+      lastFrameRef.current = Date.now();
+      setStalled(false);
     }).then((fn) => (unlistenVideo = fn));
 
     api.onSessionEvent((e) => {
@@ -95,6 +99,9 @@ export function SessionScreen({ onDisconnect }: Props) {
       try { setStats(await api.sessionStats()); } catch {}
       if (connectedAtRef.current !== null) {
         setElapsedSecs(Math.floor((Date.now() - connectedAtRef.current) / 1000));
+        // Detect stall: no frame for > 10 s while connected
+        const msSinceFrame = Date.now() - lastFrameRef.current;
+        setStalled(msSinceFrame > 10_000);
       }
     }, 500);
 
@@ -143,11 +150,63 @@ export function SessionScreen({ onDisconnect }: Props) {
     };
     const onContext = (e: Event) => e.preventDefault();
 
+    // Touch: map single touch to mouse, two-finger to scroll
+    const normTouch = (t: Touch) => {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: Math.max(0, Math.min(1, (t.clientX - rect.left) / rect.width)),
+        y: Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)),
+      };
+    };
+    let lastTouchPos = { x: 0.5, y: 0.5 };
+    let lastPinchDist = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        const { x, y } = normTouch(e.touches[0]);
+        lastTouchPos = { x, y };
+        api.sendInput({ kind: "mouse_move", x, y });
+        api.sendInput({ kind: "mouse_down", x, y, button: "left" });
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        lastPinchDist = Math.hypot(dx, dy);
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.touches.length === 1) {
+        const { x, y } = normTouch(e.touches[0]);
+        lastTouchPos = { x, y };
+        api.sendInput({ kind: "mouse_move", x, y });
+      } else if (e.touches.length === 2) {
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        const dist = Math.hypot(dx, dy);
+        const delta = lastPinchDist > 0 ? (dist - lastPinchDist) / 60 : 0;
+        lastPinchDist = dist;
+        const cx = (normTouch(e.touches[0]).x + normTouch(e.touches[1]).x) / 2;
+        const cy = (normTouch(e.touches[0]).y + normTouch(e.touches[1]).y) / 2;
+        api.sendInput({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta });
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      if (e.changedTouches.length > 0) {
+        api.sendInput({ kind: "mouse_up", x: lastTouchPos.x, y: lastTouchPos.y, button: "left" });
+      }
+      lastPinchDist = 0;
+    };
+
     canvas.addEventListener("mousemove", onMove);
     canvas.addEventListener("mousedown", onDown);
     canvas.addEventListener("mouseup", onUp);
     canvas.addEventListener("wheel", onWheel, { passive: false });
     canvas.addEventListener("contextmenu", onContext);
+    canvas.addEventListener("touchstart", onTouchStart, { passive: false });
+    canvas.addEventListener("touchmove", onTouchMove, { passive: false });
+    canvas.addEventListener("touchend", onTouchEnd, { passive: false });
 
     return () => {
       canvas.removeEventListener("mousemove", onMove);
@@ -155,6 +214,9 @@ export function SessionScreen({ onDisconnect }: Props) {
       canvas.removeEventListener("mouseup", onUp);
       canvas.removeEventListener("wheel", onWheel);
       canvas.removeEventListener("contextmenu", onContext);
+      canvas.removeEventListener("touchstart", onTouchStart);
+      canvas.removeEventListener("touchmove", onTouchMove);
+      canvas.removeEventListener("touchend", onTouchEnd);
     };
   }, []);
 
@@ -293,7 +355,12 @@ export function SessionScreen({ onDisconnect }: Props) {
 
       <DisplayTabs displays={displays} selected={selectedDisplay} onSelect={handleSelectDisplay} />
 
-      {status === "connected" && connQuality !== "good" && (
+      {status === "connected" && stalled && (
+        <div className="quality-banner quality-poor">
+          映像が停止しています — ホストが応答していない可能性があります
+        </div>
+      )}
+      {status === "connected" && !stalled && connQuality !== "good" && (
         <div className={`quality-banner quality-${connQuality}`}>
           {connQuality === "poor"
             ? `接続が不安定 — RTT ${stats.rtt_ms}ms / 損失 ${stats.packet_loss_pct.toFixed(1)}%`
