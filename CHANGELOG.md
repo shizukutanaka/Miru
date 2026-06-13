@@ -11,6 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Fix: TOFU pubkey pinning was a no-op** (ADR 0014): `check_or_pair` in
+  `miru-host` was passing `device_id` as `pubkey_b64` to both `AclStore::check`
+  and `AclStore::trust`. Because the stored value and the argument were the same
+  string, `TrustDecision::PubkeyMismatch` could never fire, making TOFU key
+  pinning completely ineffective. Any peer that could observe a trusted device_id
+  on the signal server could impersonate that device and obtain full control.
+  Fixed by using `B64.encode(pubkey)` — the actual Ed25519 pubkey bytes from
+  the verified handshake — as `pubkey_b64` in both store and check. Regression
+  test `acl_rejects_device_id_impersonation` added to `miru-auth`.
+  **Breaking**: existing `acl.json` files must be deleted and re-paired.
+
 ### Changed
 - **Viewer frame decode off the main thread** (ADR 0013): the session canvas now
   decodes JPEG frames via `createImageBitmap` (off-thread) instead of an `Image` +

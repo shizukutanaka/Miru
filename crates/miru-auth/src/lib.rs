@@ -277,4 +277,55 @@ mod tests {
             TrustDecision::PubkeyMismatch
         );
     }
+
+    /// Regression: the pubkey_b64 stored in the ACL MUST be the actual
+    /// cryptographic pubkey (base64), NOT the device_id string.
+    /// If device_id were stored as pubkey_b64, any peer claiming a known
+    /// device_id would pass check() because both sides of the comparison
+    /// evaluate to the same device_id string — making TOFU pinning a no-op
+    /// and enabling impersonation by any passive eavesdropper on the signal.
+    #[test]
+    fn acl_rejects_device_id_impersonation() {
+        let alice_id = DeviceIdentity::generate();
+        let mallory_id = DeviceIdentity::generate();
+        let device_id_str = "alice-device-uuid";
+
+        // Correctly store Alice's actual pubkey (as base64) in the ACL.
+        let alice_pubkey_b64 = alice_id.pubkey_b64();
+        let mallory_pubkey_b64 = mallory_id.pubkey_b64();
+        // sanity: they must be different keys
+        assert_ne!(alice_pubkey_b64, mallory_pubkey_b64);
+
+        let mut acl = AclStore::default();
+        acl.trust(TrustedPeer {
+            device_id: device_id_str.into(),
+            pubkey_b64: alice_pubkey_b64.clone(),
+            fingerprint: alice_id.pubkey_fingerprint(),
+            permission: Permission::Control,
+            first_seen: 0,
+            last_seen: 0,
+            friendly_name: None,
+        });
+
+        // Alice re-connects with her real key → Trusted.
+        assert_eq!(
+            acl.check(device_id_str, &alice_pubkey_b64),
+            TrustDecision::Trusted(Permission::Control),
+        );
+
+        // Mallory connects claiming Alice's device_id but with her own key → Mismatch.
+        assert_eq!(
+            acl.check(device_id_str, &mallory_pubkey_b64),
+            TrustDecision::PubkeyMismatch,
+            "impersonation must be detected — storing device_id as pubkey_b64 would hide this"
+        );
+
+        // Extra: the BUG would have stored device_id_str as pubkey_b64.
+        // Verify that pattern is rejected even if we check with the literal device_id.
+        assert_eq!(
+            acl.check(device_id_str, device_id_str),
+            TrustDecision::PubkeyMismatch,
+            "device_id must NOT be accepted as a valid pubkey"
+        );
+    }
 }

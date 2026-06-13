@@ -637,8 +637,13 @@ async fn check_or_pair(
     device_str: &str,
     pubkey: &[u8; 32],
 ) -> Result<Permission> {
+    // Base64-encode the *actual* verified Ed25519 pubkey from the handshake.
+    // Storing device_str here was a bug: any peer claiming a known device_id
+    // would pass the pubkey_b64 == pubkey_b64 comparison (same string both sides),
+    // making PubkeyMismatch unreachable and TOFU pinning completely ineffective.
+    let pubkey_b64 = B64.encode(pubkey);
     let mut acl = config.acl.lock();
-    match acl.check(device_str, device_str) {
+    match acl.check(device_str, &pubkey_b64) {
         TrustDecision::Trusted(p) => Ok(p),
         TrustDecision::Unknown => {
             // v0.1 behavior: auto-accept on first connection (TOFU — Trust On First Use).
@@ -656,7 +661,7 @@ async fn check_or_pair(
             warn!("└─────────────────────────────────────────────────────────────────────┘");
             acl.trust(TrustedPeer {
                 device_id: device_str.to_string(),
-                pubkey_b64: device_str.to_string(),
+                pubkey_b64,
                 fingerprint: fp,
                 permission: Permission::Control,
                 first_seen: now_unix(),
@@ -667,9 +672,9 @@ async fn check_or_pair(
             Ok(Permission::Control)
         }
         TrustDecision::PubkeyMismatch => {
-            error!("⚠️  Pubkey mismatch for {} — rejecting", device_str);
+            error!("⚠️  Pubkey mismatch for {} — rejecting (possible MITM or impersonation)", device_str);
             Err(anyhow::anyhow!(
-                "pubkey mismatch — possible MITM or device re-keyed"
+                "pubkey mismatch for {device_str} — possible MITM or device re-keyed"
             ))
         }
     }
