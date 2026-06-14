@@ -77,18 +77,17 @@ impl SessionCipher {
 
     /// Derive an independent cipher with a domain-separation tag (HKDF-SHA256).
     /// Use this to split a session into multiple streams without nonce-reuse risk.
-    pub fn derive_subkey(&self, info: &[u8]) -> Self {
+    pub fn derive_subkey(&self, info: &[u8]) -> Result<Self> {
         use ring::hkdf;
         let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, b"miru-subkey-v1");
         let prk = salt.extract(&self.key_bytes);
         let info_slices: [&[u8]; 1] = [info];
-        // Category A (provably-safe): 32-byte output always fits HKDF-SHA256 (max 8160B).
         let okm = prk
             .expand(&info_slices, hkdf::HKDF_SHA256)
-            .expect("hkdf expand: 32-byte output is well within limits");
+            .map_err(|_| anyhow::anyhow!("hkdf expand failed"))?;
         let mut sub = [0u8; 32];
-        okm.fill(&mut sub).expect("hkdf fill"); // same invariant
-        Self::new(sub)
+        okm.fill(&mut sub).map_err(|_| anyhow::anyhow!("hkdf fill failed"))?;
+        Ok(Self::new(sub))
     }
 
     /// Encrypt plaintext. Output: [8-byte LE seq][ciphertext+tag].
@@ -123,7 +122,11 @@ impl SessionCipher {
         if data.len() < MIN_CIPHERTEXT_LEN {
             bail!("decrypt: input too short ({} bytes)", data.len());
         }
-        let seq = u64::from_le_bytes(data[..8].try_into().expect("8 bytes; checked above"));
+        let seq = u64::from_le_bytes(
+            data[..8]
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("decrypt: seq slice wrong length"))?,
+        );
 
         // Replay check first — refuses to spend AEAD CPU on known-replayed bytes.
         self.check_and_record_seq(seq)?;
@@ -292,8 +295,8 @@ mod tests {
     #[test]
     fn derive_subkey_produces_independent_ciphers() {
         let base = SessionCipher::new([1u8; 32]);
-        let tx = base.derive_subkey(b"miru-tx");
-        let rx = base.derive_subkey(b"miru-rx");
+        let tx = base.derive_subkey(b"miru-tx").unwrap();
+        let rx = base.derive_subkey(b"miru-rx").unwrap();
         assert_ne!(tx.key_bytes(), rx.key_bytes());
         assert_ne!(tx.key_bytes(), base.key_bytes());
         let ct = tx.encrypt(b"data").unwrap();

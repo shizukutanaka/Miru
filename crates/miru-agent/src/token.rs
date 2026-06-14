@@ -293,8 +293,10 @@ impl std::fmt::Display for AgentToken {
 }
 
 fn canonical_payload_bytes(p: &AgentTokenPayload) -> Vec<u8> {
-    // JSON for human readability when debugging tokens; sorted keys for determinism.
-    serde_json::to_vec(p).expect("serialize payload")
+    // AgentTokenPayload contains only JSON-serializable types; to_vec cannot
+    // fail here. unwrap_or_default produces empty bytes on the impossible
+    // error path, which would cause token verification to fail rather than panic.
+    serde_json::to_vec(p).unwrap_or_default()
 }
 
 fn unix_now() -> u64 {

@@ -43,14 +43,14 @@ pub struct HandshakeResult {
 /// The two roles MUST pass different `is_host` values, so each side's
 /// `tx` corresponds to the other side's `rx`. This eliminates nonce-reuse
 /// risk: each direction has its own key + counter.
-fn split_directional(session_key: [u8; 32], is_host: bool) -> (SessionCipher, SessionCipher) {
+fn split_directional(session_key: [u8; 32], is_host: bool) -> Result<(SessionCipher, SessionCipher)> {
     let base = SessionCipher::new(session_key);
-    let host_to_viewer = base.derive_subkey(b"miru-h2v-v1");
-    let viewer_to_host = base.derive_subkey(b"miru-v2h-v1");
+    let host_to_viewer = base.derive_subkey(b"miru-h2v-v1")?;
+    let viewer_to_host = base.derive_subkey(b"miru-v2h-v1")?;
     if is_host {
-        (host_to_viewer, viewer_to_host)
+        Ok((host_to_viewer, viewer_to_host))
     } else {
-        (viewer_to_host, host_to_viewer)
+        Ok((viewer_to_host, host_to_viewer))
     }
 }
 
@@ -120,7 +120,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
     // 7. Derive shared secret + session key
     let shared = ephemeral.diffie_hellman(&host_eph);
     let session_key = hkdf_expand(&shared, ack.session_id.as_bytes());
-    let (tx, rx) = split_directional(session_key, false);
+    let (tx, rx) = split_directional(session_key, false)?;
 
     Ok(HandshakeResult {
         tx,
@@ -190,7 +190,7 @@ pub async fn host_handshake<C: MsgChannel>(
     let session_id = Uuid::new_v4();
     let shared = ephemeral.diffie_hellman(&viewer_eph);
     let session_key = hkdf_expand(&shared, session_id.as_bytes());
-    let (tx, rx) = split_directional(session_key, true);
+    let (tx, rx) = split_directional(session_key, true)?;
 
     // 6. Send HelloAck
     chan.send_msg(&Msg::HelloAck(HelloAck {
