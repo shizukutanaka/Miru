@@ -286,3 +286,134 @@ fn rgba_to_i420(frame: &RawFrame) -> Vec<u8> {
     };
     bgra_to_i420(&frame2)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_bgra_frame(w: u32, h: u32, stride: u32, pixel: [u8; 4]) -> RawFrame {
+        let mut data = vec![0u8; (stride * h) as usize];
+        for row in 0..h as usize {
+            for col in 0..w as usize {
+                let off = row * stride as usize + col * 4;
+                data[off..off + 4].copy_from_slice(&pixel);
+            }
+        }
+        RawFrame {
+            format: PixelFormat::Bgra32,
+            data: bytes::Bytes::from(data),
+            display_idx: 0,
+            width: w,
+            height: h,
+            stride,
+            timestamp_ms: 0,
+            dirty_rects: vec![],
+        }
+    }
+
+    #[test]
+    fn bgra_white_produces_correct_yuv() {
+        // White: R=255, G=255, B=255 → BGRA = [255, 255, 255, 255]
+        let frame = make_bgra_frame(2, 2, 8, [255, 255, 255, 255]);
+        let yuv = bgra_to_i420(&frame);
+        let y_size = 4; // 2×2
+        let uv_size = 1; // 1×1 each
+        assert_eq!(yuv.len(), y_size + uv_size * 2);
+        // BT.601 limited: white = Y=235, U=128, V=128
+        assert!(yuv[..y_size].iter().all(|&y| y == 235), "Y plane: all white = 235");
+        assert_eq!(yuv[y_size], 128, "U for white = 128");
+        assert_eq!(yuv[y_size + uv_size], 128, "V for white = 128");
+    }
+
+    #[test]
+    fn bgra_black_produces_correct_yuv() {
+        // Black: R=G=B=0 → BGRA = [0, 0, 0, 255]
+        let frame = make_bgra_frame(2, 2, 8, [0, 0, 0, 255]);
+        let yuv = bgra_to_i420(&frame);
+        let y_size = 4;
+        let uv_size = 1;
+        // BT.601 limited: black = Y=16, U=128, V=128
+        assert!(yuv[..y_size].iter().all(|&y| y == 16), "Y plane: all black = 16");
+        assert_eq!(yuv[y_size], 128, "U for black = 128");
+        assert_eq!(yuv[y_size + uv_size], 128, "V for black = 128");
+    }
+
+    #[test]
+    fn bgra_output_size_is_correct() {
+        // 4×4 frame: Y=16, UV=4 each → total 24 bytes
+        let frame = make_bgra_frame(4, 4, 16, [0, 0, 0, 255]);
+        let yuv = bgra_to_i420(&frame);
+        assert_eq!(yuv.len(), 4 * 4 + (4 / 2) * (4 / 2) * 2);
+    }
+
+    #[test]
+    fn bgra_stride_larger_than_row() {
+        // stride = 12 bytes (3 pixels), but width = 2 pixels (8 bytes of active data)
+        let w: u32 = 2;
+        let h: u32 = 2;
+        let stride: u32 = 12; // extra 4-byte padding per row
+        let mut data = vec![0u8; (stride * h) as usize];
+        // Write white pixels; padding bytes stay 0
+        for row in 0..h as usize {
+            for col in 0..w as usize {
+                let off = row * stride as usize + col * 4;
+                data[off..off + 4].copy_from_slice(&[255u8; 4]); // white BGRA
+            }
+        }
+        let frame = RawFrame {
+            format: PixelFormat::Bgra32,
+            data: bytes::Bytes::from(data),
+            display_idx: 0,
+            width: w,
+            height: h,
+            stride,
+            timestamp_ms: 0,
+            dirty_rects: vec![],
+        };
+        let yuv = bgra_to_i420(&frame);
+        // Despite padding, Y values must be 235 (white), not corrupted by padding zeros
+        assert!(yuv[..4].iter().all(|&y| y == 235), "stride padding must not corrupt Y");
+    }
+
+    #[test]
+    fn rgba_white_matches_bgra_white() {
+        // RGBA white = [255, 255, 255, 255]; BGRA white = [255, 255, 255, 255] — identical for white
+        let bgra_frame = make_bgra_frame(2, 2, 8, [255, 255, 255, 255]);
+        let rgba_frame = make_bgra_frame(2, 2, 8, [255, 255, 255, 255]);
+        // Use a wrapper that treats the same data as RGBA — for all-white, channels R=B so result is same
+        let rgba = RawFrame {
+            format: PixelFormat::Rgba32,
+            data: rgba_frame.data,
+            display_idx: 0,
+            width: 2,
+            height: 2,
+            stride: 8,
+            timestamp_ms: 0,
+            dirty_rects: vec![],
+        };
+        assert_eq!(bgra_to_i420(&bgra_frame), rgba_to_i420(&rgba));
+    }
+
+    #[test]
+    fn nv12_output_size_correct() {
+        let w: u32 = 4;
+        let h: u32 = 4;
+        let stride: u32 = 4;
+        // NV12: Y plane = stride*h bytes, UV plane = stride*h/2 bytes (interleaved U,V)
+        let y_size = (stride * h) as usize;
+        let uv_size = (stride * h / 2) as usize;
+        let data = vec![0u8; y_size + uv_size];
+        let frame = RawFrame {
+            format: PixelFormat::Nv12,
+            data: bytes::Bytes::from(data),
+            display_idx: 0,
+            width: w,
+            height: h,
+            stride,
+            timestamp_ms: 0,
+            dirty_rects: vec![],
+        };
+        let yuv = nv12_to_i420(&frame);
+        assert_eq!(yuv.len(), (w * h + (w / 2) * (h / 2) * 2) as usize);
+    }
+}
