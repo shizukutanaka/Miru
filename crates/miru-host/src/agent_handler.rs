@@ -89,7 +89,9 @@ fn button_name(b: MouseButton) -> &'static str {
 /// `<eph_pub>:<identity_pub>:<sig>`. For agent role, an extra segment is appended:
 /// `<eph_pub>:<identity_pub>:<sig>:<agent_token>`.
 pub fn extract_agent_token(pubkey_field: &str) -> Result<&str> {
-    let parts: Vec<&str> = pubkey_field.split(':').collect();
+    // splitn(4) captures everything after the 3rd ':' as one token, preserving
+    // any ':' characters inside the agent token itself.
+    let parts: Vec<&str> = pubkey_field.splitn(4, ':').collect();
     if parts.len() < 4 {
         bail!("agent role requires extra agent_token segment in pubkey field");
     }
@@ -109,6 +111,13 @@ mod tests {
     #[test]
     fn extract_rejects_missing_segment() {
         assert!(extract_agent_token("AAA:BBB:CCC").is_err());
+    }
+
+    #[test]
+    fn extract_preserves_colons_in_token() {
+        // Token contains ':' — splitn(4) must not truncate it.
+        let s = "AAA:BBB:CCC:part1:part2:part3";
+        assert_eq!(extract_agent_token(s).unwrap(), "part1:part2:part3");
     }
 
     #[test]

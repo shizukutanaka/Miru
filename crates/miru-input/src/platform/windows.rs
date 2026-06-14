@@ -13,14 +13,22 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             0,
         ),
         InputKind::MouseDown { button, x, y } => {
-            let flags = mouse_down_flags(button);
-            mouse_event(flags, to_abs(*x), to_abs(*y), 0)
+            let (flags, data) = mouse_down_flags(button);
+            mouse_event(flags, to_abs(*x), to_abs(*y), data)
         }
         InputKind::MouseUp { button, x, y } => {
-            let flags = mouse_up_flags(button);
-            mouse_event(flags, to_abs(*x), to_abs(*y), 0)
+            let (flags, data) = mouse_up_flags(button);
+            mouse_event(flags, to_abs(*x), to_abs(*y), data)
         }
-        InputKind::Scroll { dy, .. } => mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (*dy * 120.0) as i32),
+        InputKind::Scroll { dx, dy, .. } => {
+            if *dy != 0.0 {
+                mouse_event(MOUSEEVENTF_WHEEL, 0, 0, (*dy * 120.0) as i32)?;
+            }
+            if *dx != 0.0 {
+                mouse_event(MOUSEEVENTF_HWHEEL, 0, 0, (*dx * 120.0) as i32)?;
+            }
+            Ok(())
+        }
         InputKind::KeyDown { key, .. } => key_event(*key, false),
         InputKind::KeyUp { key, .. } => key_event(*key, true),
         InputKind::Text { text } => {
@@ -104,23 +112,25 @@ fn unicode_key(ch: char) -> Result<()> {
     Ok(())
 }
 
-fn mouse_down_flags(btn: &MouseButton) -> MOUSE_EVENT_FLAGS {
+// Returns (event_flags, mouseData). For X buttons, Win32 requires mouseData to
+// carry XBUTTON1 (1) or XBUTTON2 (2) — passing 0 is invalid and silently no-ops.
+fn mouse_down_flags(btn: &MouseButton) -> (MOUSE_EVENT_FLAGS, i32) {
     match btn {
-        MouseButton::Left => MOUSEEVENTF_LEFTDOWN,
-        MouseButton::Right => MOUSEEVENTF_RIGHTDOWN,
-        MouseButton::Middle => MOUSEEVENTF_MIDDLEDOWN,
-        MouseButton::X1 => MOUSEEVENTF_XDOWN,
-        MouseButton::X2 => MOUSEEVENTF_XDOWN,
+        MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, 0),
+        MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, 0),
+        MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, 0),
+        MouseButton::X1 => (MOUSEEVENTF_XDOWN, 1), // XBUTTON1
+        MouseButton::X2 => (MOUSEEVENTF_XDOWN, 2), // XBUTTON2
     }
 }
 
-fn mouse_up_flags(btn: &MouseButton) -> MOUSE_EVENT_FLAGS {
+fn mouse_up_flags(btn: &MouseButton) -> (MOUSE_EVENT_FLAGS, i32) {
     match btn {
-        MouseButton::Left => MOUSEEVENTF_LEFTUP,
-        MouseButton::Right => MOUSEEVENTF_RIGHTUP,
-        MouseButton::Middle => MOUSEEVENTF_MIDDLEUP,
-        MouseButton::X1 => MOUSEEVENTF_XUP,
-        MouseButton::X2 => MOUSEEVENTF_XUP,
+        MouseButton::Left => (MOUSEEVENTF_LEFTUP, 0),
+        MouseButton::Right => (MOUSEEVENTF_RIGHTUP, 0),
+        MouseButton::Middle => (MOUSEEVENTF_MIDDLEUP, 0),
+        MouseButton::X1 => (MOUSEEVENTF_XUP, 1), // XBUTTON1
+        MouseButton::X2 => (MOUSEEVENTF_XUP, 2), // XBUTTON2
     }
 }
 

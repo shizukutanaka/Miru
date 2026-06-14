@@ -143,11 +143,18 @@ pub async fn punch_to_peer(
                 let payload = &buf[..n];
                 if from == peer {
                     if payload == punch_packet {
-                        // Peer is also punching — ack
+                        // Receiving punch from peer proves bidirectional connectivity:
+                        // peer reached us (their NAT is open) and we received it (our
+                        // NAT is open). Send ack so peer can also return success, then
+                        // return success ourselves. Do NOT keep looping — peer will stop
+                        // sending once it receives the ack, so we'd time out waiting for
+                        // an ack that will never arrive.
                         let _ = socket.send_to(ack_packet, peer).await;
+                        info!("Hole punch successful with {} (received punch)", peer);
+                        return Ok(());
                     } else if payload == ack_packet {
-                        // Punch confirmed — both sides have NAT mappings
-                        info!("Hole punch successful with {}", peer);
+                        // Peer received our punch and acked it.
+                        info!("Hole punch successful with {} (received ack)", peer);
                         return Ok(());
                     }
                 }
