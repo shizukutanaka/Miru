@@ -35,6 +35,12 @@ export function ConnectScreen({ onConnect }: Props) {
       return;
     }
 
+    if (!/^wss?:\/\/./.test(signalUrl)) {
+      setError("シグナルURLは ws:// または wss:// で始まる必要があります");
+      setConnecting(false);
+      return;
+    }
+
     localStorage.setItem("miru.signal", signalUrl);
 
     try {

@@ -288,6 +288,9 @@ export function SessionScreen({ onDisconnect }: Props) {
   const handleClipboardSync = async () => {
     try {
       const text = await navigator.clipboard.readText();
+      // Cap at 1 MiB — the host enforces 16 MiB but sending huge payloads
+      // over the relay wastes bandwidth and could stall the session loop.
+      if (text.length > 1024 * 1024) return;
       await api.sendClipboard(text);
     } catch {}
   };
