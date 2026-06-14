@@ -78,9 +78,11 @@ impl DecoderBackend for JpegDecoder {
 
 /// Convert an RGB image to I420 (YUV 4:2:0) planes.
 pub(crate) fn rgb_to_i420(rgb: &image::RgbImage, w: u32, h: u32) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    let mut y = Vec::with_capacity((w * h) as usize);
-    let mut u = Vec::with_capacity(((w / 2) * (h / 2)) as usize);
-    let mut v = Vec::with_capacity(((w / 2) * (h / 2)) as usize);
+    // Use usize arithmetic so the multiply can't silently overflow a u32
+    // (same guard as the encoder path, covers the w*h Vec capacity hint).
+    let mut y = Vec::with_capacity((w as usize) * (h as usize));
+    let mut u = Vec::with_capacity((w as usize / 2) * (h as usize / 2));
+    let mut v = Vec::with_capacity((w as usize / 2) * (h as usize / 2));
 
     for row in 0..h {
         for col in 0..w {
