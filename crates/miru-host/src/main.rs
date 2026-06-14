@@ -368,9 +368,21 @@ fn run_token_command(args: &[String]) -> Result<()> {
     // Print the token + guidance to stdout.
     let mut cap_names: Vec<String> = caps.iter().map(|c| format!("{c:?}")).collect();
     cap_names.sort();
+    // Use the actual TTL from the issued token — issue() clamps to MAX_TTL_SECS (15 min).
+    let actual_ttl_secs = token.seconds_remaining();
+    let requested_secs = ttl_hours * 3600;
     eprintln!("Issued agent token:");
     eprintln!("  capabilities: {}", cap_names.join(", "));
-    eprintln!("  ttl:          {ttl_hours}h");
+    if actual_ttl_secs < requested_secs {
+        eprintln!(
+            "  ttl:          {}min (capped from {}h; max is {}min per security policy)",
+            actual_ttl_secs / 60,
+            ttl_hours,
+            miru_agent::token::MAX_TTL_SECS / 60,
+        );
+    } else {
+        eprintln!("  ttl:          {}min", actual_ttl_secs / 60);
+    }
     eprintln!("  issuer:       {}", identity.pubkey_fingerprint());
     eprintln!("  Set this in your MCP client config as MIRU_AGENT_TOKEN:");
     // The token itself goes to stdout alone, so it can be piped/captured.
