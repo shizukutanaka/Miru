@@ -47,7 +47,7 @@ impl QuicTransport {
         rx_cipher: SessionCipher,
     ) -> Result<Self> {
         let mut endpoint = Endpoint::client("0.0.0.0:0".parse()?)?;
-        endpoint.set_default_client_config(insecure_client_config());
+        endpoint.set_default_client_config(insecure_client_config()?);
 
         info!("QUIC connect → {}", peer_addr);
         let conn = endpoint
@@ -204,7 +204,7 @@ impl QuicRecvStream {
 
 // ─── TLS config (self-signed for P2P) ────────────────────────────────────────
 
-fn insecure_client_config() -> ClientConfig {
+fn insecure_client_config() -> Result<ClientConfig> {
     // P2P: identity verified via X25519 app-layer handshake, not TLS cert.
     // The QUIC TLS layer is a transport-level requirement of the QUIC protocol;
     // actual authentication is done at the application layer via Ed25519
@@ -217,13 +217,17 @@ fn insecure_client_config() -> ClientConfig {
 
     let mut transport = TransportConfig::default();
     transport.keep_alive_interval(Some(Duration::from_secs(15)));
-    transport.max_idle_timeout(Some(Duration::from_secs(60).try_into().unwrap()));
-
-    let mut cfg = ClientConfig::new(Arc::new(
-        quinn::crypto::rustls::QuicClientConfig::try_from(crypto).unwrap(),
+    transport.max_idle_timeout(Some(
+        Duration::from_secs(60)
+            .try_into()
+            .context("idle timeout out of range")?,
     ));
+
+    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(crypto)
+        .map_err(|e| anyhow::anyhow!("QUIC crypto config: {e}"))?;
+    let mut cfg = ClientConfig::new(Arc::new(quic_crypto));
     cfg.transport_config(Arc::new(transport));
-    cfg
+    Ok(cfg)
 }
 
 fn self_signed_server_config() -> Result<(ServerConfig, Vec<u8>)> {
