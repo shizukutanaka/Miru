@@ -340,7 +340,7 @@ impl AppState {
                 continue;
             }
             let entry: AuditEntry = serde_json::from_str(&line)?;
-            let hash = entry.hash();
+            let hash = entry.hash()?;
             entries.push(crate::commands::AuditEntryView {
                 seq: entry.seq,
                 timestamp_ms: entry.timestamp_ms,

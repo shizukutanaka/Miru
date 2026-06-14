@@ -52,10 +52,10 @@ pub enum AuditOutcome {
 
 impl AuditEntry {
     /// SHA-256 of the canonical JSON encoding of this entry.
-    pub fn hash(&self) -> String {
-        let bytes = serde_json::to_vec(self).expect("serialize entry");
+    pub fn hash(&self) -> Result<String> {
+        let bytes = serde_json::to_vec(self)?;
         let d = digest::digest(&digest::SHA256, &bytes);
-        hex::encode(d.as_ref())
+        Ok(hex::encode(d.as_ref()))
     }
 }
 
@@ -146,7 +146,7 @@ impl AuditLog {
         };
 
         let line = serde_json::to_string(&entry)?;
-        let entry_hash = entry.hash();
+        let entry_hash = entry.hash()?;
 
         let mut f = self.file.lock().unwrap_or_else(|p| p.into_inner());
         f.write_all(line.as_bytes())?;
@@ -214,7 +214,7 @@ fn replay_chain(path: &Path) -> Result<(String, u64)> {
             );
         }
 
-        prev_hash = entry.hash();
+        prev_hash = entry.hash()?;
         seq += 1;
     }
 
@@ -258,7 +258,7 @@ pub fn read_all_verified(path: &Path) -> Result<Vec<AuditEntry>> {
         if entry.prev_hash != prev_hash {
             bail!("chain broken at seq {seq}: prev_hash mismatch");
         }
-        prev_hash = entry.hash();
+        prev_hash = entry.hash()?;
         seq += 1;
         entries.push(entry);
     }

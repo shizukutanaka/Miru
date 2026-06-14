@@ -186,7 +186,10 @@ impl EncoderBackend for VpxEncoder {
         // re-apply the encoder config via vpx_codec_enc_config_set.
         unsafe {
             self.cfg.rc_target_bitrate = kbps;
-            vpx_codec_enc_config_set(&mut self.ctx, &self.cfg);
+            let rc = vpx_codec_enc_config_set(&mut self.ctx, &self.cfg);
+            if rc != vpx_codec_err_t::VPX_CODEC_OK {
+                tracing::warn!("vpx_codec_enc_config_set failed when updating bitrate to {kbps} kbps: {rc:?}");
+            }
         }
     }
 }
