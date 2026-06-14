@@ -511,7 +511,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         }
                     }
                     // AI agent without ScreenRead capability: discard frame instead of transmitting.
-                    if agent_handler.as_ref().map_or(false, |h| !h.allow_screen_send()) {
+                    if agent_handler.as_ref().is_some_and(|h| !h.allow_screen_send()) {
                         continue;
                     }
                     bytes_since_ping += vf.data.len() as u64;

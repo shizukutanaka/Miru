@@ -98,8 +98,7 @@ pub async fn submit_host_to_rekor(
 
     if !rekor_url.starts_with("https://") {
         anyhow::bail!(
-            "Rekor URL must use HTTPS to prevent MITM fake-success injection (got: {:?})",
-            rekor_url
+            "Rekor URL must use HTTPS to prevent MITM fake-success injection (got: {rekor_url:?})"
         );
     }
 
@@ -212,8 +211,7 @@ pub async fn submit_to_rekor(
 
     if !rekor_url.starts_with("https://") {
         anyhow::bail!(
-            "Rekor URL must use HTTPS to prevent MITM fake-success injection (got: {:?})",
-            rekor_url
+            "Rekor URL must use HTTPS to prevent MITM fake-success injection (got: {rekor_url:?})"
         );
     }
 

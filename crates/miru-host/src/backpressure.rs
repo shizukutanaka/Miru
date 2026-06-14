@@ -93,6 +93,8 @@ impl FrameController {
 
     /// Called when the client ACKs a frame (via Pong with matching seq, or
     /// via a periodic heartbeat reporting received-frame count).
+    /// Kept for future per-frame ACK protocols; production sessions use on_pong().
+    #[allow(dead_code)]
     pub fn on_ack(&self, n: u32) {
         // Clamp n to i32::MAX before casting. Without this guard, values where
         // n > i32::MAX would wrap to a negative i32, turning fetch_sub into

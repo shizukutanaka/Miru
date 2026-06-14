@@ -283,7 +283,7 @@ pub fn verify_register_signature(reg: &miru_common::message::Register) -> Result
         .as_secs();
     let delta = now.abs_diff(ts);
     if delta > 300 {
-        anyhow::bail!("Register signature timestamp too skewed: {}s drift", delta);
+        anyhow::bail!("Register signature timestamp too skewed: {delta}s drift");
     }
 
     // Decode the pubkey (base64url).

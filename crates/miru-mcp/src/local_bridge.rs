@@ -112,7 +112,7 @@ fn encode_png(data: &[u8], w: u32, h: u32, format: miru_capture::frame::PixelFor
                 .collect();
             &rgba_buf
         }
-        other => bail!("encode_png: unsupported pixel format {:?}", other),
+        other => bail!("encode_png: unsupported pixel format {other:?}"),
     };
 
     let mut out = Vec::new();

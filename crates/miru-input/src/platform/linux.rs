@@ -149,7 +149,7 @@ impl UinputDevice {
             if rc < 0 {
                 let errno = *libc::__errno_location();
                 libc::close(fd);
-                anyhow::bail!("UI_DEV_CREATE failed (errno {})", errno);
+                anyhow::bail!("UI_DEV_CREATE failed (errno {errno})");
             }
 
             Ok(Self { fd })

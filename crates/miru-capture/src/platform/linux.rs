@@ -129,7 +129,7 @@ impl X11Capturer {
         // (a 32K×32K screen would overflow u32 × 4 before the cast).
         const MAX_CAPTURE_DIM: u32 = 32768;
         if width > MAX_CAPTURE_DIM || height > MAX_CAPTURE_DIM {
-            bail!("X11 screen {}×{} exceeds capture limit {}×{}", width, height, MAX_CAPTURE_DIM, MAX_CAPTURE_DIM);
+            bail!("X11 screen {width}×{height} exceeds capture limit {MAX_CAPTURE_DIM}×{MAX_CAPTURE_DIM}");
         }
         let size = (width as usize) * (height as usize) * 4;
         let shm_id = unsafe { libc::shmget(libc::IPC_PRIVATE, size, libc::IPC_CREAT | 0o600) };

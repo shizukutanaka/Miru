@@ -305,10 +305,7 @@ impl McpServer {
             .context("text missing")?;
         const KEY_TYPE_MAX_CHARS: usize = 4096;
         if text.chars().count() > KEY_TYPE_MAX_CHARS {
-            bail!(
-                "key_type: text exceeds maximum of {} characters",
-                KEY_TYPE_MAX_CHARS
-            );
+            bail!("key_type: text exceeds maximum of {KEY_TYPE_MAX_CHARS} characters");
         }
         self.gate(
             Capability::KeyType,
@@ -395,10 +392,7 @@ impl McpServer {
             .context("text missing")?;
         const CLIPBOARD_WRITE_MAX_BYTES: usize = 1024 * 1024; // 1 MiB, matching JSON schema maxLength
         if text.len() > CLIPBOARD_WRITE_MAX_BYTES {
-            bail!(
-                "clipboard_write: text exceeds maximum of {} bytes",
-                CLIPBOARD_WRITE_MAX_BYTES
-            );
+            bail!("clipboard_write: text exceeds maximum of {CLIPBOARD_WRITE_MAX_BYTES} bytes");
         }
         self.gate(
             Capability::ClipboardWrite,
