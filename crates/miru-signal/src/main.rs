@@ -294,6 +294,19 @@ async fn process_rdv_msg(
                     .await;
                 return;
             }
+            // Cap signature length — base64url of 64-byte Ed25519 signature is exactly
+            // 86 chars; allow 128 for forward-compat. Oversized signature strings would
+            // trigger large allocations in verify_register_signature() before failing.
+            if reg.signature.as_deref().map_or(false, |s| s.len() > 128) {
+                warn!("Register rejected: signature too long");
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 400,
+                        message: "signature too long".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             // Verify Ed25519 ownership proof when signature is present.
             // This prevents an attacker from squatting another device's ID on
             // the signal server. Absent signatures are accepted with a warning
