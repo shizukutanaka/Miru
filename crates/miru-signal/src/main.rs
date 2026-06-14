@@ -246,6 +246,18 @@ async fn process_rdv_msg(
 ) {
     match msg {
         Msg::Register(reg) => {
+            // Reject absurdly long device IDs before they reach the DashMap.
+            // A UUID hex + optional prefix is always < 128 bytes; 256 is generous.
+            if reg.device_id.len() > 256 {
+                warn!("Register rejected: device_id too long ({} bytes)", reg.device_id.len());
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 400,
+                        message: "device_id too long".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             // Reject if we've hit the registry cap (DoS prevention).
             if state.registry.len() >= state.max_devices {
                 warn!(
@@ -290,6 +302,16 @@ async fn process_rdv_msg(
         }
         Msg::Connect(req) => {
             let target = req.target_id.clone();
+            if target.len() > 256 {
+                warn!("Connect rejected: target_id too long ({} bytes)", target.len());
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 400,
+                        message: "target_id too long".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             if !state.check_connect_rate(peer_ip) {
                 warn!("Rate limit exceeded for {} — dropping Connect to {}", peer_ip, target);
                 let _ = tx
