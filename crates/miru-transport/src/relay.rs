@@ -88,6 +88,18 @@ impl RelayTransport {
     /// size ~3x for video frames (e.g. 90KB JSON → 30KB msgpack for a 30KB VP9 frame).
     pub async fn send_msg(&self, msg: &Msg) -> Result<()> {
         let encoded = rmp_serde::to_vec_named(msg)?;
+        // ChaCha20-Poly1305 adds 8-byte seq + 16-byte tag = 24 bytes overhead.
+        // The receiver rejects frames whose total (4-byte header + payload) exceeds
+        // MAX_FRAME_BYTES. Mirror that limit here so we error before sending a frame
+        // that the peer will reject, rather than confusing the session.
+        const MAX_PLAINTEXT_BYTES: usize = 4 * 1024 * 1024 - 24;
+        if encoded.len() > MAX_PLAINTEXT_BYTES {
+            anyhow::bail!(
+                "relay: outgoing message too large ({} bytes > {} limit)",
+                encoded.len(),
+                MAX_PLAINTEXT_BYTES
+            );
+        }
         let payload = match self.tx_cipher.lock().await.as_ref() {
             Some(c) => c.encrypt(&encoded)?,
             None => encoded,

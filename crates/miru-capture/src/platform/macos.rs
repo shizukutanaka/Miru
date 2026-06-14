@@ -82,7 +82,7 @@ impl MacosCapturer {
                     index: i as u8,
                     width: mode.width() as u32,
                     height: mode.height() as u32,
-                    refresh_hz: mode.refresh_rate().max(60.0) as u8,
+                    refresh_hz: mode.refresh_rate().max(0.0) as u8,
                     name: format!("Display {}", i),
                     primary: id == main_id,
                 })

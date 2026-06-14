@@ -64,17 +64,14 @@ pub struct FingerprintEntry {
 
 impl FingerprintEntry {
     fn hash(&self) -> String {
-        let canonical = format!(
-            "{}|{}|{}|{}|{}|{}|{:?}",
-            self.seq,
-            self.prev_hash,
-            self.timestamp_ms,
-            self.label,
-            self.device_id,
-            self.fingerprint,
-            self.action
-        );
-        let d = digest::digest(&digest::SHA256, canonical.as_bytes());
+        // Use JSON serialization for an unambiguous canonical representation.
+        // A pipe-delimited format is ambiguous when the `label` field contains
+        // '|', which would let a crafted label forge the next entry's prev_hash.
+        // All FingerprintEntry fields are JSON-serializable primitives, so
+        // to_vec cannot fail; unwrap_or_default produces empty bytes on the
+        // unreachable error path, causing chain verification to fail (safe).
+        let canonical = serde_json::to_vec(self).unwrap_or_default();
+        let d = digest::digest(&digest::SHA256, &canonical);
         hex_lower(d.as_ref())
     }
 }

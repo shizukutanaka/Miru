@@ -158,8 +158,9 @@ async fn recv_loop(
                     }
                 };
                 if let Some(j) = jpeg {
-                    if let Ok(png) = jpeg_to_png(&j) {
-                        *latest_png.lock() = Some(png);
+                    match jpeg_to_png(&j) {
+                        Ok(png) => *latest_png.lock() = Some(png),
+                        Err(e) => warn!("RemoteBridge: JPEG→PNG conversion failed: {e}"),
                     }
                 }
             }
