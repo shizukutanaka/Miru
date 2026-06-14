@@ -20,13 +20,19 @@ use std::{
     io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
-use tracing::info;
+use tracing::{info, warn};
+
+/// Hard cap per recording session to prevent disk exhaustion.
+/// At 50 KB/frame × 30fps this is ~1.9 hours at maximum bitrate.
+/// Configurable via MIRU_MAX_RECORDING_BYTES env var.
+const DEFAULT_MAX_RECORDING_BYTES: u64 = 10 * 1024 * 1024 * 1024; // 10 GiB
 
 pub struct SessionRecorder {
     writer: BufWriter<File>,
     path: PathBuf,
     frame_count: u64,
     bytes_written: u64,
+    max_bytes: u64,
     started_at: std::time::Instant,
 }
 
@@ -59,7 +65,12 @@ impl SessionRecorder {
         #[cfg(not(unix))]
         let file = File::create(&path).with_context(|| format!("create {}", path.display()))?;
 
-        info!("Recording started: {}", path.display());
+        let max_bytes = std::env::var("MIRU_MAX_RECORDING_BYTES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MAX_RECORDING_BYTES);
+
+        info!("Recording started: {} (limit {:.1} GiB)", path.display(), max_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
 
         let mut writer = BufWriter::with_capacity(1024 * 1024, file);
         // Write a simple header so we know it's a Miru recording
@@ -70,11 +81,21 @@ impl SessionRecorder {
             path,
             frame_count: 0,
             bytes_written: 0,
+            max_bytes,
             started_at: std::time::Instant::now(),
         })
     }
 
     pub fn record_frame(&mut self, frame: &VideoFrame) -> Result<()> {
+        let frame_bytes = 24u64 + frame.data.len() as u64;
+        if self.bytes_written + frame_bytes > self.max_bytes {
+            warn!(
+                "Recording size limit reached ({:.1} GiB) — discarding frame and stopping",
+                self.max_bytes as f64 / 1024.0 / 1024.0 / 1024.0
+            );
+            anyhow::bail!("recording size limit exceeded");
+        }
+
         // Frame format: [24-byte header][payload]
         //   Offset  0: u8  codec (1=AV1 2=H265 3=H264 4=VP9 5=VP8 6=JPEG)
         //   Offset  1: u8  keyframe flag
