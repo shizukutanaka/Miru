@@ -190,11 +190,29 @@ impl FingerprintLog {
         let entry_hash = entry.hash();
 
         let line = serde_json::to_string(&entry)?;
-        let mut f = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .context("append fingerprint log")?;
+        let mut f = {
+            let mut opts = OpenOptions::new();
+            opts.create(true).append(true);
+            // Restrict permissions on creation; ignored for existing files.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            opts.open(&self.path).context("append fingerprint log")?
+        };
+        // Retroactively tighten permissions if the file pre-existed with 0o644.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&self.path) {
+                let mut perms = meta.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    perms.set_mode(0o600);
+                    let _ = std::fs::set_permissions(&self.path, perms);
+                }
+            }
+        }
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
         // flush() only drains the userspace buffer; sync_data() ensures the

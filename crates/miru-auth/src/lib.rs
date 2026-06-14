@@ -202,7 +202,24 @@ impl AclStore {
         // On POSIX, rename(2) is atomic; on Windows it's better than direct write
         // (the old file remains intact if the process crashes during the write).
         let tmp = path.with_extension("acl.tmp");
-        std::fs::write(&tmp, &json)?;
+        // Remove any stale tmp first so we always create fresh with 0o600; if
+        // the old tmp had loose permissions, open(create) would inherit them.
+        let _ = std::fs::remove_file(&tmp);
+        {
+            use std::io::Write as _;
+            let mut f = {
+                let mut opts = std::fs::OpenOptions::new();
+                opts.write(true).create_new(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                opts.open(&tmp)?
+            };
+            f.write_all(&json)?;
+            f.sync_data()?;
+        }
         std::fs::rename(&tmp, path)?;
         Ok(())
     }
