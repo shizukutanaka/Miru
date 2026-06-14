@@ -96,7 +96,11 @@ impl SessionCipher {
     /// lifetime of this `SessionCipher`.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         let seq = self.send_nonce.fetch_add(1, Ordering::Relaxed);
-        if seq == u64::MAX {
+        // Guard at u64::MAX-1 so the counter never wraps to 0 and causes
+        // nonce reuse with the early-session seq values. Checking seq==u64::MAX
+        // was wrong: by that point fetch_add had already wrapped the internal
+        // counter to 0, so the NEXT call would return seq=0 (already used).
+        if seq >= u64::MAX - 1 {
             bail!("send counter exhausted (rotate session)");
         }
         let nonce = nonce_from_u64(seq);
