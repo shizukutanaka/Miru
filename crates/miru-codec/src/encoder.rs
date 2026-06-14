@@ -114,6 +114,10 @@ impl EncoderBackend for JpegEncoder {
         ts_ms: u64,
         _keyframe: bool,
     ) -> Result<Option<EncodedPacket>> {
+        const MAX_FRAME_DIM: u32 = 32768;
+        if width > MAX_FRAME_DIM || height > MAX_FRAME_DIM {
+            bail!("JPEG encoder: frame dimensions {}×{} exceed limit {}", width, height, MAX_FRAME_DIM);
+        }
         let w = width as usize;
         let h = height as usize;
         let y_size = w * h;

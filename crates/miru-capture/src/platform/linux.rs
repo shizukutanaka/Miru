@@ -125,8 +125,13 @@ impl X11Capturer {
         let width = screen.width_in_pixels as u32;
         let height = screen.height_in_pixels as u32;
 
-        // Allocate shared memory
-        let size = (width * height * 4) as usize;
+        // Allocate shared memory — use usize arithmetic to avoid u32 overflow
+        // (a 32K×32K screen would overflow u32 × 4 before the cast).
+        const MAX_CAPTURE_DIM: u32 = 32768;
+        if width > MAX_CAPTURE_DIM || height > MAX_CAPTURE_DIM {
+            bail!("X11 screen {}×{} exceeds capture limit {}×{}", width, height, MAX_CAPTURE_DIM, MAX_CAPTURE_DIM);
+        }
+        let size = (width as usize) * (height as usize) * 4;
         let shm_id = unsafe { libc::shmget(libc::IPC_PRIVATE, size, libc::IPC_CREAT | 0o600) };
         if shm_id < 0 {
             bail!("shmget failed");

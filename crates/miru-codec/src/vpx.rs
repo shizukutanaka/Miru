@@ -101,8 +101,15 @@ impl EncoderBackend for VpxEncoder {
 
             // Build vpx_image
             let mut img = std::mem::zeroed::<vpx_image_t>();
-            let y_size = (width * height) as usize;
-            let uv_size = ((width / 2) * (height / 2)) as usize;
+
+            // Guard against u32 overflow in dimension arithmetic and
+            // unreasonable allocations before any unsafe pointer work.
+            const MAX_FRAME_DIM: u32 = 32768;
+            if width > MAX_FRAME_DIM || height > MAX_FRAME_DIM {
+                bail!("VpxEncoder: frame dimensions {}×{} exceed limit {}", width, height, MAX_FRAME_DIM);
+            }
+            let y_size = (width as usize) * (height as usize);
+            let uv_size = (width as usize / 2) * (height as usize / 2);
 
             if i420.len() < y_size + 2 * uv_size {
                 bail!(

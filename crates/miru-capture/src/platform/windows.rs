@@ -241,14 +241,17 @@ impl ScreenCapturer for WindowsCapturer {
                     .duplication
                     .GetFrameDirtyRects(bytemuck::cast_slice_mut(&mut buf), &mut dirty_size);
 
-                let count = dirty_size as usize / std::mem::size_of::<RECT>();
+                // Clamp count to buf.len(): GetFrameDirtyRects may set dirty_size
+                // to the *required* byte count even when the buffer was too small,
+                // so a raw divide could produce count > 64, causing a panic.
+                let count = (dirty_size as usize / std::mem::size_of::<RECT>()).min(buf.len());
                 buf[..count]
                     .iter()
-                    .map(|r| DirtyRect {
-                        x: r.left as u32,
-                        y: r.top as u32,
-                        w: (r.right - r.left) as u32,
-                        h: (r.bottom - r.top) as u32,
+                    .filter_map(|r| {
+                        // Malformed RECTs with inverted coords produce huge u32 after cast.
+                        let w = r.right.checked_sub(r.left).filter(|&v| v >= 0).map(|v| v as u32)?;
+                        let h = r.bottom.checked_sub(r.top).filter(|&v| v >= 0).map(|v| v as u32)?;
+                        Some(DirtyRect { x: r.left as u32, y: r.top as u32, w, h })
                     })
                     .collect()
             } else {
@@ -277,7 +280,10 @@ impl ScreenCapturer for WindowsCapturer {
                 .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
 
             let stride = mapped.RowPitch;
-            let size = (stride * self.height) as usize;
+            // Use checked arithmetic: stride × height can overflow u32 before cast.
+            let size = (stride as usize)
+                .checked_mul(self.height as usize)
+                .ok_or_else(|| anyhow::anyhow!("DXGI stride overflow: {}×{}", stride, self.height))?;
             let slice = std::slice::from_raw_parts(mapped.pData as *const u8, size);
             let data = Bytes::copy_from_slice(slice);
 
