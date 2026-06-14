@@ -372,7 +372,8 @@ pub async fn run(
                         }
                     }
                     Ok(Some(Msg::Close(reason))) => {
-                        info!("Host closed: {} {}", reason.code, reason.reason);
+                        let reason_trunc: String = reason.reason.chars().take(200).collect();
+                        info!("Host closed: {} {}", reason.code, reason_trunc);
                         break;
                     }
                     Ok(None) => break,

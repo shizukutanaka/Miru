@@ -118,9 +118,10 @@ impl BbrQos {
             "smooth" => HintMode::Smooth,
             _ => HintMode::Balanced,
         };
+        let mode_log: String = hint.mode.chars().take(32).collect();
         tracing::info!(
             "QoS hint applied: mode={} max_fps={} min_quality={}",
-            hint.mode, hint.max_fps, hint.min_quality
+            mode_log, hint.max_fps, hint.min_quality
         );
     }
 

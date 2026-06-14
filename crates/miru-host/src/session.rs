@@ -170,7 +170,8 @@ fn handle_file_transfer(
         }
         FileTransfer::Abort { id, reason } => {
             if let Some(rx) = transfers.remove(&id) {
-                info!("FileTransfer {id}: aborted by peer ({reason})");
+                let reason_trunc: String = reason.chars().take(200).collect();
+                info!("FileTransfer {id}: aborted by peer ({reason_trunc})");
                 let _ = std::fs::remove_file(&rx.temp_path);
             }
         }
@@ -563,7 +564,11 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     Some(Msg::OpenUrl(req)) if matches!(permission, Permission::Full) => {
                         // Only Full-permission sessions may open URLs (same as ShellExec tier).
                         let url = req.url.trim().to_string();
-                        if url.starts_with("https://") || url.starts_with("http://") {
+                        // Cap before logging and passing to the OS shell launcher.
+                        const MAX_URL_BYTES: usize = 2048;
+                        if url.len() > MAX_URL_BYTES {
+                            warn!("OpenUrl rejected: URL too long ({} bytes)", url.len());
+                        } else if url.starts_with("https://") || url.starts_with("http://") {
                             if let Err(e) = open::that(&url) {
                                 warn!("OpenUrl failed for {url}: {e}");
                             } else {
@@ -591,7 +596,8 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         qos.lock().on_rtt(rtt.saturating_mul(1_000));
                     }
                     Some(Msg::Close(reason)) => {
-                        info!("Viewer closed: {} {}", reason.code, reason.reason);
+                        let reason_trunc: String = reason.reason.chars().take(200).collect();
+                        info!("Viewer closed: {} {}", reason.code, reason_trunc);
                         break;
                     }
                     None => break,

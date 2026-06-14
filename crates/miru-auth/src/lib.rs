@@ -15,7 +15,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use ring::pbkdf2;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, num::NonZeroU32, path::Path};
-use tracing::info;
+use tracing::{info, warn};
 
 pub use argon::{hash_password, verify_password, SecretBytes};
 
@@ -164,7 +164,20 @@ impl AclStore {
             return Ok(Self::default());
         }
         let bytes = std::fs::read(path)?;
-        Ok(serde_json::from_slice(&bytes).unwrap_or_default())
+        match serde_json::from_slice(&bytes) {
+            Ok(store) => Ok(store),
+            Err(e) => {
+                warn!(
+                    "ACL file {:?} is corrupt ({e}) — starting with empty ACL. \
+                     Original file preserved as {:?}.bak for manual recovery.",
+                    path, path
+                );
+                // Preserve the corrupt file for manual recovery.
+                let bak = path.with_extension("acl.bak");
+                let _ = std::fs::copy(path, &bak);
+                Ok(Self::default())
+            }
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -172,7 +185,12 @@ impl AclStore {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_vec_pretty(self)?;
-        std::fs::write(path, json)?;
+        // Atomic write: write to a temp file in the same directory, then rename.
+        // On POSIX, rename(2) is atomic; on Windows it's better than direct write
+        // (the old file remains intact if the process crashes during the write).
+        let tmp = path.with_extension("acl.tmp");
+        std::fs::write(&tmp, &json)?;
+        std::fs::rename(&tmp, path)?;
         Ok(())
     }
 
