@@ -36,18 +36,25 @@ impl SessionRecorder {
         let timestamp = chrono_format_now();
         let filename = format!("miru-{session_id}-{timestamp}.mkv");
         let path = dir.join(filename);
+        // Create with 0o600 atomically (before anything else can open the file).
+        // On Unix, OpenOptionsExt::mode() sets the permission bits at creation
+        // time, avoiding the TOCTOU window between File::create and a subsequent
+        // set_permissions call. On Windows, the default ACL already restricts
+        // access to the creating user, so no extra step is needed.
+        #[cfg(unix)]
+        let file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .with_context(|| format!("create {}", path.display()))?
+        };
+        #[cfg(not(unix))]
         let file = File::create(&path).with_context(|| format!("create {}", path.display()))?;
 
         info!("Recording started: {}", path.display());
-
-        // Restrictive mode (Unix)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&path)?.permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(&path, perms)?;
-        }
 
         let mut writer = BufWriter::with_capacity(1024 * 1024, file);
         // Write a simple header so we know it's a Miru recording
