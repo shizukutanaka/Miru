@@ -183,14 +183,16 @@ impl McpServer {
     }
 
     async fn tool_mouse_move(&self, args: &Value) -> Result<Vec<Content>> {
-        let x = args
+        let x = (args
             .get("x")
             .and_then(|v| v.as_f64())
-            .context("x missing")? as f32;
-        let y = args
+            .context("x missing")? as f32)
+            .clamp(0.0, 1.0);
+        let y = (args
             .get("y")
             .and_then(|v| v.as_f64())
-            .context("y missing")? as f32;
+            .context("y missing")? as f32)
+            .clamp(0.0, 1.0);
         self.gate(
             Capability::PointerMove,
             json!({"x": x, "y": y}),
@@ -207,14 +209,16 @@ impl McpServer {
     }
 
     async fn tool_mouse_click(&self, args: &Value) -> Result<Vec<Content>> {
-        let x = args
+        let x = (args
             .get("x")
             .and_then(|v| v.as_f64())
-            .context("x missing")? as f32;
-        let y = args
+            .context("x missing")? as f32)
+            .clamp(0.0, 1.0);
+        let y = (args
             .get("y")
             .and_then(|v| v.as_f64())
-            .context("y missing")? as f32;
+            .context("y missing")? as f32)
+            .clamp(0.0, 1.0);
         let button_str = args
             .get("button")
             .and_then(|v| v.as_str())
@@ -267,8 +271,8 @@ impl McpServer {
             .get("dy")
             .and_then(|v| v.as_f64())
             .context("dy missing")? as f32;
-        let x = args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
-        let y = args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32;
+        let x = (args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32).clamp(0.0, 1.0);
+        let y = (args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32).clamp(0.0, 1.0);
 
         self.gate(
             Capability::PointerMove, // scrolling reuses pointer cap
