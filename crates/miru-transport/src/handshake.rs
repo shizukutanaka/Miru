@@ -129,7 +129,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
         peer_identity_pubkey: host_identity,
         selected_video_codec: ack.selected_codec,
         selected_audio_codec: ack.selected_audio,
-        peer_role: Role::Viewer,          // host is always the other side
+        peer_role: Role::Host,             // host is always the other side
         peer_pubkey_field: String::new(), // not needed on viewer side
     })
 }

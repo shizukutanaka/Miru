@@ -21,6 +21,7 @@ use serde::Deserialize;
 use std::{net::{IpAddr, SocketAddr}, sync::Arc, time::{Duration, Instant}};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
+use rand::Rng;
 use uuid::Uuid;
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -364,8 +365,15 @@ async fn process_rdv_msg(
 
             match state.registry.get(&target) {
                 Some(entry) => {
-                    // Create relay session token
-                    let token = Uuid::new_v4().simple().to_string();
+                    // Create relay session token — 128 bits of OS-random entropy
+                    // encoded as lowercase hex (32 chars). UUID v4 only provides
+                    // 122 random bits; a raw random fill is strictly stronger.
+                    let raw: [u8; 16] = rand::thread_rng().gen();
+                    let token = raw.iter().fold(String::with_capacity(32), |mut s, b| {
+                        use std::fmt::Write;
+                        let _ = write!(s, "{b:02x}");
+                        s
+                    });
                     state.relay_sessions.insert(
                         token.clone(),
                         RelaySlot {
