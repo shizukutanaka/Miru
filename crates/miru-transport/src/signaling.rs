@@ -103,6 +103,23 @@ impl SignalClient {
             .map(|k| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(k))
             .unwrap_or_default();
 
+        // Warn when connecting without TLS — device IDs and connection metadata
+        // (peer addresses, timing) are visible to any network observer.
+        // wss:// URLs are always safe. ws:// is only safe for loopback (localhost,
+        // 127.0.0.1, ::1) where no other host can intercept the traffic.
+        if signal_url.starts_with("ws://") {
+            let is_loopback = signal_url.contains("localhost")
+                || signal_url.contains("127.0.0.1")
+                || signal_url.contains("[::1]");
+            if !is_loopback {
+                tracing::warn!(
+                    "Signal server URL uses plain WebSocket (ws://): device IDs and connection \
+                    metadata are visible to network observers. Use wss:// with a TLS-terminating \
+                    reverse proxy (nginx, Caddy) in production. URL: {signal_url}"
+                );
+            }
+        }
+
         let (ws_stream, _) = connect_async(signal_url)
             .await
             .context("signal server connect failed")?;

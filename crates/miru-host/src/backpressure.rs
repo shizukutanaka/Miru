@@ -94,7 +94,12 @@ impl FrameController {
     /// Called when the client ACKs a frame (via Pong with matching seq, or
     /// via a periodic heartbeat reporting received-frame count).
     pub fn on_ack(&self, n: u32) {
-        self.in_flight.fetch_sub(n as i32, Ordering::Relaxed);
+        // Clamp n to i32::MAX before casting. Without this guard, values where
+        // n > i32::MAX would wrap to a negative i32, turning fetch_sub into
+        // fetch_add — a malicious Pong could use this to inflate in_flight and
+        // permanently suppress frame sending (DoS).
+        let n = n.min(i32::MAX as u32) as i32;
+        self.in_flight.fetch_sub(n, Ordering::Relaxed);
         // Clamp to >= 0 (defensive)
         let cur = self.in_flight.load(Ordering::Relaxed);
         if cur < 0 {
@@ -188,6 +193,29 @@ mod tests {
         assert!(!c.should_capture());
         assert!(!c.should_capture());
         assert!(c.stats().skipped >= 2);
+    }
+
+    #[test]
+    fn on_ack_large_n_does_not_inflate_in_flight() {
+        let c = FrameController::new(30, 2000);
+        // Send 2 frames so in_flight = 2
+        assert!(c.should_capture());
+        c.on_send();
+        assert!(c.should_capture());
+        c.on_send();
+        assert_eq!(c.in_flight.load(std::sync::atomic::Ordering::Relaxed), 2);
+
+        // ACK with a pathological u32 value that would wrap to i32 negative.
+        // Before the fix: n as i32 = -1, fetch_sub(-1) = fetch_add(1) → in_flight = 3.
+        // After the fix:  n clamped to i32::MAX, fetch_sub(i32::MAX) → in_flight <= 0 → clamped to 0.
+        c.on_ack(u32::MAX);
+        let after = c.in_flight.load(std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            after <= 0,
+            "on_ack(u32::MAX) must not increase in_flight (got {after})"
+        );
+        // should_capture must return true (backpressure released)
+        assert!(c.should_capture(), "capture must not be blocked after huge on_ack");
     }
 
     #[test]
