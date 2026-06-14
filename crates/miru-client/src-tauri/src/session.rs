@@ -441,6 +441,11 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
         }
         let marker = data[i + 1];
         let len = u16::from_be_bytes([data[i + 2], data[i + 3]]) as usize;
+        // JPEG segment length field includes the 2 length bytes itself (minimum 2).
+        // A length < 2 is malformed and would cause i to not advance → infinite loop.
+        if len < 2 {
+            break;
+        }
         // SOF0 (0xC0), SOF1 (0xC1), SOF2 (0xC2) contain image dimensions
         if matches!(marker, 0xC0 | 0xC1 | 0xC2) && i + 9 <= data.len() {
             let h = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
