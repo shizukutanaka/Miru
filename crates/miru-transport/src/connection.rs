@@ -74,6 +74,13 @@ impl Connection {
                 if frame.len() < 4 {
                     return Ok(None);
                 }
+                const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024 + 4;
+                if frame.len() > MAX_FRAME_BYTES {
+                    return Err(anyhow::anyhow!(
+                        "connection: oversized frame ({} bytes)",
+                        frame.len()
+                    ));
+                }
                 let payload = &frame[4..];
                 let plain = self.rx_cipher.decrypt(payload)?;
                 let msg: Msg = rmp_serde::from_slice(&plain)?;
