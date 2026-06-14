@@ -102,6 +102,13 @@ impl AppState {
     /// Returns true if the IP is within rate limit, false if it should be blocked.
     fn check_connect_rate(&self, ip: IpAddr) -> bool {
         let now = Instant::now();
+
+        // Prune IPs whose window has long since expired to prevent unbounded growth.
+        // Retain only entries where the window might still be active (with 2× slack
+        // to avoid racing a legitimate near-window-boundary request).
+        self.connect_rate
+            .retain(|_, b| now.duration_since(b.window_start) < CONNECT_RATE_WINDOW * 2);
+
         let mut entry = self.connect_rate.entry(ip).or_insert_with(|| ConnectBucket {
             count: 0,
             window_start: now,
@@ -407,10 +414,13 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
         role.as_deref().unwrap_or("?")
     );
 
-    // Reject new sessions when at capacity.
-    if state.relay_sessions.len() >= state.max_relay_sessions {
+    // Reject ONLY when the token is unknown AND we're at capacity.
+    // Peers joining a pre-created slot must be allowed through even when at capacity —
+    // their slot was counted when it was created, so this is not a new allocation.
+    let slot_known = state.relay_sessions.contains_key(&token);
+    if !slot_known && state.relay_sessions.len() >= state.max_relay_sessions {
         warn!(
-            "Relay at capacity ({}) — dropping connection",
+            "Relay at capacity ({}) — dropping unknown token",
             state.max_relay_sessions
         );
         return;
