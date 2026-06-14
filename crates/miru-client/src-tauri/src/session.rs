@@ -390,16 +390,18 @@ fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &
         .unwrap_or(0);
     let size = jpeg.len() as u32;
 
-    // Write index entry first (so a crash mid-frame-write doesn't leave a
-    // dangling offset pointing beyond EOF).
+    // Write frame data first — if we crash here no index entry points to the
+    // partial write so the index stays consistent (the frame is simply absent).
+    // Writing the index first would leave a dangling entry pointing to data
+    // that may never be fully written, corrupting the index on crash.
+    if rec.frames_file.write_all(jpeg).is_err() {
+        return;
+    }
+
     let mut entry = [0u8; 12];
     entry[..8].copy_from_slice(&offset.to_le_bytes());
     entry[8..12].copy_from_slice(&size.to_le_bytes());
     if rec.offsets_file.write_all(&entry).is_err() {
-        return;
-    }
-
-    if rec.frames_file.write_all(jpeg).is_err() {
         return;
     }
 

@@ -339,8 +339,11 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         }
                     }
                     Err(e) => {
-                        warn!("Failed to open audit log: {}", e);
-                        None
+                        // Audit log is mandatory for AI agent sessions: proceed
+                        // without it would make the None => true fallback grant
+                        // all inputs unconditionally, bypassing capability gating.
+                        warn!("Cannot open audit log for AI agent session — rejecting connection: {}", e);
+                        return Err(anyhow::anyhow!("audit log unavailable: {e}"));
                     }
                 }
             }
@@ -460,14 +463,18 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
             // Outgoing: video frames from capture loop
             Ok(msg) = cap_rx.recv_async() => {
                 if let Msg::VideoFrame(ref vf) = msg {
-                    bytes_since_ping += vf.data.len() as u64;
-                    metrics.on_video_frame(vf.data.len() as u64);
-                    bp.on_send();
                     if let Some(rec) = recorder.as_mut() {
                         if let Err(e) = rec.record_frame(vf) {
                             warn!("Record frame failed (non-fatal): {}", e);
                         }
                     }
+                    // AI agent without ScreenRead capability: discard frame instead of transmitting.
+                    if agent_handler.as_ref().map_or(false, |h| !h.allow_screen_send()) {
+                        continue;
+                    }
+                    bytes_since_ping += vf.data.len() as u64;
+                    metrics.on_video_frame(vf.data.len() as u64);
+                    bp.on_send();
                 }
                 if relay.send_msg(&msg).await.is_err() { break; }
             }
