@@ -53,7 +53,17 @@ fn i420_planes_to_rgb(
     w: usize,
     h: usize,
 ) -> Vec<u8> {
-    let mut rgb = vec![0u8; w * h * 3];
+    // Guard against mismatched plane sizes — return empty rather than panic.
+    // Callers that validated input (VPX/JPEG decoder) never hit this; it
+    // protects against a hypothetical future path that constructs a DecodedFrame
+    // with wrong plane lengths.
+    let y_needed = w.saturating_mul(h);
+    let uv_needed = (w / 2).saturating_mul(h / 2);
+    if y_plane.len() < y_needed || u_plane.len() < uv_needed || v_plane.len() < uv_needed {
+        return Vec::new();
+    }
+
+    let mut rgb = vec![0u8; y_needed.saturating_mul(3)];
 
     for row in 0..h {
         for col in 0..w {
