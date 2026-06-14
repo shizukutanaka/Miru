@@ -379,6 +379,8 @@ impl AppState {
     pub fn discover_lan_peers(&self) -> Vec<crate::commands::LanPeer> {
         let guard = self.discovery.lock();
         let Some(ref disc) = *guard else { return vec![] };
+        // Prune peers not seen in 60 s before returning snapshot.
+        disc.prune_stale(std::time::Duration::from_secs(60));
         disc.snapshot(None)
             .into_iter()
             .map(|p| crate::commands::LanPeer {

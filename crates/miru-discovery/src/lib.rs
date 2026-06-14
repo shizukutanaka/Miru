@@ -15,6 +15,9 @@ use std::{collections::HashMap, net::IpAddr, sync::Arc, time::Duration};
 use tracing::{debug, info, warn};
 
 const SERVICE_TYPE: &str = "_miru._tcp.local.";
+/// Maximum number of LAN peers retained in memory.
+/// Protects against a malicious device flooding mDNS with unique device IDs.
+const MAX_PEERS: usize = 256;
 
 /// What we advertise about ourselves.
 #[derive(Debug, Clone)]
@@ -113,13 +116,16 @@ impl Discovery {
                             if peer.device_id == our_id {
                                 continue;
                             }
-                            debug!(
-                                "Discovery: found {} ({})",
-                                peer.friendly_name, peer.device_id
-                            );
-                            peers_clone
-                                .write()
-                                .insert(peer.device_id.clone(), peer);
+                            let mut map = peers_clone.write();
+                            if map.len() >= MAX_PEERS && !map.contains_key(&peer.device_id) {
+                                warn!("Discovery: peer limit {MAX_PEERS} reached, ignoring {}", peer.device_id);
+                            } else {
+                                debug!(
+                                    "Discovery: found {} ({})",
+                                    peer.friendly_name, peer.device_id
+                                );
+                                map.insert(peer.device_id.clone(), peer);
+                            }
                         }
                     }
                     ServiceEvent::ServiceRemoved(_, name) => {
@@ -177,11 +183,22 @@ fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
         .collect();
 
     let device_id = txt.get("device_id")?.clone();
-    if device_id.is_empty() {
+    // device_id must match "XXXX-XXXX" format (9 chars); reject oversized values.
+    if device_id.is_empty() || device_id.len() > 32 {
         return None;
     }
-    let constellation_pubkey = txt.get("constellation")?.clone();
-    let friendly_name = txt.get("name").cloned().unwrap_or_default();
+    let constellation_pubkey = txt.get("constellation")
+        .cloned()
+        .unwrap_or_default()
+        .chars()
+        .take(128)
+        .collect();
+    let friendly_name: String = txt.get("name")
+        .cloned()
+        .unwrap_or_default()
+        .chars()
+        .take(64)
+        .collect();
     let form_factor = match txt.get("form").map(String::as_str) {
         Some("desktop") => FormFactor::Desktop,
         Some("laptop") => FormFactor::Laptop,
