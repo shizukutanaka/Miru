@@ -102,11 +102,28 @@ impl RevocationList {
             reason,
         };
         let line = serde_json::to_string(&entry)?;
-        let mut f = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .context("append revocation list")?;
+        let mut f = {
+            let mut opts = OpenOptions::new();
+            opts.create(true).append(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            opts.open(&self.path).context("append revocation list")?
+        };
+        // Retroactively tighten permissions if the file pre-existed with 0o644.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&self.path) {
+                let mut perms = meta.permissions();
+                if perms.mode() & 0o077 != 0 {
+                    perms.set_mode(0o600);
+                    let _ = std::fs::set_permissions(&self.path, perms);
+                }
+            }
+        }
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
         // flush() only drains the userspace buffer; sync_data() commits to storage
@@ -213,5 +230,21 @@ mod tests {
         rl.revoke(jti, "a").unwrap();
         rl.revoke(jti, "b").unwrap(); // ignored
         assert_eq!(rl.len(), 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn revocation_log_has_restricted_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rev.log");
+        let rl = RevocationList::open(&path).unwrap();
+        rl.revoke(Uuid::new_v4(), "perm-test").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "revocation log must be owner-only (0o600)"
+        );
     }
 }

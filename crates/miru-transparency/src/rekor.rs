@@ -96,6 +96,13 @@ pub async fn submit_host_to_rekor(
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
 
+    if !rekor_url.starts_with("https://") {
+        anyhow::bail!(
+            "Rekor URL must use HTTPS to prevent MITM fake-success injection (got: {:?})",
+            rekor_url
+        );
+    }
+
     let statement = build_host_statement(metadata, attestation);
     let statement_b64 = B64.encode(serde_json::to_vec(&statement)?);
 
@@ -202,6 +209,13 @@ pub async fn submit_to_rekor(
 ) -> anyhow::Result<RekorEntry> {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
+
+    if !rekor_url.starts_with("https://") {
+        anyhow::bail!(
+            "Rekor URL must use HTTPS to prevent MITM fake-success injection (got: {:?})",
+            rekor_url
+        );
+    }
 
     let statement = build_statement(metadata, commitment);
 
@@ -320,5 +334,58 @@ mod tests {
         let url = entry_url(DEFAULT_REKOR_URL, "abc123");
         assert!(url.starts_with("https://rekor.sigstore.dev/"));
         assert!(url.ends_with("/abc123"));
+    }
+
+    #[tokio::test]
+    async fn http_url_rejected_submit() {
+        let host = SigningKey::generate(&mut OsRng);
+        let viewer = SigningKey::generate(&mut OsRng);
+        let meta = SessionMetadata {
+            session_id: Uuid::new_v4(),
+            host_pubkey_b64: B64.encode(host.verifying_key().as_bytes()),
+            viewer_pubkey_b64: B64.encode(viewer.verifying_key().as_bytes()),
+            codec: "vp9".into(),
+            started_at: 100,
+            ended_at: 200,
+            video_frames: 10,
+            total_bytes: 1024,
+            relayed: false,
+        };
+        let cosigned = CoSignedCommitment::new(&meta, &host, &viewer).unwrap();
+
+        let err = submit_to_rekor("http://rekor.example.com", &meta, &cosigned)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("HTTPS"),
+            "HTTP URL must be rejected: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn http_url_rejected_host_submit() {
+        let host = SigningKey::generate(&mut OsRng);
+        let viewer = SigningKey::generate(&mut OsRng);
+        let meta = SessionMetadata {
+            session_id: Uuid::new_v4(),
+            host_pubkey_b64: B64.encode(host.verifying_key().as_bytes()),
+            viewer_pubkey_b64: B64.encode(viewer.verifying_key().as_bytes()),
+            codec: "vp9".into(),
+            started_at: 100,
+            ended_at: 200,
+            video_frames: 10,
+            total_bytes: 1024,
+            relayed: false,
+        };
+        use crate::HostOnlyAttestation;
+        let att = HostOnlyAttestation::new(&meta, &host).unwrap();
+
+        let err = submit_host_to_rekor("http://rekor.example.com", &meta, &att)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("HTTPS"),
+            "HTTP URL must be rejected: {err}"
+        );
     }
 }
