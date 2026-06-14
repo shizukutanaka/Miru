@@ -6,7 +6,7 @@
 //!   - Input is rate-limited (max 1000 events/sec per session)
 
 use anyhow::Result;
-use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent};
+use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, InputKind};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
@@ -18,6 +18,11 @@ pub struct InputHandler {
 }
 
 const MAX_EVENTS_PER_SEC: u32 = 1000;
+/// Cap on a single Text event's character count. miru_input::inject processes
+/// each character synchronously inside tokio::select!, so an unbounded Text
+/// event blocks the entire session loop (no pings, no video) until injection
+/// completes — an easy DoS from a Control-permission peer.
+const MAX_TEXT_CHARS: usize = 4096;
 
 impl InputHandler {
     pub fn new() -> Self {
@@ -38,6 +43,14 @@ impl InputHandler {
         if self.event_count > MAX_EVENTS_PER_SEC {
             warn!("Input rate limit exceeded — dropping event");
             return Ok(());
+        }
+
+        // Guard against a large Text event blocking the async event loop.
+        if let InputKind::Text { text } = &event.kind {
+            if text.chars().count() > MAX_TEXT_CHARS {
+                warn!("Text event too long ({} chars > {MAX_TEXT_CHARS}), dropped", text.chars().count());
+                return Ok(());
+            }
         }
 
         debug!("Input: {:?}", event.kind);
