@@ -1,11 +1,12 @@
-//! VP9/VP8 encoder via libvpx-sys.
+//! VP9/VP8 encoder and decoder via libvpx-sys.
 //! Used as software fallback when AV1 HW is unavailable.
 
 use anyhow::{bail, Result};
 use miru_common::message::VideoCodec;
 use vpx_sys::*;
 
-use crate::{EncodedPacket, EncoderBackend};
+use crate::{DecodedFrame, EncodedPacket, EncoderBackend};
+use crate::decoder::DecoderBackend;
 
 pub struct VpxEncoder {
     ctx: vpx_codec_ctx_t,
@@ -214,4 +215,124 @@ fn num_cpus() -> usize {
     std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
+}
+
+// ─── VP9/VP8 Decoder ─────────────────────────────────────────────────────────
+
+pub struct VpxDecoder {
+    ctx: vpx_codec_ctx_t,
+}
+
+unsafe impl Send for VpxDecoder {}
+
+impl VpxDecoder {
+    pub fn new(codec: VideoCodec) -> Result<Self> {
+        unsafe {
+            let iface = match codec {
+                VideoCodec::Vp9 => vpx_codec_vp9_dx(),
+                VideoCodec::Vp8 => vpx_codec_vp8_dx(),
+                _ => bail!("VpxDecoder: unsupported codec {:?}", codec),
+            };
+
+            let mut ctx = std::mem::zeroed::<vpx_codec_ctx_t>();
+            let rc = vpx_codec_dec_init_ver(
+                &mut ctx,
+                iface,
+                std::ptr::null(),
+                0,
+                VPX_DECODER_ABI_VERSION as i32,
+            );
+            if rc != vpx_codec_err_t::VPX_CODEC_OK {
+                bail!("vpx_codec_dec_init failed: {:?}", rc);
+            }
+            Ok(Self { ctx })
+        }
+    }
+}
+
+impl DecoderBackend for VpxDecoder {
+    fn decode(&mut self, data: &[u8], ts_ms: u64) -> Result<Option<DecodedFrame>> {
+        unsafe {
+            // Decode the compressed frame.
+            let rc = vpx_codec_decode(
+                &mut self.ctx,
+                data.as_ptr(),
+                data.len() as u32,
+                std::ptr::null_mut(),
+                0,
+            );
+            if rc != vpx_codec_err_t::VPX_CODEC_OK {
+                bail!("vpx_codec_decode: {:?}", rc);
+            }
+
+            // Retrieve the first decoded image.
+            let mut iter = std::ptr::null();
+            let img_ptr = vpx_codec_get_frame(&mut self.ctx, &mut iter);
+            if img_ptr.is_null() {
+                return Ok(None);
+            }
+            let img = &*img_ptr;
+
+            if img.fmt != vpx_img_fmt_t::VPX_IMG_FMT_I420 {
+                bail!("VpxDecoder: unexpected pixel format {:?}", img.fmt);
+            }
+
+            let w = img.d_w as usize;
+            let h = img.d_h as usize;
+            if w == 0 || h == 0 {
+                bail!("VpxDecoder: zero-dimension frame {}×{}", w, h);
+            }
+
+            let y_ptr = img.planes[VPX_PLANE_Y as usize];
+            let u_ptr = img.planes[VPX_PLANE_U as usize];
+            let v_ptr = img.planes[VPX_PLANE_V as usize];
+            if y_ptr.is_null() || u_ptr.is_null() || v_ptr.is_null() {
+                bail!("VpxDecoder: null plane pointer in decoded image");
+            }
+
+            let y_stride = img.stride[VPX_PLANE_Y as usize] as usize;
+            let u_stride = img.stride[VPX_PLANE_U as usize] as usize;
+            let v_stride = img.stride[VPX_PLANE_V as usize] as usize;
+
+            // Chroma half-dimensions (rounded down as per I420 spec).
+            let cw = w / 2;
+            let ch = h / 2;
+
+            // Copy row-by-row to strip stride padding so callers receive
+            // tightly-packed I420 planes (w*h, cw*ch, cw*ch bytes).
+            let mut y_plane = vec![0u8; w * h];
+            let mut u_plane = vec![0u8; cw * ch];
+            let mut v_plane = vec![0u8; cw * ch];
+
+            for row in 0..h {
+                let src = std::slice::from_raw_parts(y_ptr.add(row * y_stride), w);
+                y_plane[row * w..(row + 1) * w].copy_from_slice(src);
+            }
+            for row in 0..ch {
+                let src = std::slice::from_raw_parts(u_ptr.add(row * u_stride), cw);
+                u_plane[row * cw..(row + 1) * cw].copy_from_slice(src);
+            }
+            for row in 0..ch {
+                let src = std::slice::from_raw_parts(v_ptr.add(row * v_stride), cw);
+                v_plane[row * cw..(row + 1) * cw].copy_from_slice(src);
+            }
+
+            Ok(Some(DecodedFrame {
+                width: w as u32,
+                height: h as u32,
+                y_plane,
+                u_plane,
+                v_plane,
+                timestamp_ms: ts_ms,
+            }))
+        }
+    }
+}
+
+impl Drop for VpxDecoder {
+    fn drop(&mut self) {
+        unsafe {
+            vpx_codec_destroy(&mut self.ctx);
+        }
+    }
 }
