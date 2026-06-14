@@ -324,6 +324,9 @@ impl McpServer {
             .get("combo")
             .and_then(|v| v.as_str())
             .context("combo missing")?;
+        if combo.len() > 64 {
+            bail!("key_combo: combo string too long ({} bytes)", combo.len());
+        }
         self.gate(Capability::KeyCombo, json!({"combo": combo}), "key_combo")?;
         // Parse "Ctrl+Shift+T" → modifier mask + key
         let parts: Vec<&str> = combo.split('+').map(|s| s.trim()).collect();
@@ -407,6 +410,9 @@ impl McpServer {
             .get("url")
             .and_then(|v| v.as_str())
             .context("url missing")?;
+        if url.len() > 2048 {
+            bail!("open_url: URL too long ({} bytes)", url.len());
+        }
         if !(url.starts_with("https://") || url.starts_with("http://")) {
             bail!("only http(s) URLs allowed");
         }
