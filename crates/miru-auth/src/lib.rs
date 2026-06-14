@@ -19,7 +19,10 @@ use tracing::{info, warn};
 
 pub use argon::{hash_password, verify_password, SecretBytes};
 
-const PBKDF2_ITERATIONS: u32 = 100_000;
+const PBKDF2_ITERATIONS: NonZeroU32 = match NonZeroU32::new(100_000) {
+    Some(n) => n,
+    None => unreachable!(),
+};
 
 // ─── Device identity ──────────────────────────────────────────────────────────
 
@@ -122,7 +125,7 @@ pub fn pin_to_key(pin: &str, device_id: &str) -> [u8; 32] {
     let salt = device_id.as_bytes();
     pbkdf2::derive(
         pbkdf2::PBKDF2_HMAC_SHA256,
-        NonZeroU32::new(PBKDF2_ITERATIONS).unwrap(),
+        PBKDF2_ITERATIONS,
         salt,
         pin.as_bytes(),
         &mut key,

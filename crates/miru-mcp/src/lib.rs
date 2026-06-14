@@ -64,7 +64,7 @@ async fn handle_request(server: &Arc<McpServer>, req: JsonRpcRequest) -> Option<
     debug!("MCP <- {}", req.method);
 
     let result: anyhow::Result<Value> = match req.method.as_str() {
-        "initialize" => Ok(serde_json::to_value(InitializeResult {
+        "initialize" => serde_json::to_value(InitializeResult {
             protocol_version: PROTOCOL_VERSION,
             capabilities: ServerCapabilities {
                 tools: ToolsCapability {
@@ -76,17 +76,17 @@ async fn handle_request(server: &Arc<McpServer>, req: JsonRpcRequest) -> Option<
                 version: env!("CARGO_PKG_VERSION"),
             },
         })
-        .unwrap()),
+        .map_err(anyhow::Error::from),
 
         "initialized" | "notifications/initialized" => {
             // Notification — no response
             return None;
         }
 
-        "tools/list" => Ok(serde_json::to_value(ToolListResult {
+        "tools/list" => serde_json::to_value(ToolListResult {
             tools: tools::definitions(),
         })
-        .unwrap()),
+        .map_err(anyhow::Error::from),
 
         "tools/call" => {
             let params: ToolCallParams = match req.params {
@@ -109,7 +109,7 @@ async fn handle_request(server: &Arc<McpServer>, req: JsonRpcRequest) -> Option<
                 }
             };
             let result = server.handle_tool_call(params).await;
-            Ok(serde_json::to_value(result).unwrap())
+            serde_json::to_value(result).map_err(anyhow::Error::from)
         }
 
         "ping" => Ok(json!({})),

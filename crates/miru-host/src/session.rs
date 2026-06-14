@@ -191,7 +191,7 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
     // Discover public address once (non-fatal; None → skip direct-path advertisement).
     let pub_addr: Option<(String, u16)> = match tokio::time::timeout(
         Duration::from_secs(5),
-        discover_public_addr("0.0.0.0:0".parse().unwrap()),
+        discover_public_addr("0.0.0.0:0".parse().expect("literal addr")),
     )
     .await
     {

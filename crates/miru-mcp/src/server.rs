@@ -445,10 +445,8 @@ fn now_ms() -> u64 {
 /// We use VK codes for cross-platform mapping (host translates per OS).
 fn parse_key(s: &str) -> Result<u32> {
     let mut chars = s.chars();
-    let first = chars.next();
-    let only_one_char = first.is_some() && chars.next().is_none();
-    if only_one_char {
-        let c = first.unwrap().to_ascii_uppercase();
+    if let Some(c) = chars.next().filter(|_| chars.next().is_none()) {
+        let c = c.to_ascii_uppercase();
         if c.is_ascii_alphanumeric() {
             return Ok(c as u32);
         }
