@@ -92,7 +92,10 @@ impl BbrQos {
         let now = Instant::now();
         Self {
             rtt_min_us: u32::MAX,
-            bw_max_kbps: 1,
+            // Prime the BW estimate with the configured rate so the first BBR
+            // tick targets initial_kbps × pacing_gain rather than clamping to
+            // 500 kbps (the floor) for the 200ms until delivery data arrives.
+            bw_max_kbps: initial_kbps.max(1),
             rtt_samples: VecDeque::new(),
             bw_samples: VecDeque::new(),
             cur_bitrate_kbps: initial_kbps,

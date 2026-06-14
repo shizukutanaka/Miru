@@ -239,20 +239,31 @@ fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
 fn nv12_to_i420(frame: &RawFrame) -> Vec<u8> {
     let w = frame.width as usize;
     let h = frame.height as usize;
+    let stride = frame.stride as usize;
     let src = &frame.data;
     let y_size = w * h;
-    let uv_size = (w / 2) * (h / 2);
+    let uv_w = w / 2;
+    let uv_h = h / 2;
+    let uv_size = uv_w * uv_h;
     let mut out = vec![0u8; y_size + uv_size * 2];
 
-    // Y plane: copy directly
-    out[..y_size].copy_from_slice(&src[..y_size]);
+    // Y plane: copy row by row to strip stride padding. Using a flat copy of
+    // w*h bytes is wrong when stride > w (DXGI NV12 always pads to alignment).
+    for row in 0..h {
+        let src_off = row * stride;
+        let dst_off = row * w;
+        out[dst_off..dst_off + w].copy_from_slice(&src[src_off..src_off + w]);
+    }
 
-    // NV12 interleaved UV → I420 planar UV
-    let nv12_uv = &src[y_size..];
+    // NV12 UV plane starts at stride*h (not w*h).
+    let nv12_uv = &src[stride * h..];
     let (u_out, v_out) = out[y_size..].split_at_mut(uv_size);
-    for i in 0..uv_size {
-        u_out[i] = nv12_uv[i * 2];
-        v_out[i] = nv12_uv[i * 2 + 1];
+    for row in 0..uv_h {
+        let src_row = &nv12_uv[row * stride..];
+        for col in 0..uv_w {
+            u_out[row * uv_w + col] = src_row[col * 2];
+            v_out[row * uv_w + col] = src_row[col * 2 + 1];
+        }
     }
     out
 }
