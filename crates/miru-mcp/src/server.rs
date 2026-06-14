@@ -140,11 +140,17 @@ impl McpServer {
 
         // Optional sub-region crop (normalized 0-1 coordinates).
         let png = if let Some(region) = args.get("region") {
-            let rx = region.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let ry = region.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            let rw = region.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            let rh = region.get("height").and_then(|v| v.as_f64()).unwrap_or(1.0);
-            crop_png_region(&png, rx as f32, ry as f32, rw as f32, rh as f32)
+            let rx = region.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let ry = region.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let rw = region.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+            let rh = region.get("height").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
+            if !(0.0..=1.0).contains(&rx) || !(0.0..=1.0).contains(&ry)
+                || rw <= 0.0 || rh <= 0.0
+                || rx + rw > 1.0 + f32::EPSILON || ry + rh > 1.0 + f32::EPSILON
+            {
+                bail!("capture_screen: region coordinates out of [0,1] bounds");
+            }
+            crop_png_region(&png, rx, ry, rw, rh)
                 .unwrap_or(png) // on failure, fall back to full capture
         } else {
             png
@@ -266,11 +272,13 @@ impl McpServer {
     }
 
     async fn tool_scroll(&self, args: &Value) -> Result<Vec<Content>> {
-        let dx = args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
-        let dy = args
+        let dx = (args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32)
+            .clamp(-100.0, 100.0);
+        let dy = (args
             .get("dy")
             .and_then(|v| v.as_f64())
-            .context("dy missing")? as f32;
+            .context("dy missing")? as f32)
+            .clamp(-100.0, 100.0);
         let x = (args.get("x").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32).clamp(0.0, 1.0);
         let y = (args.get("y").and_then(|v| v.as_f64()).unwrap_or(0.5) as f32).clamp(0.0, 1.0);
 
@@ -332,6 +340,9 @@ impl McpServer {
         let parts: Vec<&str> = combo.split('+').map(|s| s.trim()).collect();
         if parts.is_empty() {
             bail!("empty combo");
+        }
+        if parts.len() > 10 {
+            bail!("key_combo: too many tokens ({} > 10 max)", parts.len());
         }
         let mut modifiers = 0u8;
         let mut key_str = "";
