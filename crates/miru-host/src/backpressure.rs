@@ -107,6 +107,18 @@ impl FrameController {
         }
     }
 
+    /// Called when a Pong heartbeat arrives from the viewer.
+    ///
+    /// A Pong means "I am alive and processing your stream". Because Pong
+    /// arrives at ~1 Hz (driven by Ping ticks) while frames are sent at up
+    /// to 60 fps, `on_ack(1)` is semantically wrong here: it only decrements
+    /// `in_flight` by 1 per second, capping throughput at MAX_IN_FLIGHT
+    /// (~3-4 fps). Instead, a Pong resets the window: the viewer has confirmed
+    /// it's healthy so we start the next in-flight window from zero.
+    pub fn on_pong(&self) {
+        self.in_flight.store(0, Ordering::Relaxed);
+    }
+
     /// Returns true if the controller wants a keyframe (to recover from a stall).
     /// Cooldown of 1 second to avoid spam.
     #[allow(dead_code)]
@@ -216,6 +228,23 @@ mod tests {
         );
         // should_capture must return true (backpressure released)
         assert!(c.should_capture(), "capture must not be blocked after huge on_ack");
+    }
+
+    #[test]
+    fn on_pong_resets_in_flight_to_allow_full_throughput() {
+        let c = FrameController::new(60, 5000);
+        // Fill in-flight to MAX — capture would be blocked.
+        for _ in 0..MAX_IN_FLIGHT {
+            assert!(c.should_capture());
+            c.on_send();
+        }
+        assert!(!c.should_capture(), "should be blocked before pong");
+
+        // Simulate Pong arriving (viewer confirmed it's alive).
+        c.on_pong();
+        // in_flight must be 0 — the next window is fresh.
+        assert_eq!(c.in_flight.load(std::sync::atomic::Ordering::Relaxed), 0);
+        assert!(c.should_capture(), "capture must be unblocked after pong");
     }
 
     #[test]

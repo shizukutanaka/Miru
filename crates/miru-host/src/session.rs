@@ -616,7 +616,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     }
                     Some(Msg::Pong(p)) => {
                         let rtt = now_ms().saturating_sub(p.ts) as u32;
-                        bp.on_ack(1);
+                        bp.on_pong();
                         // Feed RTT into BBR (µs precision).
                         qos.lock().on_rtt(rtt.saturating_mul(1_000));
                     }
