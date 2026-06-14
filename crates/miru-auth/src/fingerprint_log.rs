@@ -200,7 +200,11 @@ impl FingerprintLog {
             .context("append fingerprint log")?;
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
+        // flush() only drains the userspace buffer; sync_data() ensures the
+        // kernel hands the data to the storage device before we update state.
+        // Without this, a crash after flush() would silently lose the entry.
         f.flush()?;
+        f.sync_data()?;
 
         if matches!(action, FingerprintAction::Pin) {
             s.pinned
