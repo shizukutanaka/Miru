@@ -170,17 +170,21 @@ async fn main() -> Result<()> {
     // Apply minimal sandbox AFTER privileged init (audit log already open).
     sandbox_mcp(&audit_path);
 
-    // Confirmation callback for capability authorization.
-    // Policy:
-    //   - ScreenRead / PointerMove / PointerClick / KeyType / Scroll: AUTO-APPROVE
-    //     (low-risk; this is the normal "Claude can see and type" mode)
-    //   - ScreenRead / PointerMove / PointerClick / KeyType / KeyCombo / ClipboardRead:
-    //     AUTO-APPROVE (normal interactive assistant operations; ClipboardRead needs a
-    //     valid token which the user consciously minted — acceptable read-only access)
-    //   - ShellExec / FileWrite / FileRead / OpenUrl / ClipboardWrite: AUTO-DENY
-    //     (irreversible or wide-impact; v0.3 adds native UI dialog via Tauri IPC)
-    // Rationale: An AI assistant that can't read the screen, type, or read clipboard
-    // is too restricted to be useful. Shell execution always needs human oversight.
+    // Confirmation policy for capability authorization.
+    //
+    // AUTO-APPROVE (Normal / Conditional security level):
+    //   ScreenRead, PointerMove, PointerClick, KeyType, KeyCombo
+    //   These are standard interactive-assistant operations with low impact.
+    //
+    // AUTO-DENY (Dangerous security level — requires native UI dialog, v0.3):
+    //   ClipboardRead, ClipboardWrite, FileRead, FileWrite, ShellExec, OpenUrl
+    //
+    // ClipboardRead is intentionally NOT auto-approved even though it is read-only:
+    // clipboard frequently contains passwords, 2FA codes, and private keys. Token
+    // issuance is not a per-use consent signal; the user must be prompted each time
+    // so they are aware the AI is reading potentially-sensitive clipboard content.
+    // (token.rs::security_level() classifies ClipboardRead as Dangerous, and
+    // Capability::assistant_default() excludes it for this same reason.)
     let confirm: ConfirmFn = Arc::new(|req: &ConfirmRequest| {
         use miru_agent::token::Capability;
         let approved = matches!(
@@ -190,7 +194,6 @@ async fn main() -> Result<()> {
                 | Capability::PointerClick
                 | Capability::KeyType
                 | Capability::KeyCombo
-                | Capability::ClipboardRead
         );
         if approved {
             tracing::debug!(
