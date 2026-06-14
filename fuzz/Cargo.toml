@@ -33,3 +33,9 @@ name = "fuzz_verify_register_sig"
 path = "fuzz_targets/fuzz_verify_register_sig.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "fuzz_stun_parse"
+path = "fuzz_targets/fuzz_stun_parse.rs"
+test = false
+doc = false

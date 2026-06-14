@@ -74,6 +74,12 @@ async fn stun_binding_request(socket: &TokioUdpSocket, server: &str) -> Result<S
     parse_stun_xor_mapped(&buf[..n])
 }
 
+/// Public re-export for the fuzz target — identical to the private implementation.
+#[doc(hidden)]
+pub fn parse_stun_xor_mapped_fuzz(buf: &[u8]) -> Result<SocketAddr> {
+    parse_stun_xor_mapped(buf)
+}
+
 fn parse_stun_xor_mapped(buf: &[u8]) -> Result<SocketAddr> {
     if buf.len() < 20 {
         bail!("STUN response too short");
@@ -88,7 +94,11 @@ fn parse_stun_xor_mapped(buf: &[u8]) -> Result<SocketAddr> {
         }
 
         // 0x0020 = XOR-MAPPED-ADDRESS
-        if attr_type == 0x0020 {
+        // RFC 5389 §15.2: minimum 4 bytes (family + port); IPv4 = 8 bytes.
+        // Check attr_len first — a crafted response with attr_len < 4 would
+        // cause buf[val_start + 1..3] to index past the attribute boundary,
+        // panicking if val_start + 3 >= buf.len().
+        if attr_type == 0x0020 && attr_len >= 4 {
             let family = buf[val_start + 1];
             let xor_port = u16::from_be_bytes([buf[val_start + 2], buf[val_start + 3]]);
             let port = xor_port ^ 0x2112;
@@ -214,5 +224,76 @@ pub async fn detect_nat_type(local: SocketAddr) -> NatType {
         (Some(_), Some(_)) => NatType::Symmetric,
         (Some(_), None) | (None, Some(_)) => NatType::Restricted,
         (None, None) => NatType::Unknown,
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stun_header(attr_type: u16, attr_len: u16, value: &[u8]) -> Vec<u8> {
+        let mut buf = vec![0u8; 20]; // STUN header
+        // Binding Response (0x0101)
+        buf[0] = 0x01;
+        buf[1] = 0x01;
+        // Message length = 4 (attr header) + value.len()
+        let msg_len = 4u16 + value.len() as u16;
+        buf[2..4].copy_from_slice(&msg_len.to_be_bytes());
+        // Magic cookie
+        buf[4..8].copy_from_slice(&0x2112A442u32.to_be_bytes());
+        // Attr type + len
+        buf.extend_from_slice(&attr_type.to_be_bytes());
+        buf.extend_from_slice(&attr_len.to_be_bytes());
+        buf.extend_from_slice(value);
+        buf
+    }
+
+    #[test]
+    fn parses_valid_ipv4_xor_mapped() {
+        // XOR-MAPPED-ADDRESS for 192.0.2.1:54321
+        // family=0x01, port = 54321 ^ 0x2112 = 0xD0B3
+        let port: u16 = 54321 ^ 0x2112;
+        // ip = 192.0.2.1 = 0xC0000201 XOR 0x2112A442 = 0xE112A643
+        let xor_ip: u32 = 0xC0000201 ^ 0x2112A442;
+        let mut value = vec![0x00, 0x01]; // reserved, family=IPv4
+        value.extend_from_slice(&port.to_be_bytes());
+        value.extend_from_slice(&xor_ip.to_be_bytes());
+
+        let buf = stun_header(0x0020, 8, &value);
+        let addr = parse_stun_xor_mapped(&buf).unwrap();
+        assert_eq!(addr.port(), 54321);
+        assert_eq!(addr.ip().to_string(), "192.0.2.1");
+    }
+
+    #[test]
+    fn rejects_response_too_short() {
+        assert!(parse_stun_xor_mapped(&[0u8; 19]).is_err());
+    }
+
+    #[test]
+    fn malformed_attr_len_zero_does_not_panic() {
+        // attr_len=0 means the value is empty; before the fix, buf[val_start+1]
+        // would index past the attribute boundary and potentially panic.
+        let buf = stun_header(0x0020, 0, &[]);
+        // Must return Err (attribute not found / too short), NOT panic.
+        let result = parse_stun_xor_mapped(&buf);
+        assert!(result.is_err(), "attr_len=0 must not panic");
+    }
+
+    #[test]
+    fn malformed_attr_len_two_does_not_panic() {
+        let buf = stun_header(0x0020, 2, &[0x00, 0x01]);
+        let result = parse_stun_xor_mapped(&buf);
+        assert!(result.is_err(), "attr_len=2 must not panic");
+    }
+
+    #[test]
+    fn unknown_attr_type_skipped() {
+        // 0x0001 is a different attribute type — must be skipped.
+        let buf = stun_header(0x0001, 4, &[0x00; 4]);
+        let result = parse_stun_xor_mapped(&buf);
+        assert!(result.is_err(), "non-XOR-MAPPED-ADDRESS must return not-found");
     }
 }
