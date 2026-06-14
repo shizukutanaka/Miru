@@ -61,6 +61,12 @@ fn handle_file_transfer(
 ) {
     match ft {
         FileTransfer::Start { id, name, size, hash } => {
+            // Cap concurrent in-flight transfers to bound open file descriptor usage.
+            const MAX_CONCURRENT_TRANSFERS: usize = 8;
+            if transfers.len() >= MAX_CONCURRENT_TRANSFERS {
+                warn!("FileTransfer {id}: rejected — too many concurrent transfers (limit {MAX_CONCURRENT_TRANSFERS})");
+                return;
+            }
             if size > ft_cfg.max_file_bytes {
                 warn!("FileTransfer {id}: rejected — {size} bytes exceeds limit");
                 return;
