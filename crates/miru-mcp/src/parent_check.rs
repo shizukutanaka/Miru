@@ -181,7 +181,9 @@ fn parent_pid() -> Result<u32> {
     const TH32CS_SNAPPROCESS: u32 = 0x00000002;
     let me = unsafe { GetCurrentProcessId() };
     let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-    if snap.is_null() {
+    // CreateToolhelp32Snapshot returns INVALID_HANDLE_VALUE (-1) on failure, NOT null.
+    // Calling CloseHandle(INVALID_HANDLE_VALUE) raises a debugger exception on Windows.
+    if snap.is_null() || snap as isize == -1 {
         anyhow::bail!("CreateToolhelp32Snapshot failed");
     }
     let mut pe: Pe32 = unsafe { std::mem::zeroed() };
