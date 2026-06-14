@@ -76,6 +76,11 @@ fn handle_file_transfer(
                 warn!("FileTransfer {id}: rejected — empty filename after sanitization");
                 return;
             }
+            // SHA-256 as hex is exactly 64 lowercase hex chars.
+            if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+                warn!("FileTransfer {id}: rejected — invalid hash format");
+                return;
+            }
             // Resolve the temp path through safe_fs to prevent path-traversal attacks.
             let temp_name = format!(".{id}.tmp");
             let temp_path = match safe_fs::resolve_safe_path(ft_cfg, &temp_name) {
