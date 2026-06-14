@@ -10,6 +10,7 @@
 
 use anyhow::{bail, Context, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use tracing::info;
 
 /// Build a magic packet for the given MAC address.
 /// Format: 6 bytes of 0xFF, then the MAC repeated 16 times = 102 bytes.
@@ -52,10 +53,7 @@ pub fn wake(mac: [u8; 6], target_ip: Option<Ipv4Addr>) -> Result<()> {
     let target7 = SocketAddr::new(IpAddr::V4(dest), 7);
     let _ = socket.send_to(&packet, target7);
 
-    eprintln!(
-        "[wol] {}",
-        format_args!("WoL: magic packet sent to {} → {}", format_mac(&mac), dest)
-    );
+    info!("WoL: magic packet sent to {} → {}", format_mac(&mac), dest);
     Ok(())
 }
 
