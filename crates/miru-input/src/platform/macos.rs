@@ -134,7 +134,7 @@ fn mouse_up_type(btn: &MouseButton) -> (CGEventType, CGMouseButton) {
 }
 
 pub fn set_clipboard(text: &str) -> Result<()> {
-    std::process::Command::new("pbcopy")
+    let status = std::process::Command::new("pbcopy")
         .stdin(std::process::Stdio::piped())
         .spawn()
         .and_then(|mut c| {
@@ -144,6 +144,9 @@ pub fn set_clipboard(text: &str) -> Result<()> {
             }
             c.wait()
         })?;
+    if !status.success() {
+        anyhow::bail!("pbcopy exited with status {status}");
+    }
     Ok(())
 }
 
@@ -159,5 +162,8 @@ pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
 
 pub fn get_clipboard() -> Result<String> {
     let out = std::process::Command::new("pbpaste").output()?;
+    if !out.status.success() {
+        anyhow::bail!("pbpaste exited with status {}", out.status);
+    }
     Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }

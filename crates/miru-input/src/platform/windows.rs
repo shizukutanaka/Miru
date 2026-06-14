@@ -44,8 +44,22 @@ fn to_abs(v: f32) -> i32 {
     (v * 65535.0) as i32
 }
 
+/// Thin wrapper around `SendInput` that converts a 0 return value (failure)
+/// into an error using the OS-provided last error code (e.g. ERROR_ACCESS_DENIED
+/// when UIPI blocks injection into a higher-privilege window).
+fn send_input(input: INPUT) -> Result<()> {
+    let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+    if sent == 0 {
+        return Err(anyhow::anyhow!(
+            "SendInput failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
 fn mouse_event(flags: MOUSE_EVENT_FLAGS, x: i32, y: i32, data: i32) -> Result<()> {
-    let input = INPUT {
+    send_input(INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
@@ -57,9 +71,7 @@ fn mouse_event(flags: MOUSE_EVENT_FLAGS, x: i32, y: i32, data: i32) -> Result<()
                 dwExtraInfo: 0,
             },
         },
-    };
-    unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
-    Ok(())
+    })
 }
 
 fn key_event(vk: u32, key_up: bool) -> Result<()> {
@@ -68,7 +80,7 @@ fn key_event(vk: u32, key_up: bool) -> Result<()> {
     } else {
         KEYBD_EVENT_FLAGS(0)
     };
-    let input = INPUT {
+    send_input(INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
@@ -79,9 +91,7 @@ fn key_event(vk: u32, key_up: bool) -> Result<()> {
                 dwExtraInfo: 0,
             },
         },
-    };
-    unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
-    Ok(())
+    })
 }
 
 fn unicode_key(ch: char) -> Result<()> {
@@ -94,7 +104,7 @@ fn unicode_key(ch: char) -> Result<()> {
             } else {
                 KEYEVENTF_UNICODE
             };
-            let input = INPUT {
+            send_input(INPUT {
                 r#type: INPUT_KEYBOARD,
                 Anonymous: INPUT_0 {
                     ki: KEYBDINPUT {
@@ -105,8 +115,7 @@ fn unicode_key(ch: char) -> Result<()> {
                         dwExtraInfo: 0,
                     },
                 },
-            };
-            unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+            })?;
         }
     }
     Ok(())

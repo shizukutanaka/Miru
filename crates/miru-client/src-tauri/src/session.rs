@@ -269,7 +269,7 @@ pub async fn run(
                                 }
                             }
                         }
-                        let dec = decoder.as_mut().expect("just inserted above");
+                        let Some(dec) = decoder.as_mut() else { continue };
 
                         match dec.decode(&vf.data, vf.timestamp_ms) {
                             Ok(Some(frame)) => {
