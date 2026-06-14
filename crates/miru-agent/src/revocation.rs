@@ -109,7 +109,10 @@ impl RevocationList {
             .context("append revocation list")?;
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
+        // flush() only drains the userspace buffer; sync_data() commits to storage
+        // so a crash between flush() and sync_data() cannot silently un-revoke a token.
         f.flush()?;
+        f.sync_data()?;
         Ok(())
     }
 
