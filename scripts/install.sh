@@ -53,6 +53,28 @@ curl -sSL "$URL" -o "$TMP/miru.$EXT"
 
 tar -xzf "$TMP/miru.$EXT" -C "$TMP"
 
+# ─── Signature verification ───────────────────────────────────────────────────
+# Release artifacts are signed with Sigstore cosign (keyless, OIDC-backed).
+# Verify before installing unless the user explicitly opts out.
+SKIP_VERIFY="${MIRU_SKIP_VERIFY:-0}"
+if [ "$SKIP_VERIFY" = "1" ]; then
+  echo "WARNING: signature verification skipped (MIRU_SKIP_VERIFY=1)."
+elif command -v cosign &>/dev/null; then
+  echo "Verifying cosign signature..."
+  BUNDLE_URL="https://github.com/$REPO/releases/download/$VERSION/miru-$TARGET.$EXT.cosign.bundle"
+  curl -sSL "$BUNDLE_URL" -o "$TMP/miru.$EXT.cosign.bundle"
+  cosign verify-blob \
+    --bundle "$TMP/miru.$EXT.cosign.bundle" \
+    --certificate-identity-regexp "github\\.com/$REPO" \
+    --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+    "$TMP/miru.$EXT"
+  echo "Signature OK."
+else
+  echo "WARNING: cosign not found — signature not verified."
+  echo "  Install cosign: https://docs.sigstore.dev/cosign/system_config/installation/"
+  echo "  Or set MIRU_SKIP_VERIFY=1 to suppress this warning."
+fi
+
 # ─── Install ──────────────────────────────────────────────────────────────────
 SUDO=""
 if [ ! -w "$INSTALL_DIR" ]; then
@@ -61,11 +83,13 @@ fi
 
 $SUDO install -m 755 "$TMP/miru-host" "$INSTALL_DIR/miru-host"
 $SUDO install -m 755 "$TMP/miru-signal" "$INSTALL_DIR/miru-signal"
+$SUDO install -m 755 "$TMP/miru-mcp" "$INSTALL_DIR/miru-mcp"
 
 # ─── macOS: remove quarantine ─────────────────────────────────────────────────
 if [ "$OS" = "Darwin" ]; then
   xattr -d com.apple.quarantine "$INSTALL_DIR/miru-host" 2>/dev/null || true
   xattr -d com.apple.quarantine "$INSTALL_DIR/miru-signal" 2>/dev/null || true
+  xattr -d com.apple.quarantine "$INSTALL_DIR/miru-mcp" 2>/dev/null || true
 fi
 
 # ─── Linux: systemd service ───────────────────────────────────────────────────
@@ -95,6 +119,7 @@ echo ""
 echo "Miru $VERSION installed successfully!"
 echo "  Host:   $INSTALL_DIR/miru-host"
 echo "  Signal: $INSTALL_DIR/miru-signal"
+echo "  MCP:    $INSTALL_DIR/miru-mcp"
 echo ""
 echo "Start the host:"
 echo "  miru-host"
