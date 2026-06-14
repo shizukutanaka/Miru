@@ -17,7 +17,7 @@ use miru_transport::{
 use parking_lot::Mutex;
 use std::{
     collections::HashMap,
-    io::{Seek, SeekFrom, Write},
+    io::{BufReader, Read, Seek, SeekFrom, Write},
     path::PathBuf,
     sync::Arc,
     time::Duration,
@@ -36,7 +36,6 @@ use crate::{
 struct FileReceive {
     temp_path: PathBuf,
     file: std::fs::File,
-    #[allow(dead_code)]
     expected_size: u64,
     expected_hash: String,
     /// Sanitized filename from the Start message — used as the final save name.
@@ -90,6 +89,17 @@ fn handle_file_transfer(
         }
         FileTransfer::Chunk { id, offset, data } => {
             if let Some(rx) = transfers.get_mut(&id) {
+                // Reject chunks that would write past the declared file size.
+                // Without this check a sender can seek the temp file to an
+                // arbitrary offset, creating a sparse file that uses disk space
+                // far beyond max_file_bytes while still passing the Start size check.
+                let chunk_end = offset.saturating_add(data.len() as u64);
+                if chunk_end > rx.expected_size {
+                    warn!("FileTransfer {id}: chunk at {offset}+{} exceeds declared size {} — aborting", data.len(), rx.expected_size);
+                    let _ = std::fs::remove_file(&rx.temp_path);
+                    transfers.remove(&id);
+                    return;
+                }
                 if let Err(e) = rx.file.seek(SeekFrom::Start(offset))
                     .and_then(|_| rx.file.write_all(&data))
                 {
@@ -104,15 +114,10 @@ fn handle_file_transfer(
         FileTransfer::Done { id } => {
             if let Some(rx) = transfers.remove(&id) {
                 drop(rx.file); // flush + close
-                // Verify SHA-256
-                match std::fs::read(&rx.temp_path) {
-                    Ok(bytes) => {
-                        let digest = ring::digest::digest(&ring::digest::SHA256, &bytes);
-                        let actual_hash = digest
-                            .as_ref()
-                            .iter()
-                            .map(|b| format!("{b:02x}"))
-                            .collect::<String>();
+                // Stream SHA-256 rather than loading the entire file into memory —
+                // std::fs::read() on a 100 MB file would double peak RSS.
+                match hash_file_streaming(&rx.temp_path) {
+                    Ok(actual_hash) => {
                         if actual_hash != rx.expected_hash {
                             warn!("FileTransfer {id}: hash mismatch (corrupt?), deleting");
                             let _ = std::fs::remove_file(&rx.temp_path);
@@ -144,7 +149,7 @@ fn handle_file_transfer(
                         }
                     }
                     Err(e) => {
-                        warn!("FileTransfer {id}: cannot read temp file for hash check: {e}");
+                        warn!("FileTransfer {id}: hash check failed: {e}");
                         let _ = std::fs::remove_file(&rx.temp_path);
                     }
                 }
@@ -742,4 +747,21 @@ fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
         .map(|b| format!("{b:02X}"))
         .collect::<Vec<_>>()
         .join(":")
+}
+
+/// Stream a SHA-256 digest over a file without loading the entire content into memory.
+fn hash_file_streaming(path: &std::path::Path) -> std::io::Result<String> {
+    let f = std::fs::File::open(path)?;
+    let mut reader = BufReader::new(f);
+    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+    let mut buf = [0u8; 65536];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        ctx.update(&buf[..n]);
+    }
+    let digest = ctx.finish();
+    Ok(digest.as_ref().iter().map(|b| format!("{b:02x}")).collect())
 }
