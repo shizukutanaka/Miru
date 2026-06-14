@@ -6,7 +6,7 @@ use cpal::{
     SampleRate, StreamConfig,
 };
 use crossbeam_channel::{bounded, Sender};
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 pub struct AudioPlayer {
     tx: Sender<Vec<f32>>,
@@ -40,7 +40,7 @@ impl AudioPlayer {
                         match rx.try_recv() {
                             Ok(samples) => leftover = samples,
                             Err(_) => {
-                                // Underrun — fill silence
+                                trace!("audio underrun — filling silence ({} samples)", out.len() - filled);
                                 for s in &mut out[filled..] {
                                     *s = 0.0;
                                 }

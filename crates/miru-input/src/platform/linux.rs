@@ -78,8 +78,9 @@ impl UinputDevice {
                 libc::ioctl(fd, UI_SET_KEYBIT as libc::c_ulong, btn as libc::c_int);
             }
 
-            // Enable keyboard keys (0–255)
-            for key in 0..=255i32 {
+            // Enable keyboard keys (full range: 0–KEY_MAX=767).
+            // 0..=255 misses extended keys (multimedia, fn, meta >255).
+            for key in 0..=767i32 {
                 libc::ioctl(fd, UI_SET_KEYBIT as libc::c_ulong, key);
             }
 
@@ -144,7 +145,12 @@ impl UinputDevice {
                 libc::ioctl(fd, UI_ABS_SETUP, &abs_setup as *const _);
             }
 
-            libc::ioctl(fd, UI_DEV_CREATE as libc::c_ulong);
+            let rc = libc::ioctl(fd, UI_DEV_CREATE as libc::c_ulong);
+            if rc < 0 {
+                let errno = *libc::__errno_location();
+                libc::close(fd);
+                anyhow::bail!("UI_DEV_CREATE failed (errno {})", errno);
+            }
 
             Ok(Self { fd })
         }
@@ -206,8 +212,13 @@ impl Drop for UinputDevice {
 }
 
 pub fn inject(event: &InputEvent) -> Result<()> {
-    // Mutex poisoning isn't catastrophic here — uinput state is replaceable.
-    let guard = UINPUT.lock().unwrap_or_else(|p| p.into_inner());
+    let guard = match UINPUT.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            warn!("uinput mutex was poisoned; recovering — device state may be inconsistent");
+            p.into_inner()
+        }
+    };
     let dev = guard
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("uinput not available"))?;
@@ -243,7 +254,13 @@ fn inject_text(text: &str) -> Result<()> {
         warn!("Text injection: clipboard write failed: {e}");
         return Ok(());
     }
-    let guard = UINPUT.lock().unwrap_or_else(|p| p.into_inner());
+    let guard = match UINPUT.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            warn!("uinput mutex was poisoned during text injection; recovering");
+            p.into_inner()
+        }
+    };
     let dev = guard
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("uinput not available"))?;
