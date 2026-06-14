@@ -268,6 +268,19 @@ async fn process_rdv_msg(
                     .await;
                 return;
             }
+            // Cap pubkey length — base64url of 32-byte Ed25519 key is exactly 43 chars;
+            // allow 64 for forward-compat (e.g., post-quantum hybrid). Anything larger
+            // would trigger a large allocation inside verify_register_signature().
+            if reg.pubkey.len() > 64 {
+                warn!("Register rejected: pubkey too long ({} bytes)", reg.pubkey.len());
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 400,
+                        message: "pubkey too long".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             // Cap pub_addr length — an IPv6 + port is at most ~47 chars.
             // An unbounded string here lets a single client inflate the per-entry
             // allocation to an arbitrary size (up to max_devices × whatever).
