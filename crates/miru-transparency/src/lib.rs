@@ -49,16 +49,16 @@ pub struct SessionMetadata {
 
 impl SessionMetadata {
     /// Compute commitment = SHA256(canonical_json(metadata) || nonce).
-    pub fn commitment(&self, nonce: &[u8; 32]) -> [u8; 32] {
+    pub fn commitment(&self, nonce: &[u8; 32]) -> Result<[u8; 32]> {
         let mut ctx = Context::new(&SHA256);
-        // SessionMetadata contains only serializable types; to_vec cannot fail here.
-        let json = serde_json::to_vec(self).unwrap_or_default();
+        let json = serde_json::to_vec(self)
+            .map_err(|e| anyhow::anyhow!("SessionMetadata serialization failed: {e}"))?;
         ctx.update(&json);
         ctx.update(nonce);
         let d = ctx.finish();
         let mut out = [0u8; 32];
         out.copy_from_slice(d.as_ref());
-        out
+        Ok(out)
     }
 }
 
@@ -87,7 +87,7 @@ impl CoSignedCommitment {
         let mut nonce = [0u8; 32];
         ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce)
             .map_err(|_| anyhow::anyhow!("OS RNG failed"))?;
-        let commitment = metadata.commitment(&nonce);
+        let commitment = metadata.commitment(&nonce)?;
         let host_sig: Signature = host_key.sign(&commitment);
         let viewer_sig: Signature = viewer_key.sign(&commitment);
         Ok(Self {
@@ -109,7 +109,7 @@ impl CoSignedCommitment {
         let mut nonce = [0u8; 32];
         nonce.copy_from_slice(&nonce_v);
 
-        let expected = metadata.commitment(&nonce);
+        let expected = metadata.commitment(&nonce)?;
         let actual_v = B64.decode(&self.commitment_b64)?;
         if actual_v != expected {
             bail!("commitment hash mismatch — metadata or nonce was altered");
@@ -158,7 +158,7 @@ impl HostOnlyAttestation {
         let mut nonce = [0u8; 32];
         ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce)
             .map_err(|_| anyhow::anyhow!("OS RNG failed"))?;
-        let commitment = metadata.commitment(&nonce);
+        let commitment = metadata.commitment(&nonce)?;
         let host_sig: Signature = host_key.sign(&commitment);
         Ok(Self {
             commitment_b64: B64.encode(commitment),
@@ -178,7 +178,7 @@ impl HostOnlyAttestation {
         let mut nonce = [0u8; 32];
         nonce.copy_from_slice(&nonce_v);
 
-        let expected = metadata.commitment(&nonce);
+        let expected = metadata.commitment(&nonce)?;
         let actual_v = B64.decode(&self.commitment_b64)?;
         if actual_v != expected {
             bail!("commitment hash mismatch — metadata or nonce was altered");
@@ -368,8 +368,8 @@ mod tests {
         let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
 
         let nonce = [42u8; 32];
-        let c1 = meta.commitment(&nonce);
-        let c2 = meta.commitment(&nonce);
+        let c1 = meta.commitment(&nonce).unwrap();
+        let c2 = meta.commitment(&nonce).unwrap();
         assert_eq!(c1, c2);
     }
 
@@ -379,9 +379,9 @@ mod tests {
         let viewer_key = SigningKey::generate(&mut OsRng);
         let mut meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
         let nonce = [42u8; 32];
-        let c1 = meta.commitment(&nonce);
+        let c1 = meta.commitment(&nonce).unwrap();
         meta.video_frames += 1;
-        let c2 = meta.commitment(&nonce);
+        let c2 = meta.commitment(&nonce).unwrap();
         assert_ne!(c1, c2);
     }
 
