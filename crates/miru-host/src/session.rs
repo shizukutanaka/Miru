@@ -191,7 +191,7 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
     // Discover public address once (non-fatal; None → skip direct-path advertisement).
     let pub_addr: Option<(String, u16)> = match tokio::time::timeout(
         Duration::from_secs(5),
-        discover_public_addr("0.0.0.0:0".parse().expect("literal addr")),
+        discover_public_addr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
     )
     .await
     {
@@ -667,16 +667,26 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         let metadata = metrics.snapshot();
         // Host-only attestation: the viewer's signing key is never available
         // server-side. Co-signing requires a 2-round protocol (planned v1.0).
-        let attestation =
-            miru_transparency::HostOnlyAttestation::new(&metadata, &config.identity.signing_key);
-        match miru_transparency::rekor::submit_host_to_rekor(&rekor_url, &metadata, &attestation)
-            .await
-        {
-            Ok(entry) => info!(
-                "Session anchored in Rekor: index={} uuid={}",
-                entry.log_index, entry.uuid
-            ),
-            Err(e) => warn!("Rekor anchoring failed (non-fatal): {}", e),
+        match miru_transparency::HostOnlyAttestation::new(
+            &metadata,
+            &config.identity.signing_key,
+        ) {
+            Err(e) => warn!("Attestation creation failed (non-fatal): {e}"),
+            Ok(attestation) => {
+                match miru_transparency::rekor::submit_host_to_rekor(
+                    &rekor_url,
+                    &metadata,
+                    &attestation,
+                )
+                .await
+                {
+                    Ok(entry) => info!(
+                        "Session anchored in Rekor: index={} uuid={}",
+                        entry.log_index, entry.uuid
+                    ),
+                    Err(e) => warn!("Rekor anchoring failed (non-fatal): {}", e),
+                }
+            }
         }
     }
 

@@ -22,22 +22,22 @@ const ARGON2_MEMORY_KB: u32 = 64 * 1024;
 const ARGON2_ITERATIONS: u32 = 3;
 const ARGON2_PARALLELISM: u32 = 4;
 
-fn argon2() -> Argon2<'static> {
+fn argon2() -> Result<Argon2<'static>> {
     let params = Params::new(
         ARGON2_MEMORY_KB,
         ARGON2_ITERATIONS,
         ARGON2_PARALLELISM,
         Some(32),
     )
-    .expect("argon2 params");
-    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+    .map_err(|e| anyhow::anyhow!("argon2 params: {e}"))?;
+    Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
 }
 
 /// Hash a password into a PHC string (`$argon2id$v=19$...`).
 /// Use this for any persisted credential.
 pub fn hash_password(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
-    let phc = argon2()
+    let phc = argon2()?
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| anyhow::anyhow!("argon2 hash: {e}"))?
         .to_string();
@@ -48,7 +48,7 @@ pub fn hash_password(password: &str) -> Result<String> {
 pub fn verify_password(password: &str, phc: &str) -> Result<bool> {
     let parsed =
         argon2::PasswordHash::new(phc).map_err(|e| anyhow::anyhow!("argon2 parse: {e}"))?;
-    Ok(argon2()
+    Ok(argon2()?
         .verify_password(password.as_bytes(), &parsed)
         .is_ok())
 }

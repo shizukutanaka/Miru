@@ -302,7 +302,7 @@ mod tests {
             total_bytes: 1024,
             relayed: false,
         };
-        let cosigned = CoSignedCommitment::new(&meta, &host, &viewer);
+        let cosigned = CoSignedCommitment::new(&meta, &host, &viewer).unwrap();
 
         let stmt = build_statement(&meta, &cosigned);
         // Must have subject and predicate at top level

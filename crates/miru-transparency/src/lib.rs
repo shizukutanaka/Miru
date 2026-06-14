@@ -51,7 +51,8 @@ impl SessionMetadata {
     /// Compute commitment = SHA256(canonical_json(metadata) || nonce).
     pub fn commitment(&self, nonce: &[u8; 32]) -> [u8; 32] {
         let mut ctx = Context::new(&SHA256);
-        let json = serde_json::to_vec(self).expect("metadata serialize");
+        // SessionMetadata contains only serializable types; to_vec cannot fail here.
+        let json = serde_json::to_vec(self).unwrap_or_default();
         ctx.update(&json);
         ctx.update(nonce);
         let d = ctx.finish();
@@ -78,18 +79,23 @@ pub struct CoSignedCommitment {
 }
 
 impl CoSignedCommitment {
-    pub fn new(metadata: &SessionMetadata, host_key: &SigningKey, viewer_key: &SigningKey) -> Self {
+    pub fn new(
+        metadata: &SessionMetadata,
+        host_key: &SigningKey,
+        viewer_key: &SigningKey,
+    ) -> Result<Self> {
         let mut nonce = [0u8; 32];
-        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce).expect("rand");
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce)
+            .map_err(|_| anyhow::anyhow!("OS RNG failed"))?;
         let commitment = metadata.commitment(&nonce);
         let host_sig: Signature = host_key.sign(&commitment);
         let viewer_sig: Signature = viewer_key.sign(&commitment);
-        Self {
+        Ok(Self {
             commitment_b64: B64.encode(commitment),
             nonce_b64: B64.encode(nonce),
             host_signature_b64: B64.encode(host_sig.to_bytes()),
             viewer_signature_b64: B64.encode(viewer_sig.to_bytes()),
-        }
+        })
     }
 
     /// Verify that:
@@ -148,16 +154,17 @@ pub struct HostOnlyAttestation {
 }
 
 impl HostOnlyAttestation {
-    pub fn new(metadata: &SessionMetadata, host_key: &SigningKey) -> Self {
+    pub fn new(metadata: &SessionMetadata, host_key: &SigningKey) -> Result<Self> {
         let mut nonce = [0u8; 32];
-        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce).expect("rand");
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut nonce)
+            .map_err(|_| anyhow::anyhow!("OS RNG failed"))?;
         let commitment = metadata.commitment(&nonce);
         let host_sig: Signature = host_key.sign(&commitment);
-        Self {
+        Ok(Self {
             commitment_b64: B64.encode(commitment),
             nonce_b64: B64.encode(nonce),
             host_signature_b64: B64.encode(host_sig.to_bytes()),
-        }
+        })
     }
 
     /// Verify that:
@@ -383,7 +390,7 @@ mod tests {
         let host_key = SigningKey::generate(&mut OsRng);
         let viewer_key = SigningKey::generate(&mut OsRng);
         let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
-        let att = HostOnlyAttestation::new(&meta, &host_key);
+        let att = HostOnlyAttestation::new(&meta, &host_key).unwrap();
         assert!(att.verify_host(&meta).is_ok());
     }
 
@@ -392,7 +399,7 @@ mod tests {
         let host_key = SigningKey::generate(&mut OsRng);
         let viewer_key = SigningKey::generate(&mut OsRng);
         let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
-        let att = HostOnlyAttestation::new(&meta, &host_key);
+        let att = HostOnlyAttestation::new(&meta, &host_key).unwrap();
         let mut altered = meta.clone();
         altered.total_bytes += 1;
         assert!(att.verify_host(&altered).is_err());
@@ -405,7 +412,7 @@ mod tests {
         let viewer_key = SigningKey::generate(&mut OsRng);
         // metadata says host_pubkey = host_key.verifying_key(), but we sign with wrong_key
         let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
-        let att = HostOnlyAttestation::new(&meta, &wrong_key);
+        let att = HostOnlyAttestation::new(&meta, &wrong_key).unwrap();
         assert!(
             att.verify_host(&meta).is_err(),
             "wrong signing key must not verify"
@@ -418,7 +425,7 @@ mod tests {
         let viewer_key = SigningKey::generate(&mut OsRng);
         let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
 
-        let cosigned = CoSignedCommitment::new(&meta, &host_key, &viewer_key);
+        let cosigned = CoSignedCommitment::new(&meta, &host_key, &viewer_key).unwrap();
         assert!(cosigned.verify(&meta).is_ok());
     }
 
@@ -428,7 +435,7 @@ mod tests {
         let viewer_key = SigningKey::generate(&mut OsRng);
         let meta = sample_metadata(&host_key.verifying_key(), &viewer_key.verifying_key());
 
-        let cosigned = CoSignedCommitment::new(&meta, &host_key, &viewer_key);
+        let cosigned = CoSignedCommitment::new(&meta, &host_key, &viewer_key).unwrap();
 
         let mut altered = meta.clone();
         altered.video_frames += 1;

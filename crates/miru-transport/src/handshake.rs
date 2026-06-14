@@ -119,7 +119,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
 
     // 7. Derive shared secret + session key
     let shared = ephemeral.diffie_hellman(&host_eph);
-    let session_key = hkdf_expand(&shared, ack.session_id.as_bytes());
+    let session_key = hkdf_expand(&shared, ack.session_id.as_bytes())?;
     let (tx, rx) = split_directional(session_key, false)?;
 
     Ok(HandshakeResult {
@@ -189,7 +189,7 @@ pub async fn host_handshake<C: MsgChannel>(
     // 5. Derive shared
     let session_id = Uuid::new_v4();
     let shared = ephemeral.diffie_hellman(&viewer_eph);
-    let session_key = hkdf_expand(&shared, session_id.as_bytes());
+    let session_key = hkdf_expand(&shared, session_id.as_bytes())?;
     let (tx, rx) = split_directional(session_key, true)?;
 
     // 6. Send HelloAck
@@ -258,15 +258,15 @@ fn parse_pubkey_field(s: &str) -> Result<([u8; 32], [u8; 32], Signature)> {
 }
 
 /// HKDF-SHA256 expand: derive 32-byte session key.
-fn hkdf_expand(shared: &[u8; 32], salt: &[u8]) -> [u8; 32] {
+fn hkdf_expand(shared: &[u8; 32], salt: &[u8]) -> Result<[u8; 32]> {
     let salt = hkdf::Salt::new(hkdf::HKDF_SHA256, salt);
     let prk = salt.extract(shared);
     let okm = prk
         .expand(&[HKDF_INFO], hkdf::HKDF_SHA256)
-        .expect("hkdf expand");
+        .map_err(|_| anyhow::anyhow!("hkdf expand failed"))?;
     let mut out = [0u8; 32];
-    okm.fill(&mut out).expect("hkdf fill");
-    out
+    okm.fill(&mut out).map_err(|_| anyhow::anyhow!("hkdf fill failed"))?;
+    Ok(out)
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
