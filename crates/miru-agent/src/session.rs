@@ -84,7 +84,6 @@ impl AgentSession {
         action: serde_json::Value,
         scope_key: &str,
     ) -> Result<()> {
-        // 1. Token must include this capability
         // 0. Token must not be revoked (panic rotation check — always first)
         if let Some(rev) = &self.revocation {
             if rev.is_revoked(&self.token.payload.jti) {
