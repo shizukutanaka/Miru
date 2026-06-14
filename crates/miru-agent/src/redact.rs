@@ -125,12 +125,23 @@ fn redact_bytes_field(obj: &mut serde_json::Map<String, Value>, field: &str) {
             (b.len(), sha256_hex(b))
         }
         Value::Array(arr) => {
-            // Array of u8-sized numbers
-            let bytes: Vec<u8> = arr
-                .iter()
-                .filter_map(|v| v.as_u64().map(|n| n as u8))
-                .collect();
-            (bytes.len(), sha256_hex(&bytes))
+            // Stream SHA-256 byte-by-byte to avoid a secondary Vec<u8> allocation.
+            // Cap at 16 MiB elements: beyond that the JSON array itself is already
+            // pathological and we just record the count to keep the log useful.
+            const MAX_ARRAY_ELEMS: usize = 16 * 1024 * 1024;
+            if arr.len() > MAX_ARRAY_ELEMS {
+                (arr.len(), "<array too large to hash>".to_string())
+            } else {
+                let mut ctx = digest::Context::new(&digest::SHA256);
+                let mut count = 0usize;
+                for v in arr.iter() {
+                    if let Some(n) = v.as_u64() {
+                        ctx.update(&[n as u8]);
+                        count += 1;
+                    }
+                }
+                (count, sha256_hex(ctx.finish().as_ref()))
+            }
         }
         _ => return,
     };
@@ -150,11 +161,20 @@ fn redact_image_field(obj: &mut serde_json::Map<String, Value>, field: &str) {
     let (len, hash) = match value {
         Value::String(s) => (s.len(), sha256_hex(s.as_bytes())),
         Value::Array(arr) => {
-            let bytes: Vec<u8> = arr
-                .iter()
-                .filter_map(|v| v.as_u64().map(|n| n as u8))
-                .collect();
-            (bytes.len(), sha256_hex(&bytes))
+            const MAX_ARRAY_ELEMS: usize = 16 * 1024 * 1024;
+            if arr.len() > MAX_ARRAY_ELEMS {
+                (arr.len(), "<array too large to hash>".to_string())
+            } else {
+                let mut ctx = digest::Context::new(&digest::SHA256);
+                let mut count = 0usize;
+                for v in arr.iter() {
+                    if let Some(n) = v.as_u64() {
+                        ctx.update(&[n as u8]);
+                        count += 1;
+                    }
+                }
+                (count, sha256_hex(ctx.finish().as_ref()))
+            }
         }
         _ => return,
     };
