@@ -222,7 +222,7 @@ impl HandoffToken {
     ) -> Self {
         use base64::{engine::general_purpose::STANDARD as B64, Engine};
         let expires_at = unix_now() + ttl_secs;
-        let mut blob = Vec::with_capacity(48);
+        let mut blob = Vec::with_capacity(56); // 3×16 (UUIDs) + 8 (expires_at)
         blob.extend_from_slice(session_id.as_bytes());
         blob.extend_from_slice(from_device.as_bytes());
         blob.extend_from_slice(to_device.as_bytes());
@@ -243,7 +243,7 @@ impl HandoffToken {
         if unix_now() > self.expires_at {
             bail!("handoff token expired");
         }
-        let mut blob = Vec::with_capacity(48);
+        let mut blob = Vec::with_capacity(56); // 3×16 (UUIDs) + 8 (expires_at)
         blob.extend_from_slice(self.session_id.as_bytes());
         blob.extend_from_slice(self.from_device.as_bytes());
         blob.extend_from_slice(self.to_device.as_bytes());

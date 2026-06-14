@@ -154,10 +154,12 @@ impl Discovery {
 
     /// Remove peers not seen within `older_than`.
     pub fn prune_stale(&self, older_than: Duration) {
-        let cutoff = std::time::Instant::now()
-            .checked_sub(older_than)
-            .unwrap_or_else(std::time::Instant::now);
-        self.peers.write().retain(|_, p| p.last_seen > cutoff);
+        // Do not use checked_sub fallback — Instant::now() as fallback would
+        // prune ALL peers (none can have last_seen in the future).
+        let now = std::time::Instant::now();
+        self.peers
+            .write()
+            .retain(|_, p| now.duration_since(p.last_seen) < older_than);
     }
 
     pub fn shutdown(self) {
