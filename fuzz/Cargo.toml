@@ -7,9 +7,12 @@ publish = false
 [package.metadata]
 cargo-fuzz = true
 
+[workspace]
+
 [dependencies]
 libfuzzer-sys = "0.4"
 miru-common = { path = "../crates/miru-common" }
+rmp-serde = "1"
 
 [[bin]]
 name = "fuzz_message_parse"
