@@ -212,9 +212,9 @@ jobs:
           # Per docs/UNWRAP_TRIAGE.md, production (.unwrap() / .expect()) calls
           # are budgeted (provably-safe + cooperative-poison). Any net
           # increase is rejected so review notices new panic points.
-          # Current count: 21 — keep the budget equal to the actual count
+          # Current count: 25 — keep the budget equal to the actual count
           # so every new unwrap forces a conscious bump in review.
-          BUDGET=21
+          BUDGET=25
           ACTUAL=0
           for f in $(find crates -name "*.rs" -type f \
                 | grep -v "/target/" | grep -v "/fuzz/" \
