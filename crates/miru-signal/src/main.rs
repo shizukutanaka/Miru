@@ -258,6 +258,19 @@ async fn process_rdv_msg(
                     .await;
                 return;
             }
+            // Cap pub_addr length — an IPv6 + port is at most ~47 chars.
+            // An unbounded string here lets a single client inflate the per-entry
+            // allocation to an arbitrary size (up to max_devices × whatever).
+            if reg.pub_addr.as_deref().map_or(false, |a| a.len() > 128) {
+                warn!("Register rejected: pub_addr too long");
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 400,
+                        message: "pub_addr too long".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             // Reject if we've hit the registry cap (DoS prevention).
             if state.registry.len() >= state.max_devices {
                 warn!(
@@ -429,6 +442,13 @@ async fn relay_handler(
 }
 
 async fn relay_session(sock: WebSocket, token: String, role: Option<String>, state: AppState) {
+    // A valid token is a 32-char UUID hex. Reject oversized tokens immediately
+    // to avoid the O(token_len) hashing cost of two DashMap lookups on garbage input.
+    if token.len() > 64 {
+        warn!("Relay: rejecting oversized token ({} bytes)", token.len());
+        return;
+    }
+
     let is_host = role.as_deref() == Some("host");
     info!(
         "Relay join: token={}... role={}",
