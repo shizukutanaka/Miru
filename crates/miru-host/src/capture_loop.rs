@@ -120,7 +120,9 @@ pub fn start(
                         }
                     }
                 }
-                let enc = encoder.as_mut().expect("just inserted above");
+                let Some(enc) = encoder.as_mut() else {
+                    continue; // unreachable: init branch either set Some or continued
+                };
 
                 // Convert to I420 if needed
                 let i420 = match frame.format {

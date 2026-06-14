@@ -42,13 +42,13 @@ impl QosController {
             // Severe degradation
             self.fps = (self.fps / 2).max(5);
             self.bitrate_kbps = (self.bitrate_kbps as f32 * 0.6) as u32;
-            self.quality = (self.quality - 10).max(30);
+            self.quality = self.quality.saturating_sub(10).max(30);
             self.stable_streak = 0;
         } else if rtt_ms > 100 || packet_loss_pct > 5.0 {
             // Moderate degradation
             self.fps = self.fps.min(30);
             self.bitrate_kbps = (self.bitrate_kbps as f32 * 0.8) as u32;
-            self.quality = (self.quality - 5).max(50);
+            self.quality = self.quality.saturating_sub(5).max(50);
             self.stable_streak = 0;
         } else {
             // Good conditions — additive increase
