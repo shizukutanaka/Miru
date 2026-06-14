@@ -196,8 +196,15 @@ pub async fn detect_nat_type(local: SocketAddr) -> NatType {
         Err(_) => return NatType::Unknown,
     };
 
+    // Use two servers from DIFFERENT providers so NAT port mapping
+    // variations are detected. Prefer index 0 (Google) + index 2 (Cloudflare);
+    // fall back to index 1 if the array is shorter than expected.
     let server1 = STUN_SERVERS.first().copied().unwrap_or("");
-    let server2 = STUN_SERVERS.get(2).copied().unwrap_or(server1);
+    let server2 = STUN_SERVERS
+        .get(2)
+        .or_else(|| STUN_SERVERS.get(1))
+        .copied()
+        .unwrap_or(server1);
 
     let addr1 = stun_binding_request(&socket, server1).await.ok();
     let addr2 = stun_binding_request(&socket, server2).await.ok();
