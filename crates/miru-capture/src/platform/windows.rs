@@ -257,7 +257,15 @@ impl ScreenCapturer for WindowsCapturer {
 
             let resource =
                 resource.ok_or_else(|| anyhow::anyhow!("AcquireNextFrame: resource is None"))?;
-            let texture: ID3D11Texture2D = resource.cast()?;
+            let texture: ID3D11Texture2D = match resource.cast() {
+                Ok(t) => t,
+                Err(e) => {
+                    // ReleaseFrame must be called even on error; otherwise
+                    // DXGI permanently refuses future AcquireNextFrame calls.
+                    let _ = self.duplication.ReleaseFrame();
+                    bail!("resource cast to ID3D11Texture2D: {e}");
+                }
+            };
 
             // GPU→GPU copy to staging
             self.context.CopyResource(&self.staging, &texture);

@@ -90,7 +90,7 @@ impl EncoderBackend for VpxEncoder {
     ) -> Result<Option<EncodedPacket>> {
         unsafe {
             let pts = (ts_ms * 1000) as i64; // ms → microseconds
-            let duration = (1_000_000 / self.fps_den) as u64;
+            let duration = (1_000_000 / self.fps_den.max(1)) as u64;
 
             let flags = if keyframe || self.keyframe_requested {
                 self.keyframe_requested = false;
@@ -103,6 +103,14 @@ impl EncoderBackend for VpxEncoder {
             let mut img = std::mem::zeroed::<vpx_image_t>();
             let y_size = (width * height) as usize;
             let uv_size = ((width / 2) * (height / 2)) as usize;
+
+            if i420.len() < y_size + 2 * uv_size {
+                bail!(
+                    "VpxEncoder: I420 buffer too small ({} < {})",
+                    i420.len(),
+                    y_size + 2 * uv_size
+                );
+            }
 
             img.fmt = vpx_img_fmt_t::VPX_IMG_FMT_I420;
             img.w = width;
