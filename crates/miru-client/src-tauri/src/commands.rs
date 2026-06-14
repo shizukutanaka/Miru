@@ -124,12 +124,18 @@ pub async fn send_file(
     if data.len() > 100 * 1024 * 1024 {
         return Err("file exceeds 100 MB limit".into());
     }
-    // Sanitize filename: keep printable ASCII excluding path separators
+    // Sanitize filename: keep printable ASCII excluding path separators.
     let safe_name = name
         .chars()
         .filter(|&c| c.is_ascii() && !matches!(c, '/' | '\\' | '\0'))
         .take(255)
         .collect::<String>();
+    // If the original name contained only non-ASCII characters (e.g. Japanese
+    // filenames), safe_name is now empty — reject rather than forwarding an
+    // empty filename to the host.
+    if safe_name.trim().is_empty() {
+        return Err("filename must contain at least one ASCII character".into());
+    }
     state
         .send_file_transfer(safe_name, data)
         .await
