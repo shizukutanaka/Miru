@@ -490,6 +490,12 @@ impl AppState {
         let offset = u64::from_le_bytes(entry[..8].try_into().unwrap());
         let size = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
 
+        // Guard against corrupted index entries that could trigger a multi-GB allocation.
+        const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024; // 32 MiB per frame
+        if size > MAX_FRAME_BYTES {
+            anyhow::bail!("frame index entry has implausible size ({} bytes)", size);
+        }
+
         // Seek to the frame in frames.bin and read exactly `size` bytes.
         let mut frm_file = std::fs::File::open(base.join("frames.bin"))?;
         frm_file.seek(SeekFrom::Start(offset))?;

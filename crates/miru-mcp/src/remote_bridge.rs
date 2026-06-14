@@ -132,8 +132,13 @@ async fn recv_loop(
         match relay.recv_msg().await {
             Ok(Some(Msg::ClipboardSync(cs))) => {
                 if cs.format == ClipboardFormat::Text {
-                    if let Ok(text) = String::from_utf8(cs.data) {
-                        *latest_clipboard.lock() = Some(text);
+                    const MAX_CLIP_BYTES: usize = 1024 * 1024; // 1 MiB
+                    if cs.data.len() <= MAX_CLIP_BYTES {
+                        if let Ok(text) = String::from_utf8(cs.data) {
+                            *latest_clipboard.lock() = Some(text);
+                        }
+                    } else {
+                        warn!("RemoteBridge: clipboard sync too large ({} bytes), ignored", cs.data.len());
                     }
                 }
             }

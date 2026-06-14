@@ -55,7 +55,7 @@ impl Policy {
     fn per_second(burst: u32, daily_max: u32) -> Self {
         Self {
             burst,
-            refill_every: Duration::from_millis(1000 / burst as u64),
+            refill_every: Duration::from_millis(1000 / burst.max(1) as u64),
             daily_max,
         }
     }

@@ -362,6 +362,15 @@ impl McpServer {
     async fn tool_clipboard_read(&self, _args: &Value) -> Result<Vec<Content>> {
         self.gate(Capability::ClipboardRead, json!({}), "clipboard_read")?;
         let text = self.bridge.read_clipboard().await?;
+        const MAX_CLIP_BYTES: usize = 1024 * 1024; // 1 MiB — prevent LLM context overflow
+        if text.len() > MAX_CLIP_BYTES {
+            return Ok(vec![Content::Text {
+                text: format!(
+                    "[clipboard content truncated: {} bytes exceeds 1 MiB limit]",
+                    text.len()
+                ),
+            }]);
+        }
         Ok(vec![Content::Text { text }])
     }
 
