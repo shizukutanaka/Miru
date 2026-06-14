@@ -467,7 +467,20 @@ impl AppState {
         use base64::{engine::general_purpose::STANDARD as B64, Engine};
         use std::io::{Read, Seek, SeekFrom};
 
-        let base = std::path::Path::new(recording_path);
+        // Reject paths that escape the recordings directory. Without this,
+        // a crafted recording_path could read offsets.bin/frames.bin from
+        // anywhere on the filesystem if those filenames happen to exist there.
+        let recordings_dir = {
+            let d = self.config_dir.join("recordings");
+            std::fs::create_dir_all(&d).ok();
+            d.canonicalize().unwrap_or(d)
+        };
+        let base = std::path::Path::new(recording_path)
+            .canonicalize()
+            .map_err(|_| anyhow::anyhow!("invalid recording path"))?;
+        if !base.starts_with(&recordings_dir) {
+            anyhow::bail!("recording path is outside the recordings directory");
+        }
 
         // Read (offset, size) from offsets.bin — 12 bytes per frame.
         let mut idx_file = std::fs::File::open(base.join("offsets.bin"))?;
