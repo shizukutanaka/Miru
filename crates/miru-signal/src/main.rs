@@ -22,7 +22,6 @@ use std::{net::{IpAddr, SocketAddr}, sync::Arc, time::{Duration, Instant}};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use rand::Rng;
-use uuid::Uuid;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -223,7 +222,7 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<Msg>(&text) {
                             Ok(m) => process_rdv_msg(&state, m, &tx, &mut my_id, peer_ip).await,
-                            Err(e) => warn!("parse error: {}", e),
+                            Err(e) => warn!("parse error: {e}"),
                         }
                     }
                     Some(Ok(Message::Ping(d))) => { let _ = sock.send(Message::Pong(d)).await; }
@@ -284,7 +283,7 @@ async fn process_rdv_msg(
             // Cap pub_addr length — an IPv6 + port is at most ~47 chars.
             // An unbounded string here lets a single client inflate the per-entry
             // allocation to an arbitrary size (up to max_devices × whatever).
-            if reg.pub_addr.as_deref().map_or(false, |a| a.len() > 128) {
+            if reg.pub_addr.as_deref().is_some_and(|a| a.len() > 128) {
                 warn!("Register rejected: pub_addr too long");
                 let _ = tx
                     .send(Msg::Error(miru_common::message::ErrorMsg {
@@ -297,7 +296,7 @@ async fn process_rdv_msg(
             // Cap signature length — base64url of 64-byte Ed25519 signature is exactly
             // 86 chars; allow 128 for forward-compat. Oversized signature strings would
             // trigger large allocations in verify_register_signature() before failing.
-            if reg.signature.as_deref().map_or(false, |s| s.len() > 128) {
+            if reg.signature.as_deref().is_some_and(|s| s.len() > 128) {
                 warn!("Register rejected: signature too long");
                 let _ = tx
                     .send(Msg::Error(miru_common::message::ErrorMsg {
@@ -455,8 +454,7 @@ async fn process_rdv_msg(
                             tokio::time::sleep(UNCLAIMED_SLOT_TTL).await;
                             let unclaimed = sessions
                                 .get(&token)
-                                .map(|s| s.host.is_none() && s.viewer.is_none())
-                                .unwrap_or(false);
+                                .is_some_and(|s| s.host.is_none() && s.viewer.is_none());
                             if unclaimed {
                                 sessions.remove(&token);
                                 warn!("Relay slot {} expired unclaimed", &token[..8]);
@@ -516,7 +514,7 @@ async fn process_rdv_msg(
                 }
             }
         }
-        other => warn!("Unexpected rendezvous msg: {:?}", other),
+        other => warn!("Unexpected rendezvous msg: {other:?}"),
     }
 }
 

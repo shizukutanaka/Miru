@@ -144,7 +144,17 @@ impl QuicSendStream {
     /// Send an encrypted message.
     /// Frame format: [4-byte LE length][encrypted payload]
     pub async fn send_msg(&mut self, msg: &Msg) -> Result<()> {
+        // Mirror the relay transport's outgoing limit so we fail fast rather than
+        // sending a frame the peer's recv guard will reject.
+        const MAX_PLAINTEXT_BYTES: usize = 4 * 1024 * 1024 - 24;
         let json = rmp_serde::to_vec_named(msg)?;
+        if json.len() > MAX_PLAINTEXT_BYTES {
+            anyhow::bail!(
+                "quic: outgoing message too large ({} bytes > {} limit)",
+                json.len(),
+                MAX_PLAINTEXT_BYTES
+            );
+        }
         let ct = self.cipher.encrypt(&json)?;
         let len = ct.len() as u32;
         self.stream.write_all(&len.to_le_bytes()).await?;
@@ -154,6 +164,14 @@ impl QuicSendStream {
 
     /// Send raw encrypted bytes (for video/audio frames — pre-serialized).
     pub async fn send_raw(&mut self, data: &[u8]) -> Result<()> {
+        const MAX_PLAINTEXT_BYTES: usize = 4 * 1024 * 1024 - 24;
+        if data.len() > MAX_PLAINTEXT_BYTES {
+            anyhow::bail!(
+                "quic: raw payload too large ({} bytes > {} limit)",
+                data.len(),
+                MAX_PLAINTEXT_BYTES
+            );
+        }
         let ct = self.cipher.encrypt(data)?;
         let len = ct.len() as u32;
         self.stream.write_all(&len.to_le_bytes()).await?;
@@ -175,7 +193,7 @@ impl QuicRecvStream {
             return Ok(None);
         }
         let len = u32::from_le_bytes(len_buf) as usize;
-        if len == 0 || len > 64 * 1024 * 1024 {
+        if len == 0 || len > 4 * 1024 * 1024 {
             bail!("invalid frame length: {len}");
         }
         let mut buf = vec![0u8; len];
@@ -192,7 +210,7 @@ impl QuicRecvStream {
             return Ok(None);
         }
         let len = u32::from_le_bytes(len_buf) as usize;
-        if len == 0 || len > 64 * 1024 * 1024 {
+        if len == 0 || len > 4 * 1024 * 1024 {
             bail!("invalid frame length: {len}");
         }
         let mut buf = vec![0u8; len];
