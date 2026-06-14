@@ -68,7 +68,10 @@ impl AppState {
                 tracing::error!("Identity load failed: {}; using ephemeral identity", e);
                 DeviceIdentity::generate()
             });
-        let acl = AclStore::load(&config_dir.join("acl.json")).unwrap_or_default();
+        let acl = AclStore::load(&config_dir.join("acl.json")).unwrap_or_else(|e| {
+            tracing::warn!("ACL load failed: {}; starting with empty trusted-peer list", e);
+            AclStore::default()
+        });
 
         let fingerprint = identity.pubkey_fingerprint();
         info!("Viewer fingerprint: {}", fingerprint);
