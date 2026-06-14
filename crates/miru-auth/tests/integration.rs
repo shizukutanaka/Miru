@@ -75,22 +75,32 @@ fn pin_format_six_digits() {
 
 #[test]
 fn pin_to_key_is_deterministic() {
-    let k1 = pin_to_key("123456", "DEVICE-1");
-    let k2 = pin_to_key("123456", "DEVICE-1");
+    let nonce = [0u8; 16];
+    let k1 = pin_to_key("123456", "DEVICE-1", &nonce);
+    let k2 = pin_to_key("123456", "DEVICE-1", &nonce);
     assert_eq!(k1, k2);
 }
 
 #[test]
 fn pin_to_key_differs_on_pin_change() {
-    let k1 = pin_to_key("000000", "DEVICE-1");
-    let k2 = pin_to_key("000001", "DEVICE-1");
+    let nonce = [0u8; 16];
+    let k1 = pin_to_key("000000", "DEVICE-1", &nonce);
+    let k2 = pin_to_key("000001", "DEVICE-1", &nonce);
     assert_ne!(k1, k2);
 }
 
 #[test]
 fn pin_to_key_differs_on_device_change() {
-    let k1 = pin_to_key("123456", "DEVICE-A");
-    let k2 = pin_to_key("123456", "DEVICE-B");
+    let nonce = [0u8; 16];
+    let k1 = pin_to_key("123456", "DEVICE-A", &nonce);
+    let k2 = pin_to_key("123456", "DEVICE-B", &nonce);
+    assert_ne!(k1, k2);
+}
+
+#[test]
+fn pin_to_key_differs_on_nonce_change() {
+    let k1 = pin_to_key("123456", "DEVICE-1", &[0u8; 16]);
+    let k2 = pin_to_key("123456", "DEVICE-1", &[1u8; 16]);
     assert_ne!(k1, k2);
 }
 
