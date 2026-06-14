@@ -55,6 +55,10 @@ struct DeviceEntry {
     /// STUN-discovered public address of the host (filled in from Register.pub_addr).
     pub_addr: Option<String>,
     pub_port: Option<u16>,
+    /// Base64url Ed25519 pubkey from the original signed Register, if any.
+    /// Non-empty means this entry is "identity-locked": re-registrations must
+    /// present a valid signature for the same pubkey or be rejected.
+    locked_pubkey: Option<String>,
 }
 
 /// How long an issued relay token may sit completely unclaimed before the
@@ -302,6 +306,34 @@ async fn process_rdv_msg(
                     return;
                 }
             }
+            // If there's an existing identity-locked entry for this device_id,
+            // require a valid signature for the same pubkey before allowing
+            // overwrite. Without this, an unsigned client could hijack a
+            // signed device's entry and intercept subsequent connection offers.
+            if let Some(existing) = state.registry.get(&reg.device_id) {
+                if let Some(ref locked_pk) = existing.locked_pubkey {
+                    // Existing entry is identity-locked — new registration must
+                    // present a valid signature for the same pubkey.
+                    let valid_same_pk = reg.signature.is_some()
+                        && !reg.pubkey.is_empty()
+                        && reg.pubkey == *locked_pk;
+                    if !valid_same_pk {
+                        warn!(
+                            "Register rejected: {} is identity-locked but new registration lacks \
+                            matching signed pubkey",
+                            reg.device_id
+                        );
+                        let _ = tx
+                            .send(Msg::Error(miru_common::message::ErrorMsg {
+                                code: 403,
+                                message: "device_id is identity-locked; ownership proof required".to_string(),
+                            }))
+                            .await;
+                        return;
+                    }
+                }
+            }
+
             // Reject if we've hit the registry cap (DoS prevention).
             if state.registry.len() >= state.max_devices {
                 warn!(
@@ -324,12 +356,18 @@ async fn process_rdv_msg(
                 reg.pub_addr.as_deref().unwrap_or("none")
             );
             *my_id = Some(reg.device_id.clone());
+            let locked_pubkey = if reg.signature.is_some() && !reg.pubkey.is_empty() {
+                Some(reg.pubkey.clone())
+            } else {
+                None
+            };
             state.registry.insert(
                 reg.device_id.clone(),
                 DeviceEntry {
                     tx: tx.clone(),
                     pub_addr: reg.pub_addr,
                     pub_port: reg.pub_port,
+                    locked_pubkey,
                 },
             );
             let _ = tx
