@@ -347,8 +347,16 @@ pub async fn run(
                     }
                     Ok(Some(Msg::ClipboardSync(cs))) => {
                         if cs.format == miru_common::message::ClipboardFormat::Text {
-                            if let Ok(text) = String::from_utf8(cs.data) {
-                                let _ = app.emit("clipboard-sync", text);
+                            const MAX_CLIP_BYTES: usize = 1024 * 1024; // 1 MiB
+                            if cs.data.len() <= MAX_CLIP_BYTES {
+                                if let Ok(text) = String::from_utf8(cs.data) {
+                                    let _ = app.emit("clipboard-sync", text);
+                                }
+                            } else {
+                                tracing::warn!(
+                                    "clipboard-sync too large ({} bytes), ignored",
+                                    cs.data.len()
+                                );
                             }
                         }
                     }

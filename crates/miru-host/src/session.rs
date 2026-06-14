@@ -529,6 +529,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     Some(Msg::RequestClipboard) if clipboard_enabled => {
                         // Viewer explicitly requested clipboard content — push immediately.
                         if let Ok(text) = miru_input::get_clipboard() {
+                            let text = clip_truncate(text);
                             let _ = relay.send_msg(&Msg::ClipboardSync(ClipboardSync {
                                 format: miru_common::message::ClipboardFormat::Text,
                                 data: text.into_bytes(),
@@ -593,7 +594,8 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                 let _ = relay.send_msg(&Msg::Ping(miru_common::message::Ping { ts: now_ms() })).await;
             }
             _ = clip_ticker.tick(), if clipboard_enabled => {
-                if let Ok(text) = miru_input::get_clipboard() {
+                if let Ok(raw) = miru_input::get_clipboard() {
+                    let text = clip_truncate(raw);
                     if !text.is_empty() && text != last_clip {
                         last_clip = text.clone();
                         let _ = relay.send_msg(&Msg::ClipboardSync(ClipboardSync {
@@ -701,6 +703,25 @@ async fn check_or_pair(
             ))
         }
     }
+}
+
+/// Truncate clipboard text to 1 MB at a valid UTF-8 char boundary.
+///
+/// The system clipboard can hold arbitrarily large content (e.g. "Copy as
+/// text" on a large file). Forwarding it without a cap could OOM the viewer's
+/// JS frontend. We truncate before sending; the comparison in the poll loop
+/// uses the truncated form so we don't resend on every tick.
+fn clip_truncate(text: String) -> String {
+    const MAX_BYTES: usize = 1024 * 1024; // 1 MiB
+    if text.len() <= MAX_BYTES {
+        return text;
+    }
+    let mut end = MAX_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    tracing::warn!("clipboard content truncated to {} bytes (was {})", end, text.len());
+    text[..end].to_string()
 }
 
 fn now_ms() -> u64 {
