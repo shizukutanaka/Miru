@@ -32,6 +32,11 @@ pub struct SessionRecorder {
 
 impl SessionRecorder {
     pub fn create(dir: &Path, session_id: &str) -> Result<Self> {
+        // session_id goes directly into the filename — reject separators that
+        // could escape the recording directory or create hidden files.
+        if session_id.contains(['/', '\\', '\0', '.']) || session_id.is_empty() {
+            anyhow::bail!("invalid session_id for recording: {:?}", session_id);
+        }
         std::fs::create_dir_all(dir).context("create record dir")?;
         let timestamp = chrono_format_now();
         let filename = format!("miru-{session_id}-{timestamp}.mkv");

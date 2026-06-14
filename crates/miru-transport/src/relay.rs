@@ -27,7 +27,9 @@ impl RelayTransport {
     /// Connect to relay. Cipher is initially None; install it after handshake.
     pub async fn connect(relay_url: &str, token: &str, role: &str) -> Result<Self> {
         let url = format!("{relay_url}/relay?token={token}&role={role}");
-        info!("Relay connect: {}", url);
+        // Log the relay endpoint and role without the token to avoid exposing
+        // the session token (allows relay session hijacking if logs are leaked).
+        info!("Relay connect: {relay_url}/relay?role={role}");
 
         let (ws_stream, _) = connect_async(&url)
             .await
