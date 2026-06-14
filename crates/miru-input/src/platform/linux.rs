@@ -26,6 +26,8 @@ const SYN_REPORT: u16 = 0;
 const BTN_LEFT: u16 = 0x110;
 const BTN_RIGHT: u16 = 0x111;
 const BTN_MIDDLE: u16 = 0x112;
+const BTN_SIDE: u16 = 0x113; // X1 — browser back
+const BTN_EXTRA: u16 = 0x114; // X2 — browser forward
 const REL_X: u16 = 0x00;
 const REL_Y: u16 = 0x01;
 const REL_WHEEL: u16 = 0x08;
@@ -71,8 +73,8 @@ impl UinputDevice {
             libc::ioctl(fd, UI_SET_EVBIT as libc::c_ulong, EV_ABS as libc::c_int);
             libc::ioctl(fd, UI_SET_EVBIT as libc::c_ulong, EV_SYN as libc::c_int);
 
-            // Enable mouse buttons
-            for btn in [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE] {
+            // Enable mouse buttons (including X1/X2 side buttons)
+            for btn in [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE, BTN_SIDE, BTN_EXTRA] {
                 libc::ioctl(fd, UI_SET_KEYBIT as libc::c_ulong, btn as libc::c_int);
             }
 
@@ -259,7 +261,8 @@ fn btn_code(btn: &MouseButton) -> u16 {
         MouseButton::Left => BTN_LEFT,
         MouseButton::Right => BTN_RIGHT,
         MouseButton::Middle => BTN_MIDDLE,
-        MouseButton::X1 | MouseButton::X2 => BTN_MIDDLE,
+        MouseButton::X1 => BTN_SIDE,
+        MouseButton::X2 => BTN_EXTRA,
     }
 }
 

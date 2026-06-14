@@ -181,6 +181,7 @@ pub async fn run(
             None
         };
     let mut frame_count = 0u64;
+    let mut frames_since_update = 0u64;
     let mut last_stats_update = std::time::Instant::now();
     let mut bytes_since_update: u64 = 0;
     let mut last_seq: Option<u64> = None;
@@ -223,13 +224,14 @@ pub async fn run(
                         // original quality and avoids double-compression loss.
                         if vf.codec == VideoCodec::Jpeg {
                             frame_count += 1;
+                            frames_since_update += 1;
                             let elapsed = last_stats_update.elapsed();
                             if elapsed.as_secs() >= 1 {
                                 let elapsed_secs = elapsed.as_secs_f32();
                                 let mut s = stats.lock();
                                 s.frames_decoded = frame_count;
                                 s.bytes_recv += bytes_since_update;
-                                s.fps = frame_count as f32 / elapsed_secs;
+                                s.fps = frames_since_update as f32 / elapsed_secs;
                                 s.bitrate_kbps = ((bytes_since_update * 8) as f32
                                     / elapsed_secs / 1000.0) as u32;
                                 s.packet_loss_pct = if seq_total > 0 {
@@ -238,6 +240,7 @@ pub async fn run(
                                     0.0
                                 };
                                 bytes_since_update = 0;
+                                frames_since_update = 0;
                                 seq_gaps = 0;
                                 seq_total = 0;
                                 last_stats_update = std::time::Instant::now();
@@ -271,6 +274,7 @@ pub async fn run(
                         match dec.decode(&vf.data, vf.timestamp_ms) {
                             Ok(Some(frame)) => {
                                 frame_count += 1;
+                                frames_since_update += 1;
                                 // Update stats every second
                                 let elapsed = last_stats_update.elapsed();
                                 if elapsed.as_secs() >= 1 {
@@ -278,7 +282,7 @@ pub async fn run(
                                     let mut s = stats.lock();
                                     s.frames_decoded = frame_count;
                                     s.bytes_recv += bytes_since_update;
-                                    s.fps = frame_count as f32 / elapsed_secs;
+                                    s.fps = frames_since_update as f32 / elapsed_secs;
                                     s.bitrate_kbps = ((bytes_since_update * 8) as f32
                                         / elapsed_secs / 1000.0) as u32;
                                     s.packet_loss_pct = if seq_total > 0 {
@@ -287,6 +291,7 @@ pub async fn run(
                                         0.0
                                     };
                                     bytes_since_update = 0;
+                                    frames_since_update = 0;
                                     seq_gaps = 0;
                                     seq_total = 0;
                                     last_stats_update = std::time::Instant::now();
@@ -403,11 +408,10 @@ fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &
 
 /// Extract (width, height) from a JPEG SOF0/SOF2 marker without fully decoding.
 fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
-    let mut i = 0usize;
     if data.get(0..2)? != [0xFF, 0xD8] {
         return None;
     }
-    i = 2;
+    let mut i = 2usize;
     while i + 4 <= data.len() {
         if data[i] != 0xFF {
             break;

@@ -39,6 +39,8 @@ struct FileReceive {
     #[allow(dead_code)]
     expected_size: u64,
     expected_hash: String,
+    /// Sanitized filename from the Start message — used as the final save name.
+    name: String,
 }
 
 /// Resolve the directory where received files are saved.
@@ -81,7 +83,7 @@ fn handle_file_transfer(
             match std::fs::File::create(&temp_path) {
                 Ok(f) => {
                     info!("FileTransfer {id}: starting '{safe_name}' ({size} bytes)");
-                    transfers.insert(id, FileReceive { temp_path, file: f, expected_size: size, expected_hash: hash });
+                    transfers.insert(id, FileReceive { temp_path, file: f, expected_size: size, expected_hash: hash, name: safe_name });
                 }
                 Err(e) => warn!("FileTransfer {id}: cannot create temp file: {e}"),
             }
@@ -118,13 +120,9 @@ fn handle_file_transfer(
                         }
                         // Rename to final path in the same directory.
                         let dir = rx.temp_path.parent().unwrap_or(std::path::Path::new("."));
-                        // Find a non-conflicting name.
-                        let name = rx.temp_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("transfer")
-                            .trim_start_matches('.')
-                            .trim_end_matches(".tmp");
+                        // Use the sanitized name stored at Start time — deriving from
+                        // temp_path would yield the UUID, not the original filename.
+                        let name = &rx.name;
                         let mut dest = dir.join(name);
                         let mut counter = 1u32;
                         while dest.exists() {
