@@ -181,8 +181,10 @@ impl ScreenCapturer for WindowsCapturer {
                         .collect::<Vec<_>>(),
                 );
                 let r = desc.DesktopCoordinates;
-                let w = (r.right - r.left) as u32;
-                let h = (r.bottom - r.top) as u32;
+                // Guard against malformed RECTs where right < left or bottom < top
+                // (DXGI contract guarantees this never happens, but drivers can lie).
+                let w = (r.right - r.left).max(0) as u32;
+                let h = (r.bottom - r.top).max(0) as u32;
                 infos.push(DisplayInfo {
                     index: i as u8,
                     width: w,

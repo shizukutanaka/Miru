@@ -8,7 +8,7 @@
 
 #![cfg(target_os = "linux")]
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use bytes::Bytes;
 use miru_common::message::DisplayInfo;
 use tracing::{info, warn};
@@ -281,7 +281,10 @@ impl X11Capturer {
 
         // The SHM buffer was sized for the full root, so any monitor
         // sub-region (w*h <= root w*h) fits.
-        let size = (w as usize) * (h as usize) * 4;
+        let size = (w as usize)
+            .checked_mul(h as usize)
+            .and_then(|n| n.checked_mul(4))
+            .context("capture region dimensions overflow")?;
         let data = unsafe { std::slice::from_raw_parts(self.shm_ptr, size) };
         let bytes = Bytes::copy_from_slice(data);
 

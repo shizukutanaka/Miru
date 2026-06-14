@@ -89,7 +89,7 @@ impl EncoderBackend for VpxEncoder {
         keyframe: bool,
     ) -> Result<Option<EncodedPacket>> {
         unsafe {
-            let pts = (ts_ms * 1000) as i64; // ms → microseconds
+            let pts = ts_ms.saturating_mul(1000) as i64; // ms → microseconds
             let duration = (1_000_000 / self.fps_den.max(1)) as u64;
 
             let flags = if keyframe || self.keyframe_requested {
