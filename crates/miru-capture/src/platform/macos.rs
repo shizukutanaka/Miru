@@ -112,8 +112,16 @@ impl MacosCapturer {
             image::CGImage,
         };
 
-        let id = self.displays_cache[self.current_display as usize];
-        let dsp = CGDisplay::new(unsafe { CGMainDisplayID() });
+        // Re-query the active display list to obtain the real CGDirectDisplayID
+        // for the currently selected display index. Using CGMainDisplayID() would
+        // always capture display 0, ignoring select_display() calls.
+        let active = CGDisplay::active_displays()
+            .map_err(|e| anyhow::anyhow!("CGDisplay::active_displays: {:?}", e))?;
+        let display_id = active
+            .get(self.current_display as usize)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("display index {} out of range", self.current_display))?;
+        let dsp = CGDisplay::new(display_id);
         let img = dsp.image();
         let img = match img {
             Some(i) => i,
