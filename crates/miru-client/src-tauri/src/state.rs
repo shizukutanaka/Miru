@@ -492,8 +492,8 @@ impl AppState {
         idx_file.seek(SeekFrom::Start(frame_idx * 12))?;
         let mut entry = [0u8; 12];
         idx_file.read_exact(&mut entry)?;
-        let offset = u64::from_le_bytes(entry[..8].try_into().unwrap());
-        let size = u32::from_le_bytes(entry[8..12].try_into().unwrap()) as usize;
+        let offset = u64::from_le_bytes(entry[..8].try_into()?);
+        let size = u32::from_le_bytes(entry[8..12].try_into()?) as usize;
 
         // Guard against corrupted index entries that could trigger a multi-GB allocation.
         const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024; // 32 MiB per frame

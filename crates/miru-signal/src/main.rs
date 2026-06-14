@@ -45,6 +45,8 @@ struct AppState {
     max_relay_sessions: usize,
     /// Port the relay WebSocket server is listening on (for advertising to peers).
     relay_port: u16,
+    /// Public hostname/IP for advertising to peers — read once at startup.
+    public_host: String,
 }
 
 struct DeviceEntry {
@@ -89,6 +91,8 @@ impl AppState {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MAX_RELAY_SESSIONS);
+        let public_host = std::env::var("MIRU_PUBLIC_HOST")
+            .unwrap_or_else(|_| "localhost".to_string());
         Self {
             registry: Arc::new(DashMap::new()),
             relay_sessions: Arc::new(DashMap::new()),
@@ -96,6 +100,7 @@ impl AppState {
             max_devices,
             max_relay_sessions,
             relay_port,
+            public_host,
         }
     }
 
@@ -304,12 +309,7 @@ async fn process_rdv_msg(
             let _ = tx
                 .send(Msg::RegisterAck(RegisterAck {
                     device_id: reg.device_id,
-                    relay_addr: Some(format!(
-                        "{}:{}",
-                        std::env::var("MIRU_PUBLIC_HOST")
-                            .unwrap_or_else(|_| "localhost".to_string()),
-                        state.relay_port,
-                    )),
+                    relay_addr: Some(format!("{}:{}", state.public_host, state.relay_port)),
                 }))
                 .await;
         }
@@ -368,12 +368,10 @@ async fn process_rdv_msg(
                     }
 
                     // Notify host
-                    let public_host = std::env::var("MIRU_PUBLIC_HOST")
-                        .unwrap_or_else(|_| "localhost".to_string());
                     let _ = entry
                         .tx
                         .send(Msg::Relay(RelayOffer {
-                            relay_addr: public_host.clone(),
+                            relay_addr: state.public_host.clone(),
                             relay_port: state.relay_port,
                             token: token.clone(),
                         }))
@@ -404,7 +402,7 @@ async fn process_rdv_msg(
                     // Viewer also needs the relay token
                     let _ = tx
                         .send(Msg::Relay(RelayOffer {
-                            relay_addr: public_host,
+                            relay_addr: state.public_host.clone(),
                             relay_port: state.relay_port,
                             token,
                         }))
@@ -442,10 +440,10 @@ async fn relay_handler(
 }
 
 async fn relay_session(sock: WebSocket, token: String, role: Option<String>, state: AppState) {
-    // A valid token is a 32-char UUID hex. Reject oversized tokens immediately
-    // to avoid the O(token_len) hashing cost of two DashMap lookups on garbage input.
-    if token.len() > 64 {
-        warn!("Relay: rejecting oversized token ({} bytes)", token.len());
+    // A valid token is exactly a 32-char UUID simple hex string.
+    // Reject malformed tokens immediately to avoid unnecessary DashMap lookups.
+    if token.len() != 32 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
+        warn!("Relay: rejecting malformed token (len={}, valid_hex={})", token.len(), token.chars().all(|c| c.is_ascii_hexdigit()));
         return;
     }
 
@@ -497,29 +495,41 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
     let (mut ws_tx, mut ws_rx) = sock.split();
     use futures_util::{SinkExt, StreamExt};
 
-    // If peer not yet connected — wait up to 30s
+    // If peer not yet connected — wait up to 30s.
+    // Also watch ws_rx so we detect early disconnect of the waiting peer.
     let peer_tx = match peer_tx {
         Some(tx) => tx,
         None => {
-            // Poll until other side connects
-            let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+            let deadline = tokio::time::sleep(Duration::from_secs(30));
+            tokio::pin!(deadline);
             loop {
-                if tokio::time::Instant::now() >= deadline {
-                    warn!("Relay timeout waiting for peer");
-                    // Drop the slot so the abandoned token doesn't sit in the
-                    // map forever (the late peer re-creates and times out too).
-                    state.relay_sessions.remove(&token);
-                    return;
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                let slot = state.relay_sessions.get(&token);
-                let found = if is_host {
-                    slot.and_then(|s| s.viewer.clone())
-                } else {
-                    slot.and_then(|s| s.host.clone())
-                };
-                if let Some(tx) = found {
-                    break tx;
+                tokio::select! {
+                    // Deadline fired — give up and clean up the slot.
+                    _ = &mut deadline => {
+                        warn!("Relay timeout waiting for peer");
+                        state.relay_sessions.remove(&token);
+                        return;
+                    }
+                    // Waiting peer disconnected early — no point keeping the slot.
+                    msg = ws_rx.next() => {
+                        if msg.is_none() || matches!(msg, Some(Err(_))) {
+                            state.relay_sessions.remove(&token);
+                            return;
+                        }
+                        // Ignore any data frames during the wait phase
+                    }
+                    // Poll check every 100ms
+                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                        let slot = state.relay_sessions.get(&token);
+                        let found = if is_host {
+                            slot.and_then(|s| s.viewer.clone())
+                        } else {
+                            slot.and_then(|s| s.host.clone())
+                        };
+                        if let Some(tx) = found {
+                            break tx;
+                        }
+                    }
                 }
             }
         }
