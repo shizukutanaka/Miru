@@ -59,14 +59,23 @@ impl DeviceIdentity {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::write(path, id.signing_key.to_bytes())?;
+            // Write the private key with restricted permissions from the start.
+            // On Unix, std::fs::write would create the file 0o644 (world-readable),
+            // and a later set_permissions call has a TOCTOU window. Instead, open
+            // with O_CREAT|O_EXCL and mode 0o600 atomically via OpenOptionsExt.
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = std::fs::metadata(path)?.permissions();
-                perms.set_mode(0o600);
-                std::fs::set_permissions(path, perms)?;
+                use std::io::Write;
+                use std::os::unix::fs::OpenOptionsExt;
+                let mut f = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(path)?;
+                f.write_all(&id.signing_key.to_bytes())?;
             }
+            #[cfg(not(unix))]
+            std::fs::write(path, id.signing_key.to_bytes())?;
             info!("Generated new device identity");
             Ok(id)
         }
