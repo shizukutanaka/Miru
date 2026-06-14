@@ -62,7 +62,10 @@ async fn main() -> Result<()> {
 
     // ACL (TOFU peer database)
     let acl = Arc::new(Mutex::new(
-        AclStore::load(&config_dir.join("acl.json")).unwrap_or_default(),
+        AclStore::load(&config_dir.join("acl.json")).unwrap_or_else(|e| {
+            tracing::warn!("ACL load failed: {}; starting with empty trusted-peer list", e);
+            AclStore::default()
+        }),
     ));
 
     // Device ID
