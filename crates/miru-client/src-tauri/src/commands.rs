@@ -75,9 +75,15 @@ pub async fn send_input(args: SendInputArgs, state: State<'_, AppState>) -> Resu
             key: args.key.unwrap_or(0),
             modifiers: args.modifiers.unwrap_or(0),
         },
-        "text" => InputKind::Text {
-            text: args.text.unwrap_or_default(),
-        },
+        "text" => {
+            let text = args.text.unwrap_or_default();
+            // Cap text injection to prevent unbounded allocations.
+            const MAX_TEXT_BYTES: usize = 8192;
+            if text.len() > MAX_TEXT_BYTES {
+                return Err(format!("text input too long (max {MAX_TEXT_BYTES} bytes)"));
+            }
+            InputKind::Text { text }
+        }
         _ => return Err(format!("unknown input kind: {}", args.kind)),
     };
 
@@ -118,10 +124,17 @@ pub async fn send_file(
     if name.trim().is_empty() {
         return Err("filename required".into());
     }
+    // Pre-check base64 length to avoid allocating a large buffer before
+    // knowing the decoded size. Base64 overhead is ~4/3; add a small margin.
+    const MAX_DATA_BYTES: usize = 100 * 1024 * 1024;
+    const MAX_B64_BYTES: usize = MAX_DATA_BYTES * 4 / 3 + 1024;
+    if data_b64.len() > MAX_B64_BYTES {
+        return Err("file exceeds 100 MB limit".into());
+    }
     let data = base64::engine::general_purpose::STANDARD
         .decode(&data_b64)
         .map_err(|e| format!("base64 decode: {e}"))?;
-    if data.len() > 100 * 1024 * 1024 {
+    if data.len() > MAX_DATA_BYTES {
         return Err("file exceeds 100 MB limit".into());
     }
     // Sanitize filename: keep printable ASCII excluding path separators.

@@ -90,7 +90,22 @@ fn handle_file_transfer(
                     return;
                 }
             };
-            match std::fs::File::create(&temp_path) {
+            let temp_file_result = {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&temp_path)
+                }
+                #[cfg(not(unix))]
+                {
+                    std::fs::File::create(&temp_path)
+                }
+            };
+            match temp_file_result {
                 Ok(f) => {
                     info!("FileTransfer {id}: starting '{safe_name}' ({size} bytes)");
                     transfers.insert(id, FileReceive { temp_path, file: f, expected_size: size, expected_hash: hash, name: safe_name });
@@ -141,7 +156,8 @@ fn handle_file_transfer(
                         let name = &rx.name;
                         let mut dest = dir.join(name);
                         let mut counter = 1u32;
-                        while dest.exists() {
+                        const MAX_DEDUP: u32 = 9_999;
+                        while dest.exists() && counter <= MAX_DEDUP {
                             let stem = std::path::Path::new(name)
                                 .file_stem()
                                 .and_then(|s| s.to_str())
@@ -154,9 +170,17 @@ fn handle_file_transfer(
                             dest = dir.join(format!("{stem} ({counter}){ext}"));
                             counter += 1;
                         }
+                        if counter > MAX_DEDUP {
+                            warn!("FileTransfer {id}: too many files with same name — aborting");
+                            let _ = std::fs::remove_file(&rx.temp_path);
+                            return;
+                        }
                         match std::fs::rename(&rx.temp_path, &dest) {
                             Ok(_) => info!("FileTransfer {id}: saved to {}", dest.display()),
-                            Err(e) => warn!("FileTransfer {id}: rename failed: {e}"),
+                            Err(e) => {
+                                warn!("FileTransfer {id}: rename failed: {e}");
+                                let _ = std::fs::remove_file(&rx.temp_path);
+                            }
                         }
                     }
                     Err(e) => {
