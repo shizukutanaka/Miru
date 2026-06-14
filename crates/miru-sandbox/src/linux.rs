@@ -213,14 +213,19 @@ fn apply_seccomp(policy: &Policy, outcome: &mut Outcome) {
         rules.insert(nr, Vec::new());
     }
 
-    // Block exec / clone unless allowed.
+    // Block exec / fork unless allowed.
+    // NOTE: clone/clone3 are intentionally NOT blocked here because both
+    // glibc's pthread_create and the Tokio runtime use them for thread
+    // creation. Blocking them with KillProcess would kill the daemon the
+    // first time the runtime grows its thread pool after the sandbox
+    // engages. Blocking execve + execveat is sufficient to prevent any
+    // child process from running a new program; fork + vfork are also
+    // blocked as defence-in-depth (useless without exec, but belt+braces).
     if !policy.allow_exec {
         const EXEC_FAMILY: &[(i64, i64)] = &[
             // (x86_64, aarch64)
             (59, 221),  // execve
             (322, 281), // execveat
-            (435, 435), // clone3
-            (56, 220),  // clone (still allowed on its own — only block if no_new_privs not viable)
             (57, -1),   // fork (x86_64 only)
             (58, -1),   // vfork (x86_64 only)
         ];

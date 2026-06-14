@@ -133,10 +133,13 @@ impl RevocationList {
 
     /// Check whether a JTI is revoked.
     pub fn is_revoked(&self, jti: &Uuid) -> bool {
+        // Fail closed: if the lock is poisoned (panic in a write guard),
+        // we cannot reliably determine revocation status. Returning true
+        // blocks the action rather than silently allowing a revoked token.
         self.revoked
             .read()
             .map(|s| s.contains(jti))
-            .unwrap_or(false)
+            .unwrap_or(true)
     }
 
     pub fn len(&self) -> usize {

@@ -151,7 +151,11 @@ impl AuditLog {
         let mut f = self.file.lock().unwrap_or_else(|p| p.into_inner());
         f.write_all(line.as_bytes())?;
         f.write_all(b"\n")?;
-        f.flush()?; // durability — every entry is fsync'd
+        // flush() pushes BufWriter's internal buffer to the kernel; sync_data()
+        // then tells the OS to commit to storage so a power failure cannot lose
+        // the entry. Both are required for durable audit logging.
+        f.flush()?;
+        f.get_ref().sync_data()?;
 
         *last_hash = entry_hash;
         let seq = *next_seq;
