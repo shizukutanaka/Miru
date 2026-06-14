@@ -53,10 +53,11 @@ pub async fn run(
 
     // 1. Connect to signal server with our viewer device ID
     let viewer_did = DeviceId::new();
-    let mut signal = SignalClient::connect(
+    let mut signal = SignalClient::connect_signed(
         &args.signal_url,
         &viewer_did,
         Some(identity.verifying_key.as_bytes()),
+        Some(&identity.signing_key),
     )
     .await?;
 

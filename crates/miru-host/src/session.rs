@@ -212,10 +212,11 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
     let mut backoff_secs = 5u64;
 
     loop {
-        let mut signal = match SignalClient::connect_with_pub_addr(
+        let mut signal = match SignalClient::connect_with_pub_addr_signed(
             &signal_url,
             &device_id,
             Some(config.identity.verifying_key.as_bytes()),
+            Some(&config.identity.signing_key),
             pub_addr.clone(),
         )
         .await

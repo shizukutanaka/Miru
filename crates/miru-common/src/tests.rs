@@ -133,6 +133,8 @@ mod tests {
                 pubkey: "".into(),
                 pub_addr: None,
                 pub_port: None,
+                signature: None,
+                signed_at_sec: None,
             }),
             Msg::Close(CloseReason {
                 code: 0,

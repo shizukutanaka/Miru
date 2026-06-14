@@ -3295,6 +3295,7 @@ dependencies = [
  "serde_bytes",
  "serde_json",
  "thiserror 1.0.69",
+ "tracing",
  "uuid",
  "x25519-dalek",
 ]
@@ -3439,6 +3440,7 @@ dependencies = [
  "dashmap",
  "futures-util",
  "miru-common",
+ "miru-transport",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

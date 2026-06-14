@@ -276,6 +276,31 @@ async fn process_rdv_msg(
                     .await;
                 return;
             }
+            // Verify Ed25519 ownership proof when signature is present.
+            // This prevents an attacker from squatting another device's ID on
+            // the signal server. Absent signatures are accepted with a warning
+            // for backward compatibility; a future version will require them.
+            match miru_transport::signaling::verify_register_signature(&reg) {
+                Ok(true) => {} // verified — device owns the claimed pubkey
+                Ok(false) => {
+                    // Legacy client with no signature. Accept but log so operators
+                    // can track rollout progress.
+                    warn!(
+                        "Register: {} has no ownership proof (upgrade miru-host/miru-client)",
+                        reg.device_id
+                    );
+                }
+                Err(e) => {
+                    warn!("Register rejected: invalid ownership proof for {}: {}", reg.device_id, e);
+                    let _ = tx
+                        .send(Msg::Error(miru_common::message::ErrorMsg {
+                            code: 403,
+                            message: "invalid registration signature".to_string(),
+                        }))
+                        .await;
+                    return;
+                }
+            }
             // Reject if we've hit the registry cap (DoS prevention).
             if state.registry.len() >= state.max_devices {
                 warn!(

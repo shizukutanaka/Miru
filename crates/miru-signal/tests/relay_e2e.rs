@@ -76,6 +76,8 @@ async fn relay_forwards_bytes_between_peers() {
         pubkey: String::new(),
         pub_addr: None,
         pub_port: None,
+        signature: None,
+        signed_at_sec: None,
     })).await;
     // Consume RegisterAck
     recv_msg(&mut host_rdv).await;
@@ -206,6 +208,8 @@ async fn oversized_relay_message_drops_connection() {
         pubkey: String::new(),
         pub_addr: None,
         pub_port: None,
+        signature: None,
+        signed_at_sec: None,
     })).await;
     recv_msg(&mut host_rdv).await; // RegisterAck
 

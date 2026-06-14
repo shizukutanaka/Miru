@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 miru-common = { workspace = true }
+miru-transport = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }

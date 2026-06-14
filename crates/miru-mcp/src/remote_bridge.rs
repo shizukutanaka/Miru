@@ -40,10 +40,11 @@ impl RemoteBridge {
         let identity = DeviceIdentity::generate();
         let viewer_did = DeviceId::new();
 
-        let mut signal = SignalClient::connect(
+        let mut signal = SignalClient::connect_signed(
             signal_url,
             &viewer_did,
             Some(identity.verifying_key.as_bytes()),
+            Some(&identity.signing_key),
         )
         .await
         .context("signal connect failed")?;

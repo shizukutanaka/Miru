@@ -138,6 +138,15 @@ pub struct Register {
     /// None when behind symmetric NAT or when STUN failed.
     pub pub_addr: Option<String>,
     pub pub_port: Option<u16>,
+    /// Ed25519 signature over SHA-256(device_id || pubkey_bytes || signed_at_sec LE u64).
+    /// Present when the client has an identity key. Signal server MUST reject
+    /// registrations where this field is present but the signature is invalid.
+    /// Omitted by legacy clients (signal server logs a warning and accepts for now).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<String>,
+    /// Unix seconds at the time of signing. Replays older than ±5 min are rejected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_at_sec: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
