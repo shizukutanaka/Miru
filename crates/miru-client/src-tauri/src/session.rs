@@ -330,7 +330,18 @@ pub async fn run(
                             let _ = tx.try_send(af);
                         }
                     }
-                    Ok(Some(Msg::DisplayList(dl))) => {
+                    Ok(Some(Msg::DisplayList(mut dl))) => {
+                        const MAX_DISPLAYS: usize = 16;
+                        if dl.displays.len() > MAX_DISPLAYS {
+                            warn!("DisplayList: {} displays from host, capping at {MAX_DISPLAYS}", dl.displays.len());
+                            dl.displays.truncate(MAX_DISPLAYS);
+                        }
+                        for d in &mut dl.displays {
+                            // Limit display name to 64 Unicode chars to bound Tauri event payload.
+                            if d.name.chars().count() > 64 {
+                                d.name = d.name.chars().take(64).collect();
+                            }
+                        }
                         let _ = app.emit("display-list", &dl);
                     }
                     Ok(Some(Msg::QosUpdate(u))) => {

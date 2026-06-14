@@ -119,6 +119,16 @@ impl RelayTransport {
                 if frame.len() < 4 {
                     return Ok(None);
                 }
+                // Reject oversized frames before any decrypt/deserialize allocation.
+                // Mirrors the relay server's MAX_RELAY_MSG_BYTES cap; also guards the
+                // future direct P2P path where no relay intermediary exists.
+                const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024 + 4; // 4 MiB payload + 4-byte header
+                if frame.len() > MAX_FRAME_BYTES {
+                    return Err(anyhow::anyhow!(
+                        "relay: received oversized frame ({} bytes > {} limit)",
+                        frame.len(), MAX_FRAME_BYTES
+                    ));
+                }
                 let payload = &frame[4..];
                 let plain = match self.rx_cipher.lock().await.as_ref() {
                     Some(c) => c.decrypt(payload)?,

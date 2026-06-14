@@ -228,6 +228,12 @@ pub async fn host_handshake<C: MsgChannel>(
 /// ignore anything past the third colon-delimited segment; callers that need
 /// the agent token use `extract_agent_token` separately.
 fn parse_pubkey_field(s: &str) -> Result<([u8; 32], [u8; 32], Signature)> {
+    // Reject oversized strings before any base64 allocation.
+    // Legitimate format: b64(32B):b64(32B):b64(64B)[:agent_token≤512B]
+    // Exact max for 3-segment form: 44+1+44+1+88 = 178 chars. 1024 is generous headroom.
+    if s.len() > 1024 {
+        bail!("pubkey field too long ({} bytes)", s.len());
+    }
     // splitn(4, ':') captures any 4th-and-beyond content as a single remainder
     // slice, preventing it from being mistaken for extra fields.
     let parts: Vec<&str> = s.splitn(4, ':').collect();
