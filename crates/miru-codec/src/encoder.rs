@@ -145,7 +145,9 @@ impl EncoderBackend for JpegEncoder {
 
     fn update_bitrate(&mut self, kbps: u32) {
         // Approximate quality from target bitrate — very rough heuristic.
-        // At 1080p30, 4 Mbps ≈ quality 85; 1 Mbps ≈ 50.
+        // At 1080p30, ~9 Mbps corresponds to quality 30 (minimum); quality
+        // increases above that. For AI-agent screenshot use cases (lower
+        // resolution, infrequent frames) this is sufficient.
         let pixels = (self.width * self.height) as f64;
         let bits_per_pixel = (kbps as f64 * 1000.0) / (pixels * 30.0);
         self.quality = (bits_per_pixel * 200.0).clamp(30.0, 95.0) as u8;

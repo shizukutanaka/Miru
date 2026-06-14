@@ -601,6 +601,12 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
 
     info!("Session {} ended", result.session_id);
 
+    // Clean up any file transfers that never completed (peer disconnected mid-transfer).
+    for (id, rx) in file_transfers.drain() {
+        warn!("FileTransfer {}: session ended without completion — removing temp file", id);
+        let _ = std::fs::remove_file(&rx.temp_path);
+    }
+
     // Finalize recording (flush + log summary).
     if let Some(rec) = recorder.take() {
         match rec.finalize() {
