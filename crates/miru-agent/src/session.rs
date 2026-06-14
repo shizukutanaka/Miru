@@ -9,7 +9,7 @@
 
 use anyhow::{bail, Result};
 use parking_lot::Mutex;
-use std::{sync::Arc, time::Instant};
+use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::Instant};
 use tracing::{info, warn};
 
 use crate::{
@@ -37,6 +37,10 @@ pub struct AgentSession {
     revocation: Option<Arc<crate::revocation::RevocationList>>,
     /// Auto-approve cache: (capability, scope_key) → expiry instant.
     auto_approve: Mutex<Vec<AutoApprove>>,
+    /// Set by revoke() to block all subsequent authorize() calls.
+    /// Guards against callers that hold the session reference beyond
+    /// a panel-close event (e.g. Arc<AgentSession> shared across tasks).
+    locally_revoked: AtomicBool,
 }
 
 struct AutoApprove {
@@ -73,6 +77,7 @@ impl AgentSession {
             confirm,
             revocation,
             auto_approve: Mutex::new(Vec::new()),
+            locally_revoked: AtomicBool::new(false),
         }
     }
 
@@ -84,7 +89,19 @@ impl AgentSession {
         action: serde_json::Value,
         scope_key: &str,
     ) -> Result<()> {
-        // 0. Token must not be revoked (panic rotation check — always first)
+        // 0a. Session must not have been locally revoked (panel-close path).
+        if self.locally_revoked.load(Ordering::Acquire) {
+            self.audit.append(
+                &self.token.payload.jti.to_string(),
+                cap,
+                action,
+                None,
+                AuditOutcome::Denied,
+            )?;
+            bail!("agent session has been revoked");
+        }
+
+        // 0b. Token must not be on the persistent revocation list (panic rotation).
         if let Some(rev) = &self.revocation {
             if rev.is_revoked(&self.token.payload.jti) {
                 self.audit.append(
@@ -192,7 +209,11 @@ impl AgentSession {
     }
 
     /// Revoke the session (e.g., user closed the AI panel).
+    /// All subsequent authorize() calls will be denied regardless of the token's
+    /// remaining TTL. This complements the persistent RevocationList for the
+    /// in-process, single-session case.
     pub fn revoke(&self) {
+        self.locally_revoked.store(true, Ordering::Release);
         warn!("Agent session revoked: {}", self.token.payload.sub);
     }
 
@@ -414,6 +435,35 @@ mod tests {
         assert!(
             err.to_string().contains("revoked"),
             "expected revoked error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn local_revoke_blocks_subsequent_authorize() {
+        let key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let token = AgentToken::issue(
+            &key,
+            "test",
+            Capability::assistant_default(),
+            std::time::Duration::from_secs(60),
+            None,
+        );
+        let session = AgentSession::open(token, temp_audit(), always_yes());
+
+        // Before revocation — allowed.
+        assert!(session
+            .authorize(Capability::ScreenRead, json!({}), "s")
+            .is_ok());
+
+        session.revoke();
+
+        // After revoke() — must be denied even though the token is still valid.
+        let err = session
+            .authorize(Capability::ScreenRead, json!({}), "s")
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("revoked"),
+            "expected revoked error after session.revoke(), got: {err}"
         );
     }
 
