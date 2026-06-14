@@ -498,7 +498,15 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         }
                     }
                     Some(Msg::ClipboardSync(s)) if matches!(permission, Permission::Full) => {
-                        let _ = input_handler.handle_clipboard(&s);
+                        // Cap inbound clipboard to prevent the host from allocating an
+                        // arbitrarily large OS clipboard buffer. WebSocket frames can be up
+                        // to 64 MiB; a cap here is the last defence before the OS API.
+                        const MAX_VIEWER_CLIP_BYTES: usize = 16 * 1024 * 1024; // 16 MiB
+                        if s.data.len() <= MAX_VIEWER_CLIP_BYTES {
+                            let _ = input_handler.handle_clipboard(&s);
+                        } else {
+                            warn!("ClipboardSync from viewer too large ({} bytes) — dropped", s.data.len());
+                        }
                     }
                     Some(Msg::SelectDisplay(sel)) => {
                         if sel.index != current_display_idx {
