@@ -1,41 +1,28 @@
 # Unwrap / expect Triage
 
-Status: **21 production unwrap/expect calls** — all verified Category A or B.
-Category C (genuine runtime failures) has been eliminated.
+Status: **2 production unwrap/expect calls** — both verified Category A.
+Category B (mutex poison) and Category C (genuine runtime failures) eliminated.
 
 ## Category definitions
 
-- **A** — Provably-safe at compile time (const values, post-guard, fixed-size types).
-- **B** — Mutex poison (cooperative; data is append-only or atomic; recovery = same as panic).
-- **C** — Genuine failure path. ZERO remaining.
+- **A** — Provably-safe at compile time (const values, post-guard, fixed-size types, unrecoverable startup).
+- **B** — Mutex poison (cooperative; data is append-only or atomic; recovery = same as panic). — **0 remaining**.
+- **C** — Genuine failure path. — **0 remaining**.
 
 ## Inventory
 
-### A: Provably safe (18 sites)
+### A: Provably safe (2 sites)
 
 | File | Line | Reason |
 |------|------|--------|
-| `miru-auth/src/lib.rs:109` | `NonZeroU32::new(100_000)` | const 100_000 ≠ 0 |
-| `miru-auth/src/argon.rs:31` | `Argon2::new(params)` | hardcoded valid params |
-| `miru-transparency/src/lib.rs:54` | `to_vec(Serialize)` | derived Serialize, no map keys |
-| `miru-transparency/src/lib.rs:88` | `getrandom` | OsRng — OS failure = system dead |
-| `miru-transport/src/handshake.rs:229,231` | HKDF 32-byte expand | max 8160B; 32B trivially fits |
-| `miru-transport/src/quic.rs:208` | `Duration::from_secs(60).try_into()` | 60s fits VarInt |
-| `miru-transport/src/quic.rs:210` | `QuicClientConfig::try_from(rustls)` | config we just built |
-| `miru-mcp/src/lib.rs:70,79,94` | `to_value(struct)` | internal types, derived Serialize |
-| `miru-mcp/src/server.rs:316` | `.first.unwrap()` | guarded by `.is_none()` above |
-| `miru-agent/src/audit.rs:56` | `to_vec(AuditEntry)` | internal struct |
-| `miru-agent/src/token.rs:230` | `to_vec(AgentTokenPayload)` | internal struct |
-| `miru-common/src/crypto.rs:86,88,119` | HKDF fill, slice try_into | size-checked by type |
-| `miru-host/src/qos_bbr.rs:152,154,166` | `.back()/.nth(2)` | `len()>=3` guard above |
-| `miru-host/src/capture_loop.rs:86` | `.as_mut().expect("just inserted above")` | `if encoder.is_none()` guard |
-| `miru-client/src-tauri/src/session.rs:143` | `.as_mut().expect("just inserted above")` | same pattern |
+| `miru-client/src-tauri/src/main.rs:47` | `.expect("Tauri app failed")` | Tauri app startup failure is unrecoverable; no meaningful error to propagate |
+| `miru-codec/src/ffmpeg_enc.rs:86` | commented-out `unwrap()` in dead code | Inside a `//` comment — counted by the awk budget check but unreachable |
 
-### B: Mutex poison — cooperative (3 sites)
+### B: Mutex poison — none remaining ✅
 
-| File | Rationale |
-|------|-----------|
-| `miru-agent/src/audit.rs:125,126,142` | Append-only log; poison = panic elsewhere; `unwrap_or_else(into_inner)` |
+All former Category B sites were converted:
+- `miru-agent/src/audit.rs` → `unwrap_or_else(p.into_inner())` + warn! log
+- `miru-input/src/platform/linux.rs` → match with warn! log
 
 ### C: Genuine — none remaining ✅
 
@@ -44,6 +31,7 @@ All former Category C sites were converted:
 - `capture_loop.rs` encoder init → `if encoder.is_none() { match … { Err => continue } }`
 - `state.rs` identity load → `unwrap_or_else(|_| DeviceIdentity::generate())`
 - `client/session.rs` decoder → `if decoder.is_none() { match … { Err => continue } }`
+- `miru-transparency/src/lib.rs:55` → `commitment()` now returns `Result<[u8; 32]>`, uses `?`
 
 ## Rule
 
@@ -54,7 +42,7 @@ cannot fail at that point. Category C is permanently banned.
 ## CI enforcement
 
 `.github/workflows/ci.yml` `crypto-gate` job checks:
-- Budget ≤ 21 unwrap/expect in production (excludes tests)
+- Budget ≤ 5 unwrap/expect in production (excludes tests, benches, fuzz)
 - No non-strict `.verify()` in production
 - No `danger_accept_invalid_*` APIs
 - `SessionCipher` must not derive `Clone`
