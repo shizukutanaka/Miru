@@ -77,7 +77,7 @@ pub async fn run(
             Some(SignalEvent::ConnectAck { host_addr, host_port, relay, .. }) => {
                 // Compose addr:port for a directly usable socket address string.
                 host_pub_addr = match (host_addr, host_port) {
-                    (Some(a), Some(p)) => Some(format!("{}:{}", a, p)),
+                    (Some(a), Some(p)) => Some(format!("{a}:{p}")),
                     (Some(a), None) => Some(a),
                     _ => None,
                 };
@@ -123,7 +123,6 @@ pub async fn run(
         file_transfer: true,
         audio: true,
         multi_monitor: true,
-        ..Default::default()
     };
 
     let result = time::timeout(
@@ -447,7 +446,7 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
             break;
         }
         // SOF0 (0xC0), SOF1 (0xC1), SOF2 (0xC2) contain image dimensions
-        if matches!(marker, 0xC0 | 0xC1 | 0xC2) && i + 9 <= data.len() {
+        if matches!(marker, 0xC0..=0xC2) && i + 9 <= data.len() {
             let h = u16::from_be_bytes([data[i + 5], data[i + 6]]) as u32;
             let w = u16::from_be_bytes([data[i + 7], data[i + 8]]) as u32;
             return Some((w, h));

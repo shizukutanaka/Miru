@@ -498,7 +498,7 @@ impl AppState {
         // Guard against corrupted index entries that could trigger a multi-GB allocation.
         const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024; // 32 MiB per frame
         if size > MAX_FRAME_BYTES {
-            anyhow::bail!("frame index entry has implausible size ({} bytes)", size);
+            anyhow::bail!("frame index entry has implausible size ({size} bytes)");
         }
 
         // Seek to the frame in frames.bin and read exactly `size` bytes.
@@ -560,7 +560,7 @@ fn start_discovery(fingerprint: &str) -> Option<miru_discovery::Discovery> {
     let advert = LocalAdvertisement {
         device_id: fingerprint.to_string(),
         constellation_pubkey: String::new(),
-        friendly_name: format!("Miru Viewer ({})", fingerprint),
+        friendly_name: format!("Miru Viewer ({fingerprint})"),
         form_factor: FormFactor::Desktop,
         port: 0, // viewer doesn't serve inbound connections
         capabilities: DeviceCapabilities {

@@ -545,7 +545,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                             warn!("ClipboardSync from viewer too large ({} bytes) — dropped", s.data.len());
                         }
                     }
-                    Some(Msg::SelectDisplay(sel)) => {
+                    Some(Msg::SelectDisplay(sel)) if matches!(permission, Permission::Control | Permission::Full) => {
                         if sel.index != current_display_idx {
                             info!("Display switch: {} → {}", current_display_idx, sel.index);
                             match create_capturer() {
@@ -603,7 +603,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                             warn!("OpenUrl rejected non-http URL: {url}");
                         }
                     }
-                    Some(Msg::QosHint(hint)) => {
+                    Some(Msg::QosHint(hint)) if matches!(permission, Permission::Control | Permission::Full) => {
                         // Apply viewer quality preference to QoS floor/ceiling.
                         let mut q = qos.lock();
                         q.apply_hint(&hint);
