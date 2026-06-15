@@ -113,6 +113,14 @@ impl RelayTransport {
     }
 
     pub async fn send_raw(&self, data: &[u8]) -> Result<()> {
+        const MAX_PLAINTEXT_BYTES: usize = 4 * 1024 * 1024 - 24; // match recv cap minus AEAD tag
+        if data.len() > MAX_PLAINTEXT_BYTES {
+            anyhow::bail!(
+                "relay: raw payload too large ({} bytes > {} limit)",
+                data.len(),
+                MAX_PLAINTEXT_BYTES
+            );
+        }
         let payload = match self.tx_cipher.lock().await.as_ref() {
             Some(c) => c.encrypt(data)?,
             None => data.to_vec(),

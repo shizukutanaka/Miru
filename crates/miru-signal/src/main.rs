@@ -123,10 +123,10 @@ impl AppState {
             window_start: now,
         });
         if now.duration_since(entry.window_start) >= CONNECT_RATE_WINDOW {
-            entry.count = 1;
+            entry.count = 0;
             entry.window_start = now;
-            true
-        } else if entry.count < CONNECT_RATE_LIMIT {
+        }
+        if entry.count < CONNECT_RATE_LIMIT {
             entry.count += 1;
             true
         } else {
@@ -452,11 +452,11 @@ async fn process_rdv_msg(
                         let token = token.clone();
                         tokio::spawn(async move {
                             tokio::time::sleep(UNCLAIMED_SLOT_TTL).await;
-                            let unclaimed = sessions
-                                .get(&token)
-                                .is_some_and(|s| s.host.is_none() && s.viewer.is_none());
-                            if unclaimed {
-                                sessions.remove(&token);
+                            // remove_if is atomic: no TOCTOU between the guard check and removal.
+                            if sessions
+                                .remove_if(&token, |_, s| s.host.is_none() && s.viewer.is_none())
+                                .is_some()
+                            {
                                 warn!("Relay slot {} expired unclaimed", &token[..8]);
                             }
                         });
