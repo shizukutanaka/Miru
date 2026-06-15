@@ -42,6 +42,8 @@ pub struct DiscoveredPeer {
     pub addresses: Vec<IpAddr>,
     pub port: u16,
     pub last_seen: std::time::Instant,
+    /// mDNS fully-qualified service name — used to match ServiceRemoved events.
+    pub(crate) full_name: String,
 }
 
 pub struct Discovery {
@@ -128,9 +130,12 @@ impl Discovery {
                             }
                         }
                     }
-                    ServiceEvent::ServiceRemoved(_, name) => {
-                        debug!("Discovery: removed {}", name);
-                        // Entries age out via prune_stale().
+                    ServiceEvent::ServiceRemoved(_, full_name) => {
+                        // Graceful departure: remove immediately so the UI reflects
+                        // the change at once rather than waiting for prune_stale().
+                        let mut map = peers_clone.write();
+                        map.retain(|_, p| p.full_name != full_name);
+                        debug!("Discovery: removed {}", full_name);
                     }
                     _ => {}
                 }
@@ -219,5 +224,6 @@ fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
         addresses,
         port: info.get_port(),
         last_seen: std::time::Instant::now(),
+        full_name: info.get_fullname().to_string(),
     })
 }
