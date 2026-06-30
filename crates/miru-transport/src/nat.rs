@@ -19,7 +19,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::net::UdpSocket as TokioUdpSocket;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Public STUN servers used to discover external address.
 /// Multiple servers in rotation — if one is slow, fall through.
@@ -145,7 +145,9 @@ pub async fn punch_to_peer(
         }
 
         // Send punch
-        let _ = socket.send_to(punch_packet, peer).await;
+        if let Err(e) = socket.send_to(punch_packet, peer).await {
+            warn!("hole punch send failed to {}: {} (check local firewall/UDP outbound)", peer, e);
+        }
 
         // Receive (short timeout — keep punching)
         match tokio::time::timeout(Duration::from_millis(50), socket.recv_from(&mut buf)).await {
@@ -159,7 +161,9 @@ pub async fn punch_to_peer(
                         // return success ourselves. Do NOT keep looping — peer will stop
                         // sending once it receives the ack, so we'd time out waiting for
                         // an ack that will never arrive.
-                        let _ = socket.send_to(ack_packet, peer).await;
+                        if let Err(e) = socket.send_to(ack_packet, peer).await {
+                            warn!("hole punch ack send failed to {}: {}", peer, e);
+                        }
                         info!("Hole punch successful with {} (received punch)", peer);
                         return Ok(());
                     } else if payload == ack_packet {
