@@ -109,6 +109,10 @@ fn parse_button(s: &Option<String>) -> MouseButton {
 
 #[tauri::command]
 pub async fn send_clipboard(text: String, state: State<'_, AppState>) -> Result<(), String> {
+    const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        return Err(format!("clipboard content too large (max 10 MiB)"));
+    }
     state.send_clipboard(text).await.map_err(|e| e.to_string())
 }
 

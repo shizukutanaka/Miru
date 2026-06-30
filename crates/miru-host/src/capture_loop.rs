@@ -124,17 +124,20 @@ pub fn start(
                     continue; // unreachable: init branch either set Some or continued
                 };
 
-                // Convert to I420 if needed
-                let i420 = match frame.format {
-                    PixelFormat::I420 => frame.data.to_vec(),
-                    PixelFormat::Bgra32 => bgra_to_i420(&frame),
-                    PixelFormat::Nv12 => nv12_to_i420(&frame),
-                    PixelFormat::Rgba32 => rgba_to_i420(&frame),
+                // Convert to I420 if needed.
+                // I420 frames are already in the right format — borrow the
+                // Bytes slice directly rather than copying into a new Vec.
+                let i420_owned: Vec<u8>;
+                let i420: &[u8] = match frame.format {
+                    PixelFormat::I420 => &frame.data,
+                    PixelFormat::Bgra32 => { i420_owned = bgra_to_i420(&frame); &i420_owned }
+                    PixelFormat::Nv12 => { i420_owned = nv12_to_i420(&frame); &i420_owned }
+                    PixelFormat::Rgba32 => { i420_owned = rgba_to_i420(&frame); &i420_owned }
                 };
 
                 // Encode
                 match enc.encode(
-                    &i420,
+                    i420,
                     frame.width,
                     frame.height,
                     frame.timestamp_ms,
@@ -270,23 +273,57 @@ fn nv12_to_i420(frame: &RawFrame) -> Vec<u8> {
     out
 }
 
+/// RGBA32 → I420 (YUV 4:2:0 planar).
+/// Direct conversion without intermediate clone+swap — BT.601 fixed-point.
 fn rgba_to_i420(frame: &RawFrame) -> Vec<u8> {
-    // Same as BGRA but swap R and B channels
-    let mut swapped = frame.data.to_vec();
-    for i in (0..swapped.len()).step_by(4) {
-        swapped.swap(i, i + 2); // R ↔ B
+    let w = frame.width as usize;
+    let h = frame.height as usize;
+    let src = &frame.data;
+    let stride = frame.stride as usize;
+
+    let y_size = w * h;
+    let uv_size = (w / 2) * (h / 2);
+    let mut out = vec![0u8; y_size + uv_size * 2];
+    let (y_plane, uv_plane) = out.split_at_mut(y_size);
+    let (u_plane, v_plane) = uv_plane.split_at_mut(uv_size);
+
+    // Pass 1: Y — RGBA layout: [R, G, B, A]
+    for row in 0..h {
+        for col in 0..w {
+            let i = row * stride + col * 4;
+            let r = src[i] as i32;
+            let g = src[i + 1] as i32;
+            let b = src[i + 2] as i32;
+            let y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
+            y_plane[row * w + col] = y.clamp(16, 235) as u8;
+        }
     }
-    let frame2 = RawFrame {
-        format: PixelFormat::Bgra32,
-        data: bytes::Bytes::from(swapped),
-        display_idx: frame.display_idx,
-        width: frame.width,
-        height: frame.height,
-        stride: frame.stride,
-        timestamp_ms: frame.timestamp_ms,
-        dirty_rects: frame.dirty_rects.clone(),
-    };
-    bgra_to_i420(&frame2)
+
+    // Pass 2: UV — 2×2 block averaging
+    for row in (0..h).step_by(2) {
+        let r0 = row;
+        let r1 = (row + 1).min(h - 1);
+        for col in (0..w).step_by(2) {
+            let c0 = col;
+            let c1 = (col + 1).min(w - 1);
+            let avg = |ch: usize| {
+                (src[r0 * stride + c0 * 4 + ch] as i32
+                    + src[r0 * stride + c1 * 4 + ch] as i32
+                    + src[r1 * stride + c0 * 4 + ch] as i32
+                    + src[r1 * stride + c1 * 4 + ch] as i32)
+                    / 4
+            };
+            let r = avg(0);
+            let g = avg(1);
+            let b = avg(2);
+            let uv_i = (row / 2) * (w / 2) + col / 2;
+            let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+            let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+            u_plane[uv_i] = u.clamp(16, 240) as u8;
+            v_plane[uv_i] = v.clamp(16, 240) as u8;
+        }
+    }
+    out
 }
 
 #[cfg(test)]
