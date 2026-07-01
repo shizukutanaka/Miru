@@ -130,7 +130,11 @@ impl McpServer {
     // ─── Tool implementations ────────────────────────────────────────────────
 
     async fn tool_screen_capture(&self, args: &Value) -> Result<Vec<Content>> {
-        let display = args.get("display").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+        let display_raw = args.get("display").and_then(|v| v.as_u64()).unwrap_or(0);
+        if display_raw > u8::MAX as u64 {
+            bail!("display index {display_raw} out of range (max {})", u8::MAX);
+        }
+        let display = display_raw as u8;
         self.gate(
             Capability::ScreenRead,
             json!({"display": display}),
