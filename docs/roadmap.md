@@ -3,6 +3,35 @@
 ## 目的
 プロダクトを30%向上、10年間動かせる基盤を確立。
 
+## 0. 優先順位の見直し (2026-06、ソクラテス式問答による分析)
+
+CLAUDE.md の WHY は「TeamViewer/AnyDesk代替」であり、評価基準は
+「今日配って、音声付き60fps HWエンコード映像が初回接続で見えるか」の一点に
+尽きる。この基準で現状を棚卸しした結果:
+
+**決定的に不足 (v0.1優先で着手)**:
+- ホスト側システム音声キャプチャ — `miru-audio` の Opus encode/decode/playback
+  は完成しているが、`miru-host` がどこからも呼んでおらず AudioFrame が
+  一度も送信されない (Features.audio は誤って true を広告していたため
+  false に修正済み)
+- HW エンコード (AV1/H264/H265) — `ffmpeg_enc.rs` は全メソッドが `bail!`
+- WebGL2 YUV→RGB 描画パス — JPEG プレビューのみが本番導線
+- Wayland/PipeWire キャプチャ — スタブ
+- CI/CD — `.github/workflows/` ではなく `workflows-proposed/` に隔離されたまま
+  実行されていない (GitHub App の `workflows` 権限不足、要手動対応)
+
+**質は高いが時期尚早 (中核完成までは追加投資を凍結)**:
+- NAT越え高度化(STUN/ホールパンチ/NATタイプ判定) — 実装済みで十分。
+  これ以上の最適化より上記の「不足」に資源を回す
+- セッション録画(`miru-host/src/recording.rs`) — ライブ接続の基本体験が
+  未完成な段階での拡張は優先度を下げる
+- `miru-agent`/`miru-mcp`/`miru-sandbox`/`miru-constellation`/
+  `miru-discovery`/`miru-transparency` (AIエージェント統治基盤) — 暗号設計・
+  capability トークン設計は業界水準以上に高品質だが、これは「人間向け
+  リモートデスクトップ」という一次ゴールの外側にある別プロダクトの種。
+  実利用データが無いまま capability 粒度を増やすより、実際に使われてから
+  拡張すべき
+
 ---
 
 ## 1. 信頼性 (10年運用前提)
