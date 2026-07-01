@@ -318,7 +318,12 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         hw_decode: false,
         clipboard: true,
         file_transfer: true,
-        audio: true,
+        // No system-audio capture backend is wired into miru-host yet (no
+        // module here ever constructs an AudioEncoder or sends AudioFrame).
+        // Advertising `true` would tell viewers to expect audio that never
+        // arrives. Flip to true once a capture backend (e.g. WASAPI loopback
+        // / PulseAudio monitor / CoreAudio tap) lands.
+        audio: false,
         multi_monitor: true,
     };
 

@@ -103,6 +103,15 @@
    (`#[allow(dead_code)]`)。配線して E2E で検証する
 6. **Merkle tree の RFC 6962 非準拠**(odd leaf を self-hash)— 内部一貫性は
    あるが他実装と相互運用不可。参照実装との比較テストを足すか準拠に戻す
-7. **音声コーデックのネゴシエーション**(host が Opus を hard-code)
+7. **ホスト側の音声キャプチャが完全に未実装**(想定より大きなギャップ):
+   `miru-audio`(Opus encode/decode + playback)と `negotiate_audio`
+   (Opus/PCM 優先度ネゴシエーション)は完成しているが、`miru-host` の
+   どこにも `AudioEncoder` を呼ぶコードが無く、`AudioFrame` が一度も
+   送信されない。にもかかわらず `Features.audio = true` を広告しており
+   viewer に「音声あり」と誤って伝えていた点は本セッションで
+   `audio: false` に修正済み。本実装には WASAPI ループバック
+   (Windows)/ PulseAudio monitor(Linux)/ CoreAudio tap(macOS)による
+   システム音声キャプチャの新規実装が必要(規模: 中、`cpal` 等の新規
+   依存の検討を含む)
 8. **CHANGELOG の整理** — 現在は開発セッションログ(Sprint 22-26 形式)。
    公開リリースノート形式(Keep a Changelog)への移行を推奨
