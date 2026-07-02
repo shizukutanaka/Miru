@@ -455,7 +455,8 @@ impl AppState {
             "duration_ms": duration_ms,
             "frame_count": frame_count,
         });
-        std::fs::write(rec.dir.join("meta.json"), meta.to_string()).ok();
+        std::fs::write(rec.dir.join("meta.json"), meta.to_string())
+            .map_err(|e| anyhow::anyhow!("failed to write recording metadata: {e}"))?;
         info!("Recording stopped: {} ({} frames)", rec.session_id, frame_count);
 
         Ok(crate::commands::RecordingSummary {
@@ -489,7 +490,10 @@ impl AppState {
 
         // Read (offset, size) from offsets.bin — 12 bytes per frame.
         let mut idx_file = std::fs::File::open(base.join("offsets.bin"))?;
-        idx_file.seek(SeekFrom::Start(frame_idx * 12))?;
+        let seek_off = frame_idx
+            .checked_mul(12)
+            .ok_or_else(|| anyhow::anyhow!("frame_idx overflow"))?;
+        idx_file.seek(SeekFrom::Start(seek_off))?;
         let mut entry = [0u8; 12];
         idx_file.read_exact(&mut entry)?;
         let offset = u64::from_le_bytes(entry[..8].try_into()?);

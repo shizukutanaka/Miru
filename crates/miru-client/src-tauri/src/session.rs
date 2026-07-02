@@ -414,14 +414,16 @@ fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &
     // partial write so the index stays consistent (the frame is simply absent).
     // Writing the index first would leave a dangling entry pointing to data
     // that may never be fully written, corrupting the index on crash.
-    if rec.frames_file.write_all(jpeg).is_err() {
+    if let Err(e) = rec.frames_file.write_all(jpeg) {
+        tracing::warn!("recording: frames_file write failed, dropping frame: {e}");
         return;
     }
 
     let mut entry = [0u8; 12];
     entry[..8].copy_from_slice(&offset.to_le_bytes());
     entry[8..12].copy_from_slice(&size.to_le_bytes());
-    if rec.offsets_file.write_all(&entry).is_err() {
+    if let Err(e) = rec.offsets_file.write_all(&entry) {
+        tracing::warn!("recording: offsets_file write failed, dropping frame: {e}");
         return;
     }
 
