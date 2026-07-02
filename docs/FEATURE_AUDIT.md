@@ -33,7 +33,7 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 | 4 | Wayland / PipeWire キャプチャ | `crates/miru-capture/src/platform/pipewire.rs` がスタブ。Ubuntu 22.04+ / Fedora の標準セッション(Wayland)で動かない | xdg-desktop-portal (zbus) + pipewire-rs。規模: 中 (2-3週) |
 | 5 | macOS 60fps キャプチャ | `crates/miru-capture/src/platform/macos.rs` — deprecated な CGDisplayCreateImage で ~20fps | ScreenCaptureKit (SCStream) へ移行。規模: 中 (1-2週) |
 | 6 | CI/CD が稼働していない | ワークフローが `.github/workflows/` ではなく `.github/workflows-proposed/` に隔離されたまま。push する GitHub App に `workflows` 権限が無く自動化エージェントでは移動できない(実際に push が拒否されることを確認済み) | **リポジトリ管理者の手作業が必要**: `git mv .github/workflows-proposed/*.yml .github/workflows/`。規模: 極小 |
-| 7 | PIN ペアリング UI と Rust 側の統合 | UI (`crates/miru-client/ui/src/components/PairingDialog.tsx`) と Rust 側 (`crates/miru-auth/`) は双方存在するが未接続。CLAUDE.md 残作業リストに記載 | Tauri command で接続。規模: 小 |
+| 7 | クライアント側 TOFU 確認ダイアログが完全に未接続(想定より詳細判明) | `crates/miru-client/ui/src/components/PairingDialog.tsx` は指紋確認 UI として完成しているが `App.tsx` のどこからも import/render されていない(確認済み: `grep -n "PairingDialog" App.tsx` は 0 件)。`crates/miru-client/src-tauri/src/session.rs` はハンドシェイク直後に `host_fpr` を計算し `session-event` で emit するが、それを検証・保存する処理が無いまま接続が自動的に進む。`SessionScreen.tsx` は指紋を接続後の統計行に**受動的に表示するだけ**(367行目、ツールチップ「帯域外で確認してください」)で、ユーザーが承認/拒否するゲートは存在しない。TOFU を謳う設計(`docs/PRODUCT_REVIEW.md`)の実装が視聴者(viewer)側では機能していない | 初回接続時に `PairingDialog` を表示して指紋を能動的に確認させ、承認後にのみ `TrustedPeer` として保存するフローの実装が必要。Rust側(`session.rs`)とTS側(`ConnectScreen.tsx`/`App.tsx`)の両方に変更が要るため、Rust ビルド検証が可能な環境で着手すること。規模: 小〜中 |
 
 ## 🟡 過剰 — 品質は高いがコア未完成の段階では時期尚早(追加投資を凍結)
 
