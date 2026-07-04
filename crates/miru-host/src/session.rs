@@ -741,18 +741,36 @@ async fn check_or_pair(
             Ok(p)
         }
         TrustDecision::Unknown => {
-            // v0.1 behavior: auto-accept on first connection (TOFU — Trust On First Use).
+            // v0.1 default: auto-accept on first connection (TOFU — Trust On First Use).
             // The fingerprint is printed prominently so the user can verify out-of-band.
             // v0.3 will add a native UI confirmation dialog via Tauri IPC.
             //
             // Security note: TOFU is standard practice for SSH, WireGuard, and Signal.
             // The TOFU fingerprint log (miru-auth::fingerprint_log) records this pin
             // with a hash-chain so any subsequent change is detectable.
+            //
+            // Operators who want a hard stop instead of auto-accept (e.g. a host
+            // exposed to an untrusted network, or one where every legitimate
+            // device should be pre-approved out of band) can opt into strict mode
+            // with MIRU_REQUIRE_PAIRING_CONFIRM=1. This does not change the
+            // default — existing deployments relying on the current
+            // first-connection-just-works behavior are unaffected.
             let fp = pubkey_fingerprint(pubkey);
+            if std::env::var("MIRU_REQUIRE_PAIRING_CONFIRM").is_ok() {
+                error!("┌─ FIRST CONNECTION from new device REJECTED ─────────────────────────┐");
+                error!("│  Fingerprint: {}                      │", fp);
+                error!("│  MIRU_REQUIRE_PAIRING_CONFIRM is set — refusing unapproved devices. │");
+                error!("│  Pre-approve this device in acl.json, or unset the env var to       │");
+                error!("│  restore auto-accept (TOFU) for first connections.                  │");
+                error!("└─────────────────────────────────────────────────────────────────────┘");
+                return Err(anyhow::anyhow!(
+                    "unknown device {device_str} rejected: MIRU_REQUIRE_PAIRING_CONFIRM is set"
+                ));
+            }
             warn!("┌─ FIRST CONNECTION from new device ─────────────────────────────────┐");
             warn!("│  Fingerprint: {}                      │", fp);
             warn!("│  Auto-accepting (TOFU). Verify this fingerprint out-of-band.        │");
-            warn!("│  v0.3 will add a confirmation dialog. See SECURITY.md.              │");
+            warn!("│  Set MIRU_REQUIRE_PAIRING_CONFIRM=1 to require pre-approval instead. │");
             warn!("└─────────────────────────────────────────────────────────────────────┘");
             acl.trust(TrustedPeer {
                 device_id: device_str.to_string(),
