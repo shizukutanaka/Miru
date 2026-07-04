@@ -40,6 +40,26 @@ pub struct SessionEvent {
     pub host_pub_addr: Option<String>,
 }
 
+/// Marker error for failures the auto-reconnect loop (state.rs) must NOT
+/// retry: a security-policy refusal (pubkey mismatch) or an explicit user
+/// rejection of a pairing prompt. Retrying either automatically would be
+/// wrong — a changed host key isn't a transient network blip, and retrying
+/// after the user said "no" would just re-show the same prompt.
+///
+/// Constructed via `anyhow::Error::new(NoAutoRetry(..))` — NOT wrapped with
+/// `.context()`, which would make `downcast_ref` in state.rs miss it (context
+/// wrapping replaces the top-level concrete type anyhow's downcast checks).
+#[derive(Debug)]
+pub struct NoAutoRetry(pub String);
+
+impl std::fmt::Display for NoAutoRetry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for NoAutoRetry {}
+
 pub async fn run(
     args: crate::commands::ConnectArgs,
     identity: Arc<DeviceIdentity>,
@@ -167,10 +187,10 @@ pub async fn run(
                 )),
                 Some(host_fpr),
             );
-            anyhow::bail!(
+            return Err(anyhow::Error::new(NoAutoRetry(format!(
                 "pubkey mismatch for {} — refusing to connect (possible MITM)",
                 args.device_id
-            );
+            ))));
         }
         TrustDecision::Unknown => {
             let (tx, rx) = oneshot::channel::<bool>();
@@ -192,7 +212,9 @@ pub async fn run(
                     Some("ペアリングが拒否またはタイムアウトしました".to_string()),
                     None,
                 );
-                anyhow::bail!("pairing not confirmed by user (rejected or timed out)");
+                return Err(anyhow::Error::new(NoAutoRetry(
+                    "pairing not confirmed by user (rejected or timed out)".to_string(),
+                )));
             }
 
             let now = now_ms();

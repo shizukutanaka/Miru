@@ -139,6 +139,12 @@ impl AppState {
 
                 match result {
                     Ok(()) => break, // clean exit (user disconnect or host close)
+                    Err(e) if e.downcast_ref::<crate::session::NoAutoRetry>().is_some() => {
+                        // Security-policy refusal (pubkey mismatch) or explicit
+                        // user pairing rejection — never auto-retry these.
+                        tracing::warn!("Session ended without auto-retry: {}", e);
+                        break;
+                    }
                     Err(e) => {
                         attempt += 1;
                         if attempt > MAX_RECONNECT_ATTEMPTS {
