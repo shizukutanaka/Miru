@@ -1,7 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-export type SessionStatus = "idle" | "connecting" | "connected" | "disconnected" | "error" | "reconnecting";
+export type SessionStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "error"
+  | "reconnecting"
+  | "pairing_required";
 
 export interface SessionStats {
   fps: number;
@@ -45,6 +52,10 @@ export const api = {
     }),
 
   disconnect: () => invoke<void>("disconnect"),
+
+  /** Resolve a pending first-connection TOFU fingerprint confirmation. */
+  confirmPairing: (accept: boolean) =>
+    invoke<void>("confirm_pairing", { accept }),
 
   sendInput: (input: {
     kind: string;

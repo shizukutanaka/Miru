@@ -30,6 +30,15 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve a pending first-connection TOFU pairing prompt (see the
+/// "pairing_required" session-event). Called from the fingerprint
+/// confirmation dialog once the user has compared it out-of-band.
+#[tauri::command]
+pub fn confirm_pairing(accept: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.confirm_pairing(accept);
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SendInputArgs {
     pub kind: String, // "mouse_move", "mouse_down", etc.

@@ -23,6 +23,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::disconnect,
+            commands::confirm_pairing,
             commands::send_input,
             commands::send_clipboard,
             commands::request_clipboard,

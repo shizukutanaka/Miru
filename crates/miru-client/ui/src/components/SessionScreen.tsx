@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, SessionStats, DisplayInfo } from "../lib/tauri";
 import { DisplayTabs } from "./DisplayTabs";
+import { PairingDialog } from "./PairingDialog";
 
 interface Props {
   onDisconnect: () => void;
@@ -15,7 +16,9 @@ export function SessionScreen({ onDisconnect }: Props) {
     bytes_recv: 0, frames_decoded: 0, packet_loss_pct: 0,
   });
   const [resolution, setResolution] = useState({ w: 0, h: 0 });
-  const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "reconnecting">("connecting");
+  const [status, setStatus] = useState<
+    "connecting" | "connected" | "disconnected" | "reconnecting" | "pairing_required"
+  >("connecting");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [hostQos, setHostQos] = useState<{ fps: number; bitrate_kbps: number; quality: number } | null>(null);
@@ -96,6 +99,11 @@ export function SessionScreen({ onDisconnect }: Props) {
       } else if (e.kind === "reconnecting") {
         setStatus("reconnecting");
         setStatusMessage(e.message ?? null);
+      } else if (e.kind === "pairing_required") {
+        // First-time connection to this device_id — hold here until the
+        // user compares the fingerprint out-of-band and confirms/cancels.
+        setStatus("pairing_required");
+        setStatusMessage(null);
       } else if (e.kind === "disconnected" || e.kind === "error") {
         setStatus("disconnected");
         setStatusMessage(e.message ?? null);
@@ -341,6 +349,20 @@ export function SessionScreen({ onDisconnect }: Props) {
 
   return (
     <div className="session">
+      {status === "pairing_required" && (
+        <PairingDialog
+          fingerprint={fingerprint ?? ""}
+          requirePin={false}
+          onConfirm={() => {
+            void api.confirmPairing(true);
+          }}
+          onCancel={() => {
+            void api.confirmPairing(false);
+            onDisconnect();
+          }}
+        />
+      )}
+
       <div className="video-stage" ref={stageRef}>
         <canvas ref={canvasRef} tabIndex={0} />
 
@@ -403,11 +425,12 @@ export function SessionScreen({ onDisconnect }: Props) {
         <span className="status-pill">
           <span className={`status-dot ${
             status === "connected" ? "ok"
-            : status === "reconnecting" ? "warn"
+            : status === "reconnecting" || status === "pairing_required" ? "warn"
             : status === "connecting" ? "info"
             : "error"
           }`} />
           {status === "connected" ? "接続中"
+            : status === "pairing_required" ? "指紋の確認待ち"
             : status === "reconnecting" ? (statusMessage ?? "再接続中...")
             : status === "connecting" ? "接続しています"
             : "切断"}

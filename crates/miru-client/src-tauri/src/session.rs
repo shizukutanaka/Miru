@@ -3,7 +3,7 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use miru_audio::{playback::AudioPlayer, AudioDecoder, Layout};
-use miru_auth::DeviceIdentity;
+use miru_auth::{AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer};
 use miru_codec::{i420_to_jpeg, Decoder};
 use miru_common::{
     message::{AudioCodec, Features, Msg, VideoCodec},
@@ -48,6 +48,9 @@ pub async fn run(
     app: AppHandle,
     stats: Arc<Mutex<SessionStats>>,
     recording: Arc<Mutex<Option<RecordingState>>>,
+    acl: Arc<Mutex<AclStore>>,
+    acl_path: std::path::PathBuf,
+    pending_pairing: Arc<Mutex<Option<oneshot::Sender<bool>>>>,
 ) -> Result<()> {
     emit_status(&app, "connecting", None, None);
 
@@ -136,6 +139,76 @@ pub async fn run(
         "Handshake complete: codec={:?} host_fpr={}",
         result.selected_video_codec, host_fpr
     );
+
+    // TOFU gate: verify or record trust in this host's identity key BEFORE
+    // installing ciphers / accepting any video or input. Three outcomes:
+    //   - Trusted: pubkey matches what we saved on a prior connection — proceed.
+    //   - PubkeyMismatch: the host's key changed since we last connected — this
+    //     is exactly what TOFU exists to catch (possible MITM); refuse outright,
+    //     do not offer a click-through override.
+    //   - Unknown: first time seeing this device_id — pause and ask the UI to
+    //     show the fingerprint for out-of-band verification before proceeding.
+    let pubkey_b64 = B64.encode(result.peer_identity_pubkey);
+    let decision = acl.lock().check(&args.device_id, &pubkey_b64);
+    match decision {
+        TrustDecision::Trusted(_) => {
+            let now = now_ms();
+            let mut guard = acl.lock();
+            guard.touch(&args.device_id, now);
+            let _ = guard.save(&acl_path);
+        }
+        TrustDecision::PubkeyMismatch => {
+            emit_status(
+                &app,
+                "error",
+                Some(format!(
+                    "セキュリティ警告: {} の鍵が以前の接続時と異なります。中間者攻撃の可能性があるため接続を中止しました。",
+                    args.device_id
+                )),
+                Some(host_fpr),
+            );
+            anyhow::bail!(
+                "pubkey mismatch for {} — refusing to connect (possible MITM)",
+                args.device_id
+            );
+        }
+        TrustDecision::Unknown => {
+            let (tx, rx) = oneshot::channel::<bool>();
+            *pending_pairing.lock() = Some(tx);
+            emit_status_full(&app, "pairing_required", None, Some(host_fpr.clone()), host_pub_addr.clone());
+
+            // 120s to give the user time to compare fingerprints out-of-band.
+            let accepted = time::timeout(std::time::Duration::from_secs(120), rx)
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(false);
+            *pending_pairing.lock() = None;
+
+            if !accepted {
+                emit_status(
+                    &app,
+                    "disconnected",
+                    Some("ペアリングが拒否またはタイムアウトしました".to_string()),
+                    None,
+                );
+                anyhow::bail!("pairing not confirmed by user (rejected or timed out)");
+            }
+
+            let now = now_ms();
+            let mut guard = acl.lock();
+            guard.trust(TrustedPeer {
+                device_id: args.device_id.clone(),
+                pubkey_b64,
+                fingerprint: host_fpr.clone(),
+                permission: Permission::Control,
+                first_seen: now,
+                last_seen: now,
+                friendly_name: None,
+            });
+            let _ = guard.save(&acl_path);
+        }
+    }
 
     // Install ciphers (separate keys per direction, no nonce-reuse risk)
     relay.install_ciphers(result.tx, result.rx).await;
@@ -456,6 +529,13 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
         i += 2 + len;
     }
     None
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {

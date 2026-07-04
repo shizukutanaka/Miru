@@ -44,6 +44,9 @@ pub struct AppState {
     stats: Arc<Mutex<SessionStats>>,
     pub recording: Arc<Mutex<Option<RecordingState>>>,
     discovery: Arc<Mutex<Option<miru_discovery::Discovery>>>,
+    /// Holds the oneshot sender for a pairing confirmation currently awaiting
+    /// a UI response. `None` when no pairing prompt is pending.
+    pending_pairing: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
 struct ActiveSession {
@@ -86,6 +89,7 @@ impl AppState {
             stats: Arc::new(Mutex::new(SessionStats::default())),
             recording: Arc::new(Mutex::new(None)),
             discovery: Arc::new(Mutex::new(discovery)),
+            pending_pairing: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -107,6 +111,9 @@ impl AppState {
         let identity = Arc::clone(&self.identity);
         let stats = Arc::clone(&self.stats);
         let recording = Arc::clone(&self.recording);
+        let acl = Arc::clone(&self.acl);
+        let acl_path = self.config_dir.join("acl.json");
+        let pending_pairing = Arc::clone(&self.pending_pairing);
         let app_clone = app.clone();
         let session_slot = Arc::clone(&self.session);
 
@@ -121,6 +128,9 @@ impl AppState {
                     app_clone.clone(),
                     Arc::clone(&stats),
                     Arc::clone(&recording),
+                    Arc::clone(&acl),
+                    acl_path.clone(),
+                    Arc::clone(&pending_pairing),
                 )
                 .await;
 
@@ -255,6 +265,17 @@ impl AppState {
             .map_err(|_| anyhow::anyhow!("session closed"))?;
 
         Ok(())
+    }
+
+    /// Resolve a pending first-connection pairing prompt (see session.rs's
+    /// TOFU gate). `accept = false` also covers "no prompt pending" — the
+    /// caller sees the send simply have no effect via `send().is_err()`
+    /// being ignored, which is fine: if the session already timed out the
+    /// gate has moved on regardless.
+    pub fn confirm_pairing(&self, accept: bool) {
+        if let Some(tx) = self.pending_pairing.lock().take() {
+            let _ = tx.send(accept);
+        }
     }
 
     pub fn list_peers(&self) -> Vec<TrustedPeer> {
