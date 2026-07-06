@@ -76,5 +76,7 @@ Status: Accepted
 
 ## セキュリティ報告
 
-GitHub Issue ではなく `security@miru.app` (将来) に報告してください。
-90日の responsible disclosure ポリシー。
+公開 GitHub Issue ではなく、詳細は [SECURITY.md](./SECURITY.md) を参照してください。
+現時点で機能している唯一の窓口は GitHub Private Vulnerability Reporting です
+(`security@miru.app` によるメール受付はまだ稼働していません — 監視されていない
+宛先に送らないでください)。90日の responsible disclosure ポリシー。

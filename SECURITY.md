@@ -8,15 +8,13 @@
 This gives us a private workspace to triage, draft a fix, and assign a
 CVE through GitHub's Numbering Authority — all coordinated with you.
 
-**Email backup** — `security@miru.app` (PGP-encrypted preferred).
-
-PGP fingerprint:
-
-```
-TODO  TODO  TODO  TODO  TODO  TODO  TODO  TODO  TODO  TODO  TODO
-```
-
-Public key: [keys.openpgp.org](https://keys.openpgp.org/) (search by fingerprint).
+**Email backup** — not yet available. A PGP-encrypted email channel
+(`security@miru.app`) is planned but not yet set up: there is no
+monitored inbox and no PGP key published. Until this is stood up,
+**use the GitHub Private Vulnerability Reporting channel above as the
+only channel** — do not send reports to `security@miru.app` expecting
+a timely (or any) response yet. This section will be updated with a
+real fingerprint once the key exists and the inbox is monitored.
 
 ### What we commit to
 
