@@ -36,6 +36,8 @@ CLAUDE.md の WHY は「TeamViewer/AnyDesk代替」であり、評価基準は
 
 「市販レベル」は機能完成度(セクション0)に加えて、一般消費者/企業に事故なく
 配布・運用できる状態を要求する。コード実査で確認したハードブロッカー順に記載。
+各フェーズをどのモデル(Haiku/Sonnet/Opus/Fable5)で実装すべきかは
+`docs/MODEL_GUIDE.md` を参照。
 
 **フェーズ0(即着手・低リスク)**: ✅ 完了 — `SECURITY.md`/`CONTRIBUTING.md` の
 PGP鍵プレースホルダ・機能していない連絡先メールの虚偽表示を是正し、GitHub Private
