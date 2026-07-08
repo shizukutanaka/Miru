@@ -187,9 +187,13 @@ pub fn start(
 
 // ─── Color conversion ─────────────────────────────────────────────────────────
 
-/// BGRA32 → I420 (YUV 4:2:0 planar).
-/// Two-pass: Y in one linear scan, UV with 2×2 block averaging (BT.601).
-fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
+/// Generic packed 32-bit-per-pixel → I420 conversion, parameterized by the
+/// byte offset of R/G/B within each pixel (alpha is always ignored). Shared
+/// by BGRA32 (r_off=2,g_off=1,b_off=0) and RGBA32 (r_off=0,g_off=1,b_off=2) —
+/// the two formats differ only in channel order, so the BT.601 fixed-point
+/// math and 2×2 chroma averaging were previously duplicated line-for-line.
+/// Two-pass: Y in one linear scan, UV with 2×2 block averaging.
+fn packed32_to_i420(frame: &RawFrame, r_off: usize, g_off: usize, b_off: usize) -> Vec<u8> {
     let w = frame.width as usize;
     let h = frame.height as usize;
     let src = &frame.data;
@@ -205,9 +209,9 @@ fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
     for row in 0..h {
         for col in 0..w {
             let i = row * stride + col * 4;
-            let b = src[i] as i32;
-            let g = src[i + 1] as i32;
-            let r = src[i + 2] as i32;
+            let r = src[i + r_off] as i32;
+            let g = src[i + g_off] as i32;
+            let b = src[i + b_off] as i32;
             let y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
             y_plane[row * w + col] = y.clamp(16, 235) as u8;
         }
@@ -221,16 +225,16 @@ fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
         for col in (0..w).step_by(2) {
             let c0 = col;
             let c1 = (col + 1).min(w - 1);
-            let avg = |ch: usize| {
-                (src[r0 * stride + c0 * 4 + ch] as i32
-                    + src[r0 * stride + c1 * 4 + ch] as i32
-                    + src[r1 * stride + c0 * 4 + ch] as i32
-                    + src[r1 * stride + c1 * 4 + ch] as i32)
+            let avg = |off: usize| {
+                (src[r0 * stride + c0 * 4 + off] as i32
+                    + src[r0 * stride + c1 * 4 + off] as i32
+                    + src[r1 * stride + c0 * 4 + off] as i32
+                    + src[r1 * stride + c1 * 4 + off] as i32)
                     / 4
             };
-            let b = avg(0);
-            let g = avg(1);
-            let r = avg(2);
+            let r = avg(r_off);
+            let g = avg(g_off);
+            let b = avg(b_off);
             let uv_i = (row / 2) * (w / 2) + col / 2;
             let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
             let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
@@ -273,57 +277,14 @@ fn nv12_to_i420(frame: &RawFrame) -> Vec<u8> {
     out
 }
 
-/// RGBA32 → I420 (YUV 4:2:0 planar).
-/// Direct conversion without intermediate clone+swap — BT.601 fixed-point.
+/// BGRA32 → I420 (YUV 4:2:0 planar). See [`packed32_to_i420`].
+fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
+    packed32_to_i420(frame, 2, 1, 0)
+}
+
+/// RGBA32 → I420 (YUV 4:2:0 planar). See [`packed32_to_i420`].
 fn rgba_to_i420(frame: &RawFrame) -> Vec<u8> {
-    let w = frame.width as usize;
-    let h = frame.height as usize;
-    let src = &frame.data;
-    let stride = frame.stride as usize;
-
-    let y_size = w * h;
-    let uv_size = (w / 2) * (h / 2);
-    let mut out = vec![0u8; y_size + uv_size * 2];
-    let (y_plane, uv_plane) = out.split_at_mut(y_size);
-    let (u_plane, v_plane) = uv_plane.split_at_mut(uv_size);
-
-    // Pass 1: Y — RGBA layout: [R, G, B, A]
-    for row in 0..h {
-        for col in 0..w {
-            let i = row * stride + col * 4;
-            let r = src[i] as i32;
-            let g = src[i + 1] as i32;
-            let b = src[i + 2] as i32;
-            let y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-            y_plane[row * w + col] = y.clamp(16, 235) as u8;
-        }
-    }
-
-    // Pass 2: UV — 2×2 block averaging
-    for row in (0..h).step_by(2) {
-        let r0 = row;
-        let r1 = (row + 1).min(h - 1);
-        for col in (0..w).step_by(2) {
-            let c0 = col;
-            let c1 = (col + 1).min(w - 1);
-            let avg = |ch: usize| {
-                (src[r0 * stride + c0 * 4 + ch] as i32
-                    + src[r0 * stride + c1 * 4 + ch] as i32
-                    + src[r1 * stride + c0 * 4 + ch] as i32
-                    + src[r1 * stride + c1 * 4 + ch] as i32)
-                    / 4
-            };
-            let r = avg(0);
-            let g = avg(1);
-            let b = avg(2);
-            let uv_i = (row / 2) * (w / 2) + col / 2;
-            let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-            let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-            u_plane[uv_i] = u.clamp(16, 240) as u8;
-            v_plane[uv_i] = v.clamp(16, 240) as u8;
-        }
-    }
-    out
+    packed32_to_i420(frame, 0, 1, 2)
 }
 
 #[cfg(test)]

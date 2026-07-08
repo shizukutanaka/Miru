@@ -191,6 +191,7 @@ async fn main() -> Result<()> {
         identity,
         acl,
         config_dir,
+        require_pairing_confirm: std::env::var("MIRU_REQUIRE_PAIRING_CONFIRM").is_ok(),
     };
     let result = session::run(device_id, signal_url, config).await;
 

@@ -207,6 +207,12 @@ pub struct HostConfig {
     pub identity: Arc<DeviceIdentity>,
     pub acl: Arc<Mutex<AclStore>>,
     pub config_dir: PathBuf,
+    /// Opt-in strict mode: refuse unapproved (first-connection) devices
+    /// instead of auto-accepting via TOFU. Read once from
+    /// `MIRU_REQUIRE_PAIRING_CONFIRM` at startup (see main.rs) rather than
+    /// inside `check_or_pair`, matching how other env-derived settings
+    /// (MIRU_RDV_PORT, MIRU_FRIENDLY_NAME) are handled in this binary.
+    pub require_pairing_confirm: bool,
 }
 
 const SIGNAL_BACKOFF_MAX_SECS: u64 = 120;
@@ -756,7 +762,7 @@ async fn check_or_pair(
             // default — existing deployments relying on the current
             // first-connection-just-works behavior are unaffected.
             let fp = pubkey_fingerprint(pubkey);
-            if std::env::var("MIRU_REQUIRE_PAIRING_CONFIRM").is_ok() {
+            if config.require_pairing_confirm {
                 error!("┌─ FIRST CONNECTION from new device REJECTED ─────────────────────────┐");
                 error!("│  Fingerprint: {}                      │", fp);
                 error!("│  MIRU_REQUIRE_PAIRING_CONFIRM is set — refusing unapproved devices. │");
