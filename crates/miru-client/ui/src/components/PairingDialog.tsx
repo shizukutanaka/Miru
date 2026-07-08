@@ -36,23 +36,30 @@ export function PairingDialog({ fingerprint, onConfirm, onCancel, requirePin = t
 
   return (
     <div className="dialog-backdrop">
-      <div className="dialog">
-        <h2>新しいデバイスに接続</h2>
-        <p className="dialog-subtitle">
+      <div
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pairing-dialog-title"
+        aria-describedby="pairing-dialog-subtitle"
+      >
+        <h2 id="pairing-dialog-title">新しいデバイスに接続</h2>
+        <p id="pairing-dialog-subtitle" className="dialog-subtitle">
           {requirePin
             ? "相手のデバイスに表示されている指紋とPINを照合してください。"
             : "初めて接続するホストです。相手のデバイスに表示されている指紋と一致するか確認してください。"}
         </p>
 
         <div className="fpr-display">
-          <span className="fpr-label">指紋</span>
-          <code className="fpr-value">{fingerprint}</code>
+          <span className="fpr-label" id="pairing-dialog-fpr-label">指紋</span>
+          <code className="fpr-value" aria-labelledby="pairing-dialog-fpr-label">{fingerprint}</code>
         </div>
 
         {requirePin && (
           <div className="pin-input">
-            <label>PIN（6桁）</label>
+            <label htmlFor="pairing-dialog-pin">PIN（6桁）</label>
             <input
+              id="pairing-dialog-pin"
               type="text"
               inputMode="numeric"
               pattern="[0-9]*"
@@ -65,7 +72,7 @@ export function PairingDialog({ fingerprint, onConfirm, onCancel, requirePin = t
           </div>
         )}
 
-        <div className="dialog-warning">
+        <div className="dialog-warning" role="alert">
           指紋が一致しない場合は接続を拒否してください。中間者攻撃の可能性があります。
         </div>
 
