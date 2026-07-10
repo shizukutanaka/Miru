@@ -35,10 +35,11 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 | 4 | Wayland / PipeWire キャプチャ | `crates/miru-capture/src/platform/pipewire.rs` がスタブ。Ubuntu 22.04+ / Fedora の標準セッション(Wayland)で動かない | xdg-desktop-portal (zbus) + pipewire-rs。規模: 中 (2-3週) |
 | 5 | macOS 60fps キャプチャ | `crates/miru-capture/src/platform/macos.rs` — deprecated な CGDisplayCreateImage で ~20fps | ScreenCaptureKit (SCStream) へ移行。規模: 中 (1-2週) |
 | 6 | CI/CD が稼働していない | ワークフローが `.github/workflows/` ではなく `.github/workflows-proposed/` に隔離されたまま。push する GitHub App に `workflows` 権限が無く自動化エージェントでは移動できない(実際に push が拒否されることを確認済み) | **リポジトリ管理者の手作業が必要**: `git mv .github/workflows-proposed/*.yml .github/workflows/`。規模: 極小 |
-| 7 | ~~クライアント側 TOFU 確認ダイアログが完全に未接続~~ → **実装済み(要 cargo test 検証)** | `crates/miru-client/src-tauri/src/session.rs` のハンドシェイク直後に TOFU ゲートを追加: viewer 側 `AclStore`(`crates/miru-auth/src/lib.rs`)の `check()`/`trust()`/`touch()` を初めて呼び出すよう配線。`TrustDecision::Unknown`(初回接続)は `pending_pairing` oneshot チャネル経由でフロントエンドの確認を待ち(120秒タイムアウト)、`PairingDialog.tsx`(新設の `requirePin={false}` モード)で指紋を能動的に確認させてから `TrustedPeer` を永続化する。`TrustDecision::PubkeyMismatch`(鍵変更 = MITM の可能性)は問答無用で `bail!` して接続拒否。新規 Tauri command `confirm_pairing` を追加(`commands.rs`/`main.rs`/`lib/tauri.ts`)。TypeScript 側は `npx tsc -b --noEmit` でエラーゼロを実機検証済み。**Rust 側はサンドボックスの crates.io 遮断によりコンパイル未検証** — マージ前に必ず `cargo test -p miru-client-src-tauri`(または workspace 全体)を実行すること | 完了。次のアクションは Rust ビルド検証のみ |
-
-| 8 | ~~ホスト側 TOFU が無条件自動承認~~ → **オプトイン強化モードを追加(要 cargo test 検証)** | `crates/miru-host/src/session.rs` の `check_or_pair()`: `miru-host` は GUI の無い純粋な CLI/ヘッドレスバイナリ(`ui.rs` は stdout バナー出力のみ)のため、viewer 側と同じ対話的確認ダイアログは実装できない。デフォルト挙動(初回接続は自動承認)を無断で変更すると新規ユーザーの「繋ぐだけで動く」オンボーディング体験を壊す破壊的変更になり、`CLAUDE.md` の「破壊的変更は major version のみ」規則にも抵触するため、**デフォルトは変更せず** `MIRU_REQUIRE_PAIRING_CONFIRM=1` を設定した場合のみ未承認デバイスを拒否するオプトイン強化モードを追加(未設定時は既存の `warn!` ログ付き自動承認のまま)。`MIRU_ALLOW_STUB` で既に確立されている「デフォルト維持・明示的 opt-in」パターンを踏襲 | 完了(デフォルト非破壊)。次のアクションは Rust ビルド検証のみ |
-| 9 | `ConnectArgs.pin` フィールドが実質デッドコード | `crates/miru-client/ui/src/components/ConnectScreen.tsx` に「PIN(初回のみ)」という入力欄があり `api.connect(id, signalUrl, pin)` で送信されるが、`crates/miru-client/src-tauri/src/session.rs` `crates/miru-client/src-tauri/src/commands.rs` のどこにも `args.pin` を参照する行が無い(`grep -n "args.pin" session.rs commands.rs` は 0 件)。ユーザーが PIN を入力しても何の検証にも使われない。`CLAUDE.md` の暗号セクションは「PIN: PBKDF2-SHA256 (100k iter, salt=device_id)」を設計として明記しており、意図された機能が未接続と考えられる | PBKDF2 ベースのペアリング認証を実装して `pin` を実際に検証に使うか、機能が無いなら UI から誤解を招く入力欄を外す。判断は要相談。規模: 小(検証接続のみなら)〜中(認証方式として設計するなら) |
+| 7 | ~~クライアント側 TOFU 確認ダイアログが完全に未接続~~ → **実装済み(要 cargo test 検証)** | `crates/miru-client/src-tauri/src/session.rs` のハンドシェイク直後に TOFU ゲートを追加: viewer 側 `AclStore`(`crates/miru-auth/src/lib.rs`)の `check()`/`trust()`/`touch()` を初めて呼び出すよう配線。`TrustDecision::Unknown`(初回接続)は `pending_pairing` oneshot チャネル経由でフロントエンドの確認を待ち(120秒タイムアウト)、`PairingDialog.tsx`(`requirePin={false}` モード)で指紋を能動的に確認させてから `TrustedPeer` を永続化する。`TrustDecision::PubkeyMismatch`(鍵変更 = MITM の可能性)は `NoAutoRetry` マーカーエラーで即座に拒否し、再接続ループが自動リトライしないようにも対応済み。新規 Tauri command `confirm_pairing`。TypeScript 側は `npx tsc -b --noEmit` でエラーゼロを実機検証済み。**Rust 側はサンドボックスの crates.io 遮断によりコンパイル未検証** — マージ前に必ず `cargo test --workspace` を実行すること | 完了。次のアクションは Rust ビルド検証のみ |
+| 8 | ~~ホスト側 TOFU が無条件自動承認~~ → **オプトイン強化モードを追加(要 cargo test 検証)** | `crates/miru-host/src/session.rs` の `check_or_pair()`。`miru-host` は GUI の無い純粋な CLI/ヘッドレスバイナリのため viewer 側と同じ対話的確認ダイアログは実装できない。デフォルト挙動(初回接続は自動承認)を無断で変える判断は破壊的変更のリスクがあるため、**デフォルトは変更せず** `HostConfig::require_pairing_confirm`(`MIRU_REQUIRE_PAIRING_CONFIRM=1` で有効化、`main.rs` で一度だけ読み取り)を追加。`MIRU_ALLOW_STUB` の「デフォルト維持・明示的 opt-in」パターンを踏襲 | 完了。次のアクションは Rust ビルド検証のみ |
+| 9 | `ConnectArgs.pin` フィールドが実質デッドコード | `ConnectScreen.tsx` の「PIN(初回のみ)」入力欄が `session.rs`/`commands.rs` のどこからも参照されない(未検証)。`CLAUDE.md` は PBKDF2-SHA256 ペアリングを設計として明記 | 実装するか誤解を招く入力欄を外すか要相談。**未着手**。規模: 小〜中 |
+| 10 | UI アクセシビリティ欠如 | 商用品質監査(2026-07)で確認: 12個の `.tsx` 全体で `aria-*`/`role=` 使用が実質ゼロだった。`ConnectScreen.tsx`(label/input の `id`/`htmlFor` 関連付け、`role="alert"`、ピア接続ボタンの `aria-label`)と `PairingDialog.tsx`(`role="dialog"` + `aria-modal`/`aria-labelledby`)は対応済み(`tsc` 検証済み) | 残り10コンポーネント(`SessionScreen`/`OnboardingWizard`/`AuditLogViewer`/`ConstellationMap`/`AgentTokenIssue`/`TimelineScrubber`/`DisplayTabs`/`PairPrompt`/`App.tsx`)が未着手。規模: 小(コンポーネントごと) |
+| 11 | ~~存在しない `miru.app` ドメインへの依存~~ → **解消済み** | `MIRU_SIGNAL` のデフォルト値が未登録の `signal.miru.app` を指していた(`main.rs`/`scripts/install.sh` 双方)。`PRIVACY.md` は実装ゼロのクラッシュレポート機能を実在するかのように詳述していた(`--enable-crash-reports` フラグはコード上皆無、`grep` で確認済み)。全て `localhost` デフォルトへの修正、または「未実装/未稼働」の正直な注記に置換 | 完了 |
 
 ## 🟡 過剰 — 品質は高いがコア未完成の段階では時期尚早(追加投資を凍結)
 
@@ -72,16 +73,22 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 
 ## 本ブランチで適用済みの修正(引き継ぎ時の注意)
 
-ブランチ `claude/sweet-franklin-l5a1yw` に以下 6 コミットを追加済み:
+ブランチ `claude/sweet-franklin-l5a1yw` に20コミット以上を追加済み。主な内容
+(詳細は `git log` を参照):
 
-| コミット | 内容 |
-|----------|------|
-| `8a516bf` | perf: RGBA→I420 変換の全フレーム clone+swap を直接変換に置換 / I420 パススルーの Vec コピーを参照渡しに / relay 接続 10 秒タイムアウト / クリップボード 10MiB 上限 / backpressure の atomic ordering を Acquire/Release に |
-| `cd839ae` | perf: JPEG デコードの RGB→I420 を f64 から固定小数点 BT.601 に / BBR の RTT sentinel (`u32::MAX`) を `Option<u32>` に / hole-punch 送信失敗の warn ログ化 |
-| `fd07ddc` | fix: MCP レート制限の refill 間隔を切り上げ除算に(設定超過レートの防止)/ u128→u32 キャストのクランプ / display index の範囲チェック |
-| `a1157d3` | docs: PRODUCT_REVIEW.md の陳腐化修正(XRandR マルチモニタと StubBridge fail-loud は実装済みだった) |
-| `585ad1e` | fix: `Features.audio` の虚偽広告 (`true`→`false`) を修正 |
-| `6b50a2a` | docs: roadmap.md に優先順位分析(セクション 0)を追記 |
+- perf: RGBA/BGRA→I420 変換の高速化(clone排除・固定小数点化)、後に
+  `packed32_to_i420` へ重複排除して統合
+- fix: relay接続タイムアウト、クリップボードサイズ上限、backpressureの
+  atomic ordering、MCPレート制限の切り上げ除算、display index範囲チェック
+- fix: `Features.audio` の虚偽広告修正
+- feat: viewer側TOFU確認ゲート、host側 opt-in強化モード(`MIRU_REQUIRE_PAIRING_CONFIRM`)
+- feat: UI アクセシビリティ基礎対応(2/12コンポーネント)
+- fix: 存在しない `miru.app` ドメインへの依存を解消(コード・配布パッケージ・
+  法的文書すべて)
+- docs: `PRODUCT_REVIEW.md`/`roadmap.md`(優先順位分析 + 商用品質ロードマップ)/
+  `MODEL_GUIDE.md`(モデル・skill・Agent・Loop使い分け)の新規作成・更新
+- `/code-review`・`/simplify` スキルによるセルフレビューを実施済み(clippy警告
+  修正、BGRA/RGBA変換の重複排除、env変数のconfig field化)
 
 **重要**: これらのコード変更は目視レビューのみで **コンパイル未検証** です。
 作成時のサンドボックスは crates.io (`static.crates.io`) への通信がプロキシポリシーで
