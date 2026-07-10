@@ -1,10 +1,10 @@
-# Maintainer: shizukutanaka <hello@miru.app>
+# Maintainer: shizukutanaka <https://github.com/shizukutanaka>
 pkgname=miru
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="AI-era secure PC fabric: remote desktop + AI agent + verifiable E2E + constellation"
 arch=('x86_64' 'aarch64')
-url="https://miru.app"
+url="https://github.com/shizukutanaka/miru"
 license=('MIT')
 depends=('libx11' 'libxcb' 'alsa-lib' 'pulseaudio')
 makedepends=('rust' 'cargo' 'pkgconf')

@@ -7,7 +7,7 @@
 //!         "command": "miru-mcp",
 //!         "env": {
 //!           "MIRU_AGENT_TOKEN": "miru-agent.<...>",
-//!           "MIRU_SIGNAL": "ws://signal.miru.app:21115/ws",
+//!           "MIRU_SIGNAL": "ws://your-signal-server:21115/ws",
 //!           "MIRU_HOST_DEVICE_ID": "ABCD-1234"
 //!         }
 //!       }
@@ -41,12 +41,9 @@ struct Args {
     #[arg(env = "MIRU_AGENT_TOKEN")]
     token: Option<String>,
 
-    /// Signal server URL.
-    #[arg(
-        long,
-        env = "MIRU_SIGNAL",
-        default_value = "ws://signal.miru.app:21115/ws"
-    )]
+    /// Signal server URL. Defaults to a local server — Miru is self-hosted
+    /// by design; point this at your own deployment.
+    #[arg(long, env = "MIRU_SIGNAL", default_value = "ws://localhost:21115/ws")]
     signal: String,
 
     /// Target host's device ID.
