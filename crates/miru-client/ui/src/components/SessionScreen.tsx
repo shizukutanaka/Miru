@@ -364,9 +364,9 @@ export function SessionScreen({ onDisconnect }: Props) {
       )}
 
       <div className="video-stage" ref={stageRef}>
-        <canvas ref={canvasRef} tabIndex={0} />
+        <canvas ref={canvasRef} tabIndex={0} aria-label="リモートホストの画面" role="img" />
 
-        <div className="session-overlay">
+        <div className="session-overlay" role="status" aria-live="polite" aria-label="接続統計">
           <div className="stat-row"><span className="label">FPS</span><span className="value">{stats.fps.toFixed(1)}</span></div>
           <div className="stat-row"><span className="label">RTT</span><span className="value">{stats.rtt_ms} ms</span></div>
           <div className="stat-row"><span className="label">BW</span><span className="value">{stats.bitrate_kbps} kbps</span></div>
@@ -402,12 +402,12 @@ export function SessionScreen({ onDisconnect }: Props) {
       <DisplayTabs displays={displays} selected={selectedDisplay} onSelect={handleSelectDisplay} />
 
       {status === "connected" && stalled && (
-        <div className="quality-banner quality-poor">
+        <div className="quality-banner quality-poor" role="alert">
           映像が停止しています — ホストが応答していない可能性があります
         </div>
       )}
       {status === "connected" && !stalled && connQuality !== "good" && (
-        <div className={`quality-banner quality-${connQuality}`}>
+        <div className={`quality-banner quality-${connQuality}`} role="status" aria-live="polite">
           {connQuality === "poor"
             ? `接続が不安定 — RTT ${stats.rtt_ms}ms / 損失 ${stats.packet_loss_pct.toFixed(1)}%`
             : `接続状態が低下 — RTT ${stats.rtt_ms}ms`}
@@ -417,12 +417,13 @@ export function SessionScreen({ onDisconnect }: Props) {
       <input
         ref={fileInputRef}
         type="file"
+        aria-label="ホストへ送信するファイルを選択"
         style={{ display: "none" }}
         onChange={handleFileSend}
       />
 
       <div className="toolbar">
-        <span className="status-pill">
+        <span className="status-pill" role="status" aria-live="polite">
           <span className={`status-dot ${
             status === "connected" ? "ok"
             : status === "reconnecting" || status === "pairing_required" ? "warn"
