@@ -202,6 +202,11 @@ async fn rendezvous_handler(
 
 /// Interval between server-initiated WebSocket pings.
 const RENDEZVOUS_PING_INTERVAL: Duration = Duration::from_secs(30);
+/// Max time to wait for a single WebSocket send before treating the peer as
+/// wedged (stopped reading but hasn't closed the TCP connection). Without
+/// this, a client that fills its receive buffer and never drains it can
+/// stall a session task — and its registry/relay-slot cleanup — indefinitely.
+const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
 async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<Msg>(32);
@@ -214,7 +219,10 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
             // Forward outbound messages to WebSocket
             Some(msg) = rx.recv() => {
                 let Ok(json) = serde_json::to_string(&msg) else { continue };
-                if sock.send(Message::Text(json)).await.is_err() { break }
+                match tokio::time::timeout(SEND_TIMEOUT, sock.send(Message::Text(json))).await {
+                    Ok(Ok(())) => {}
+                    _ => break,
+                }
             }
             // Handle inbound WebSocket messages
             incoming = sock.recv() => {
@@ -225,15 +233,18 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
                             Err(e) => warn!("parse error: {e}"),
                         }
                     }
-                    Some(Ok(Message::Ping(d))) => { let _ = sock.send(Message::Pong(d)).await; }
+                    Some(Ok(Message::Ping(d))) => {
+                        let _ = tokio::time::timeout(SEND_TIMEOUT, sock.send(Message::Pong(d))).await;
+                    }
                     Some(Ok(Message::Pong(_))) => {} // keepalive echo
                     _ => break,
                 }
             }
             // Server-initiated keepalive ping to detect dead connections.
             _ = ping_ticker.tick() => {
-                if sock.send(Message::Ping(vec![])).await.is_err() {
-                    break;
+                match tokio::time::timeout(SEND_TIMEOUT, sock.send(Message::Ping(vec![]))).await {
+                    Ok(Ok(())) => {}
+                    _ => break,
                 }
             }
         }
@@ -255,6 +266,20 @@ async fn process_rdv_msg(
 ) {
     match msg {
         Msg::Register(reg) => {
+            // Rate-limit Register the same way Connect already is: each Register
+            // performs an Ed25519 signature verification (non-trivial CPU cost)
+            // plus a registry insert/remove, so a single connection looping
+            // Register requests would otherwise have no per-IP throttle.
+            if !state.check_connect_rate(peer_ip) {
+                warn!("Register rate limit exceeded for {}", peer_ip);
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 429,
+                        message: "too many requests — retry later".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             // Reject absurdly long device IDs before they reach the DashMap.
             // A UUID hex + optional prefix is always < 128 bytes; 256 is generous.
             if reg.device_id.len() > 256 {
@@ -597,6 +622,10 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
         None => {
             let deadline = tokio::time::sleep(Duration::from_secs(30));
             tokio::pin!(deadline);
+            // Reuse a single interval instead of constructing a fresh `sleep`
+            // every loop iteration — avoids per-tick allocation churn when
+            // many connections are simultaneously waiting for their peer.
+            let mut poll = tokio::time::interval(Duration::from_millis(100));
             loop {
                 tokio::select! {
                     // Deadline fired — give up and clean up the slot.
@@ -614,7 +643,7 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
                         // Ignore any data frames during the wait phase
                     }
                     // Poll check every 100ms
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    _ = poll.tick() => {
                         let slot = state.relay_sessions.get(&token);
                         let found = if is_host {
                             slot.and_then(|s| s.viewer.clone())
@@ -646,7 +675,10 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
                             );
                             break;
                         }
-                        if peer_tx.send(data).await.is_err() { break }
+                        match tokio::time::timeout(SEND_TIMEOUT, peer_tx.send(data)).await {
+                            Ok(Ok(())) => {}
+                            _ => break,
+                        }
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     _ => {}
@@ -656,7 +688,10 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
             data = fwd_rx.recv() => {
                 match data {
                     Some(d) => {
-                        if ws_tx.send(Message::Binary(d)).await.is_err() { break }
+                        match tokio::time::timeout(SEND_TIMEOUT, ws_tx.send(Message::Binary(d))).await {
+                            Ok(Ok(())) => {}
+                            _ => break,
+                        }
                     }
                     None => break,
                 }
