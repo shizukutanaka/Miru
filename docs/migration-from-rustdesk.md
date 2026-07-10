@@ -159,5 +159,6 @@ A: 両方の設定が独立しているため、いつでも RustDesk に戻せ�
 
 - 質問: GitHub Discussions
 - バグ: GitHub Issues
-- セキュリティ: `security@miru.app`
-- 移行で困ったら: `migrate@miru.app`
+- セキュリティ: [SECURITY.md](../SECURITY.md) 参照(`security@miru.app` はまだ稼働していません)
+- 移行で困ったら: GitHub Issues/Discussions へ(専用アドレス `migrate@miru.app` は
+  まだ稼働していません)

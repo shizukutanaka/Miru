@@ -52,7 +52,7 @@ chmod +x ~/.local/bin/miru-mcp
       "command": "miru-mcp",
       "env": {
         "MIRU_AGENT_TOKEN": "miru-agent.<貼り付け>",
-        "MIRU_SIGNAL": "ws://signal.miru.app:21115/ws",
+        "MIRU_SIGNAL": "ws://your-signal-server:21115/ws",
         "MIRU_HOST_DEVICE_ID": "ABCD-1234"
       }
     }
