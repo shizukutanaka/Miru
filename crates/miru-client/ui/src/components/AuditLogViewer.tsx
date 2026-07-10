@@ -74,7 +74,10 @@ export function AuditLogViewer({ onClose }: Props) {
           </div>
           <div className="audit-stat">
             <span className="stat-label">チェーン整合性</span>
-            <span className={`stat-value ${summary.chain_intact ? "ok" : "error"}`}>
+            <span
+              className={`stat-value ${summary.chain_intact ? "ok" : "error"}`}
+              role={summary.chain_intact ? undefined : "alert"}
+            >
               {summary.chain_intact ? "OK ✓" : "改ざん検知 ✗"}
             </span>
           </div>
@@ -90,21 +93,24 @@ export function AuditLogViewer({ onClose }: Props) {
       )}
 
       <div className="audit-toolbar">
-        <div className="filter-group">
+        <div className="filter-group" role="group" aria-label="結果でフィルタ">
           <button
             className={filter === "all" ? "active" : ""}
+            aria-pressed={filter === "all"}
             onClick={() => setFilter("all")}
           >
             すべて
           </button>
           <button
             className={filter === "ok" ? "active" : ""}
+            aria-pressed={filter === "ok"}
             onClick={() => setFilter("ok")}
           >
             許可
           </button>
           <button
             className={filter === "denied" ? "active" : ""}
+            aria-pressed={filter === "denied"}
             onClick={() => setFilter("denied")}
           >
             拒否
@@ -117,7 +123,7 @@ export function AuditLogViewer({ onClose }: Props) {
 
       <div className="audit-table">
         {filtered.length === 0 ? (
-          <div className="empty-state">
+          <div className="empty-state" role="status">
             まだ記録がありません。AI エージェントが操作するとここに記録されます。
           </div>
         ) : (
