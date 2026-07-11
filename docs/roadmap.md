@@ -107,9 +107,9 @@ Vulnerability Reporting を唯一の稼働窓口として明記。
       (`docs/RESEARCH_NOTES.md` §1)
 - [ ] **適応ビットレート**: AIMD実装済み → BBR風アルゴリズム検討
 - [ ] **可変フレームレート**: 静止画は5fps、動画は60fps切替
-- [ ] スクリーンコンテントモード (SCM): VP9/AV1で文字フォントに最適化。
-      VP9 は `vpx.rs` の encoder 初期化に screen-content tuning を足すだけで
-      効く低コスト改善候補 (`docs/RESEARCH_NOTES.md` §1)
+- [x] スクリーンコンテントモード (SCM): VP9 は `vpx.rs` に
+      `VP9E_SET_TUNE_CONTENT=1` を設定済み(要ビルド検証)。残りは AV1 配線時の
+      SCC ツール有効化 (`docs/RESEARCH_NOTES.md` §1)
 
 ### トランスポート
 - [ ] **QUIC優先パス**: P2P成功時はリレー切断 — 帯域・レイテンシ削減。

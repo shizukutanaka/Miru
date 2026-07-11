@@ -66,6 +66,13 @@ impl VpxEncoder {
                 set_ctrl(&mut ctx, VP9E_SET_TILE_COLUMNS, 4)?;
                 set_ctrl(&mut ctx, VP9E_SET_FRAME_PARALLEL_DECODING, 1)?;
                 set_ctrl(&mut ctx, VP9E_SET_AQ_MODE, 3)?; // cyclic refresh
+                // Tune for screen content (VPX_CONTENT_SCREEN = 1 in the
+                // vpx_tune_content enum). Miru is a screen-sharing tool, so
+                // frames are dominated by text, sharp edges, and large flat
+                // regions — exactly what libvpx's screen-content mode targets
+                // (it biases toward palette/intra-block-copy-style decisions).
+                // See docs/RESEARCH_NOTES.md §1.
+                set_ctrl(&mut ctx, VP9E_SET_TUNE_CONTENT, 1)?;
             }
 
             Ok(Self {

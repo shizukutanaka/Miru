@@ -19,9 +19,9 @@ Miru の残課題(`docs/FEATURE_AUDIT.md` / `docs/roadmap.md` セクション0.5
   「AV1 HW エンコーダが実在する場合のみ AV1、無ければ H.265/VP9」という
   能力ベースの分岐が2026年時点では正しい。ソフトウェア AV1 リアルタイム
   エンコードには手を出さない(roadmap の AV1 HW 前提は妥当)
-- VP9(現在の実コーデック)には既に `VP8E_SET_SCREEN_CONTENT_MODE` 相当の
-  screen mode があり、`vpx.rs` の encoder 初期化で screen-content tuning を
-  明示するのは低コストで効く改善候補
+- VP9(現在の実コーデック)には screen-content 向けのチューニングがあり、
+  `vpx.rs` の encoder 初期化で `VP9E_SET_TUNE_CONTENT=1` (VPX_CONTENT_SCREEN)
+  を設定するのは低コストで効く改善 → **実施済み(要ビルド検証)**
 - 将来 AV1 を配線する際は SCC ツールの有効化を必須要件とすること
 
 **出典**:
