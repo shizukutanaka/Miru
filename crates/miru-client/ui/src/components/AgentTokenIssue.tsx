@@ -74,8 +74,8 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
   if (issued) {
     return (
       <div className="dialog-backdrop">
-        <div className="dialog" style={{ maxWidth: 600 }}>
-          <h2>トークン発行完了</h2>
+        <div className="dialog" style={{ maxWidth: 600 }} role="dialog" aria-modal="true" aria-labelledby="token-issued-title">
+          <h2 id="token-issued-title">トークン発行完了</h2>
           <p className="dialog-subtitle">
             このトークンを Claude Desktop の設定にコピー。漏洩しないよう注意。
           </p>
@@ -114,15 +114,16 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
 
   return (
     <div className="dialog-backdrop">
-      <div className="dialog" style={{ maxWidth: 520 }}>
-        <h2>AI エージェントに権限を付与</h2>
+      <div className="dialog" style={{ maxWidth: 520 }} role="dialog" aria-modal="true" aria-labelledby="token-issue-title">
+        <h2 id="token-issue-title">AI エージェントに権限を付与</h2>
         <p className="dialog-subtitle">
           Claude などの AI に PC 制御を許可する時限式トークンを発行
         </p>
 
         <div className="field">
-          <label>用途ラベル</label>
+          <label htmlFor="agent-token-label">用途ラベル</label>
           <input
+            id="agent-token-label"
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -132,8 +133,9 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
         </div>
 
         <div className="field">
-          <label>有効期限 (最大 15 分)</label>
+          <label htmlFor="agent-token-ttl">有効期限 (最大 15 分)</label>
           <select
+            id="agent-token-ttl"
             value={ttlMins}
             onChange={(e) => setTtlMins(Number(e.target.value))}
           >
@@ -143,8 +145,8 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
           </select>
         </div>
 
-        <div className="field">
-          <label>許可する操作</label>
+        <fieldset className="field">
+          <legend>許可する操作</legend>
           <div className="caps-list">
             {CAPS.map((cap) => (
               <label key={cap.id} className={`cap-row ${cap.danger ? "danger" : ""}`}>
@@ -158,14 +160,14 @@ export function AgentTokenIssue({ onIssued, onCancel }: Props) {
               </label>
             ))}
           </div>
-        </div>
+        </fieldset>
 
-        <div className="dialog-warning">
+        <div className="dialog-warning" role="alert">
           危険操作 (確認必須) は AI が実行を試みるたびに、あなたへ通知が届きます。
           いつでも「信頼済みデバイス」一覧から無効化できます。
         </div>
 
-        {error && <div className="error-msg" style={{ color: "var(--danger, #e05)" }}>{error}</div>}
+        {error && <div className="error-msg" role="alert" style={{ color: "var(--danger, #e05)" }}>{error}</div>}
 
         <div className="dialog-actions">
           <button className="button-ghost" onClick={onCancel}>キャンセル</button>

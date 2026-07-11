@@ -58,16 +58,22 @@ export function ConstellationMap({ onConnect, onClose }: Props) {
       </div>
 
       {loading ? (
-        <div className="empty-state">読込中...</div>
+        <div className="empty-state" role="status">読込中...</div>
       ) : devices.length === 0 ? (
-        <div className="empty-state">
+        <div className="empty-state" role="status">
           まだデバイスが登録されていません。
           <br />
           別のデバイスから constellation key を共有して招待してください。
         </div>
       ) : (
         <>
-          <div className="constellation-svg-wrap">
+          {/* Decorative visualization only — the device-list below provides
+              the same information and connect action through real, keyboard-
+              accessible <button> elements. The SVG's onClick <g> targets are
+              not reachable via keyboard, so hide this duplicate from
+              assistive tech rather than half-fix an inaccessible custom
+              widget. */}
+          <div className="constellation-svg-wrap" aria-hidden="true">
             <svg viewBox="0 0 400 400" width="100%" style={{ maxWidth: 480 }}>
               {/* Center: this device */}
               <g>
@@ -134,6 +140,7 @@ export function ConstellationMap({ onConnect, onClose }: Props) {
                 </div>
                 <button
                   className="button-ghost"
+                  aria-label={`${d.name} に接続`}
                   onClick={() => onConnect(d.device_id)}
                   disabled={d.status === "offline"}
                 >

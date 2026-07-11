@@ -117,9 +117,22 @@ export function TimelineScrubber({ onClose }: Props) {
                 <div className="scrubber">
                   <div
                     className="scrubber-track"
+                    role="slider"
+                    tabIndex={0}
+                    aria-label="再生位置"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(playbackPos * 100)}
+                    aria-valuetext={formatTime(playbackPos * (selected.duration_ms || 60000))}
                     onClick={(e) => {
                       const rect = (e.target as HTMLElement).getBoundingClientRect();
                       jumpTo((e.clientX - rect.left) / rect.width);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowLeft") jumpTo(playbackPos - 0.01);
+                      else if (e.key === "ArrowRight") jumpTo(playbackPos + 0.01);
+                      else if (e.key === "Home") jumpTo(0);
+                      else if (e.key === "End") jumpTo(1);
                     }}
                   >
                     {bookmarks.map((b, i) => (
@@ -137,6 +150,7 @@ export function TimelineScrubber({ onClose }: Props) {
                 <div className="timeline-controls">
                   <button
                     className="button-ghost"
+                    aria-label="5% 巻き戻し"
                     onClick={() => jumpTo(Math.max(0, playbackPos - 0.05))}
                     title="-5%"
                   >
@@ -147,17 +161,19 @@ export function TimelineScrubber({ onClose }: Props) {
                   </button>
                   <button
                     className="button-ghost"
+                    aria-label="5% 早送り"
                     onClick={() => jumpTo(Math.min(1, playbackPos + 0.05))}
                     title="+5%"
                   >
                     ▷
                   </button>
 
-                  <div className="speed-selector">
+                  <div className="speed-selector" role="group" aria-label="再生速度">
                     {[0.25, 0.5, 1, 2, 4, 8].map((s) => (
                       <button
                         key={s}
                         className={speed === s ? "active" : ""}
+                        aria-pressed={speed === s}
                         onClick={() => setSpeed(s)}
                       >
                         {s}x
