@@ -100,13 +100,22 @@ Vulnerability Reporting を唯一の稼働窓口として明記。
 - [ ] フレームスキップ: 直前フレームと完全一致なら送信スキップ
 
 ### エンコード
-- [ ] **AV1 HW**: NVENC (RTX 40+), QSV (Arc), AMF (RX 7000+) — 同品質で帯域30%減
+- [ ] **AV1 HW**: NVENC (RTX 40+), QSV (Arc), AMF (RX 7000+) — 同品質で帯域30%減。
+      2026年時点の外部評価ではリアルタイム用途の AV1 は HW エンコーダ必須
+      (SW リアルタイムは非現実的)で、HW が無い環境の低遅延現実解は H.265。
+      AV1 配線時は SCC (Screen Content Coding) の有効化を必須要件とする
+      (`docs/RESEARCH_NOTES.md` §1)
 - [ ] **適応ビットレート**: AIMD実装済み → BBR風アルゴリズム検討
 - [ ] **可変フレームレート**: 静止画は5fps、動画は60fps切替
-- [ ] スクリーンコンテントモード (SCM): VP9/AV1で文字フォントに最適化
+- [ ] スクリーンコンテントモード (SCM): VP9/AV1で文字フォントに最適化。
+      VP9 は `vpx.rs` の encoder 初期化に screen-content tuning を足すだけで
+      効く低コスト改善候補 (`docs/RESEARCH_NOTES.md` §1)
 
 ### トランスポート
-- [ ] **QUIC優先パス**: P2P成功時はリレー切断 — 帯域・レイテンシ削減
+- [ ] **QUIC優先パス**: P2P成功時はリレー切断 — 帯域・レイテンシ削減。
+      設計先として IETF MoQ (draft-ietf-moq-transport) を必読文献とする —
+      リモートデスクトップが明示的ターゲット用途で、多ストリーム/優先度/
+      部分信頼性を標準化済み (`docs/RESEARCH_NOTES.md` §3)
 - [ ] **多ストリーム並列**: 動画/音声/入力で別ストリーム → HOL-blocking回避
 - [ ] **0-RTT再接続**: 同一ピア再接続時にハンドシェイクスキップ
 - [ ] **FEC (Forward Error Correction)**: パケット損失5%まで再送なしで復元
@@ -121,7 +130,10 @@ Vulnerability Reporting を唯一の稼働窓口として明記。
 ## 3. セキュリティ (継続強化)
 
 ### 暗号進化
-- [ ] **PQC ハイブリッド**: X25519 + Kyber768 の二重鍵交換 (post-quantum対応)
+- [ ] **PQC ハイブリッド**: X25519 + ML-KEM-768 (旧称 Kyber768) の二重鍵交換。
+      2026年時点で X25519MLKEM768 は Chrome/Edge/Firefox デフォルト有効の
+      事実上の業界標準。combiner は「並列実行 → 共有秘密連結 → HKDF」
+      (`docs/RESEARCH_NOTES.md` §4)。RustCrypto の ml-kem crate が利用可能
 - [ ] **HKDF**: shared secret から専用キー導出 (現在は直接使用)
 - [ ] 定期 rekey: 1時間毎にセッションキー再生成
 
