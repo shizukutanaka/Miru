@@ -49,40 +49,45 @@ export default function App() {
           <span>Miru</span>
         </div>
 
-        <nav className="titlebar-nav">
+        <nav className="titlebar-nav" aria-label={t("nav.main_label")}>
           <button
             className={view.kind === "connect" || view.kind === "session" ? "active" : ""}
+            aria-current={view.kind === "connect" || view.kind === "session" ? "page" : undefined}
             onClick={() => setView({ kind: "connect" })}
           >
             {t("nav.connect")}
           </button>
           <button
             className={view.kind === "constellation" ? "active" : ""}
+            aria-current={view.kind === "constellation" ? "page" : undefined}
             onClick={() => setView({ kind: "constellation" })}
           >
             {t("nav.constellation")}
           </button>
           <button
             className={view.kind === "agent_issue" ? "active" : ""}
+            aria-current={view.kind === "agent_issue" ? "page" : undefined}
             onClick={() => setView({ kind: "agent_issue" })}
           >
             {t("nav.ai_authorize")}
           </button>
           <button
             className={view.kind === "audit" ? "active" : ""}
+            aria-current={view.kind === "audit" ? "page" : undefined}
             onClick={() => setView({ kind: "audit" })}
           >
             {t("nav.audit")}
           </button>
           <button
             className={view.kind === "timeline" ? "active" : ""}
+            aria-current={view.kind === "timeline" ? "page" : undefined}
             onClick={() => setView({ kind: "timeline" })}
           >
             {t("nav.timeline")}
           </button>
         </nav>
 
-        <div className="fpr" title={t("titlebar.fingerprint_tooltip")}>
+        <div className="fpr" title={t("titlebar.fingerprint_tooltip")} aria-label={t("titlebar.fingerprint_tooltip")}>
           {fingerprint}
         </div>
       </div>
