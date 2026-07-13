@@ -118,6 +118,8 @@ RustDesk が抱えた既知の脆弱性に対する Miru の対応:
 | CVE-2026-30798 | Heartbeat 改ざん | 全制御メッセージ AEAD 暗号化 |
 | CVE-2026-2490 | シンボリックリンク漏洩 | O_NOFOLLOW + path 検証 |
 | CVE-2024-25140 | テスト証明書出荷 | ビルドプロセスで本番/テスト分離 |
+| CVE-2026-30784 | rendezvous/relay の未認証 RegisterPeer 登録による権限昇格 | `miru-signal` の Register ハンドラは Ed25519 所有権証明 (`verify_register_signature`) + identity-lock で他デバイス ID の乗っ取りを拒否。**残存緩和点**: 後方互換のため署名なし登録を警告付きで受理中 — 全クライアント移行後に必須化予定 (docs/RESEARCH_NOTES.md §6) |
+| CVE-2026-30795 | Heartbeat 同期ループの平文送信 | Miru の全セッションメッセージ (Ping/Pong 含む) は ChaCha20-Poly1305 で暗号化。signal 経由の Register/Connect は device_id/pubkey のみでセッション内容を含まない |
 
 ## 7. プライバシー検証
 

@@ -131,8 +131,88 @@ SLH-DSA をネイティブサポート。正しい combiner は「両鍵交換�
 - https://docs.rs/wasapi
 - https://deepwiki.com/rustdesk/rustdesk/5.3-audio-service
 
+## 6. RustDesk 2026 CVE 動向 — 同型アーキテクチャからの教訓(最重要)
+
+**現状 (2026-03 公開)**: RustDesk に複数の重大 CVE。Miru と**同じ signal/relay
+アーキテクチャ**を持つため直接照合した:
+
+- **CVE-2026-30784** (Critical): rendezvous (hbbs) の `handle_punch_hole_request()`
+  と **RegisterPeer ハンドラが認証なしで悪意あるピアを登録可能** → 権限昇格。
+  relay forwarding にもアクセス制御なし。
+  **Miru の状況**: `miru-signal` の Register ハンドラは既に
+  `verify_register_signature` (Ed25519 所有権証明) + identity-lock を実装済みで
+  この攻撃面をほぼ塞いでいる(コード実査で確認)。**唯一の残存緩和点**は、
+  後方互換のため「署名なし Register を警告付きで受理」している点
+  (`main.rs` の `Ok(false) => warn!(...)` 分岐)。全クライアント移行後に
+  署名必須化(`Ok(false)` を reject に)すれば完全に閉じる。
+- **CVE-2026-30794** (AiTM): TLS retry が `danger_accept_invalid_certs(true)` を
+  使用。**Miru**: 該当関数を一切提供しない設計(TRUST.md 既載)。
+- **CVE-2026-30795**: Heartbeat 同期ループの平文送信。**Miru**: 全セッション
+  メッセージが ChaCha20-Poly1305 暗号化、signal 経由は device_id/pubkey のみ。
+- **CVE-2026-30792** (MitM): strategy 同期/HTTP API のメッセージ改ざん。
+  **Miru**: HTTP API 設定同期チャネル自体が存在しない(該当せず)。
+
+**Miru への含意**: 本調査で判明した **具体的な次アクションは1つ** — 全クライアント
+が署名付き Register に移行し次第、`miru-signal` の未署名 Register 受理を
+reject に切り替える(CVE-2026-30784 の残存緩和点を閉じる)。それ以外の RustDesk
+2026 CVE は Miru の既存設計で構造的にカバー済み。
+
+**出典**:
+- https://www.sentinelone.com/vulnerability-database/cve-2026-30784/
+- https://vulnerability.circl.lu/vuln/cve-2026-30784
+- https://www.sentinelone.com/vulnerability-database/cve-2026-30794/
+- https://www.sentinelone.com/vulnerability-database/cve-2026-30795/
+- https://app.opencve.io/cve/?vendor=rustdesk
+
+## 7. macOS ScreenCaptureKit — CGDisplay は積極的 deprecation フェーズへ
+
+**現状 (2026)**: 旧 Quartz CGDisplay API は deprecated。**macOS Sequoia 15.1
+以降、CGScreenCapture 系を使うアプリに対し OS が「セキュリティ設定を回避しようと
+している」旨のユーザー警告を出し始めた**。ScreenCaptureKit (SCStream) が正道。
+Rust バインディングは `screencapturekit` crate (crates.io) が存在。SCStream の
+停止通知は `SCStreamDelegateTrait::did_stop_with_error` に一本化(旧
+`stream_did_stop` は deprecated)。`CGPreflightScreenCaptureAccess` も 15.1 で
+deprecation issue が上がっている(xcap#160)。
+
+**Miru への含意**:
+- FEATURE_AUDIT 🔴#5 (macOS 20fps) は「性能改善」だけでなく **2026年時点では
+  互換性リスク**になりつつある — Sequoia でユーザーに警告が出るなら UX 上の
+  ブロッカーに近い。ScreenCaptureKit 移行の優先度を上げる材料
+- Rust から `screencapturekit` crate を使えば FFI を自前で書かずに済む可能性
+
+**出典**:
+- https://developer.apple.com/documentation/screencapturekit/
+- https://crates.io/crates/screencapturekit
+- https://github.com/nashaofu/xcap/issues/160
+- https://github.com/svtlabs/screencapturekit-rs
+
+## 8. Tauri v2 配布パイプライン — 署名/公証/updater の実務
+
+**現状 (2026)**: Tauri v2 は署名・公証・自動更新の公式ドキュメントが整備済み:
+- **macOS**: Developer ID Application 証明書で署名 → Tauri がビルド時に **公証を
+  自動実行**(App Store Connect API または Apple ID の認証情報を環境変数で渡す)。
+  **無料 Apple Developer アカウントでは公証不可**(有料 $99/年が必須)
+- **Windows**: OV 証明書 + Azure Key Vault 方式が推奨。署名なしは SmartScreen 警告
+- **updater**: `npm run tauri signer generate` で鍵ペア生成、
+  `TAURI_SIGNING_PRIVATE_KEY` 等の環境変数で署名。`latest.json` を配布
+
+**Miru への含意**:
+- roadmap §0.5 フェーズ2(署名・自動更新)の実装手順が具体化。Tauri v2 の
+  updater は Ed25519 署名 + `latest.json` で、`docs/updater.md` の既存設計と
+  一致する(公式プラグインをそのまま使える)
+- **コスト要件が判明**: macOS 配布には有料 Apple Developer Program ($99/年) が
+  必須。「完全無料でセルフホスト」を掲げる Miru でも、署名済み macOS バイナリを
+  配るには開発元の有料アカウントが要る点を README/roadmap に明記すべき
+
+**出典**:
+- https://v2.tauri.app/distribute/sign/macos/
+- https://v2.tauri.app/distribute/sign/windows/
+- https://v2.tauri.app/plugin/updater/
+- https://dev.to/tomtomdu73/ship-your-tauri-v2-app-like-a-pro-code-signing-for-macos-and-windows-part-12-3o9n
+
 ## 調査メタ情報
 
-- 調査日: 2026-07 / 方法: Web 検索(4クエリ)
-- 未調査で価値がありそうな残りテーマ: ScreenCaptureKit の最新 API 変更、
-  Tauri v2 の updater/notarization 実務、RustDesk の 2026 年 CVE 動向
+- 調査日: 2026-07 / 方法: Web 検索(第1回4クエリ + 第2回4クエリ)
+- 本調査で判明した唯一の具体コードアクション: §6 の CVE-2026-30784 残存緩和点
+  (未署名 Register 受理)の将来クローズ。それ以外は設計判断/優先度材料。
+- 残テーマ: WebRTC DataChannel vs raw QUIC のベンチ比較、Opus の DTX/FEC 設定
