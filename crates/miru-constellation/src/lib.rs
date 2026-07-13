@@ -212,6 +212,12 @@ pub struct HandoffToken {
     pub signature_b64: String,
 }
 
+/// Hard cap on handoff TTL — mirrors miru_agent::token::MAX_TTL_SECS. Without
+/// this, an unbounded caller-supplied ttl_secs could overflow the
+/// unix_now() + ttl_secs addition (panicking in debug/overflow-checked
+/// builds, wrapping to an unexpected timestamp in release).
+pub const MAX_HANDOFF_TTL_SECS: u64 = 300;
+
 impl HandoffToken {
     pub fn issue(
         constellation_key: &SigningKey,
@@ -221,7 +227,7 @@ impl HandoffToken {
         ttl_secs: u64,
     ) -> Self {
         use base64::{engine::general_purpose::STANDARD as B64, Engine};
-        let expires_at = unix_now() + ttl_secs;
+        let expires_at = unix_now().saturating_add(ttl_secs.min(MAX_HANDOFF_TTL_SECS));
         let mut blob = Vec::with_capacity(56); // 3×16 (UUIDs) + 8 (expires_at)
         blob.extend_from_slice(session_id.as_bytes());
         blob.extend_from_slice(from_device.as_bytes());

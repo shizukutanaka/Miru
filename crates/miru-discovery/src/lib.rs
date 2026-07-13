@@ -88,6 +88,18 @@ impl Discovery {
             .take(12)
             .collect::<String>()
             .to_lowercase();
+        // If device_id has no ASCII-alphanumeric characters at all, every such
+        // device would otherwise collapse to the same "miru-" instance name,
+        // silently colliding on the LAN. Fall back to a deterministic hash of
+        // the raw device_id so distinct devices stay distinguishable.
+        let safe_id = if safe_id.is_empty() {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            advert.device_id.hash(&mut hasher);
+            format!("{:x}", hasher.finish() & 0xFFFF_FFFF)
+        } else {
+            safe_id
+        };
         let instance_name = format!("miru-{safe_id}");
         let hostname = format!("{instance_name}.local.");
 
@@ -181,11 +193,19 @@ impl Discovery {
 }
 
 fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
-    let txt: HashMap<String, String> = info
-        .get_properties()
-        .iter()
-        .map(|p| (p.key().to_string(), p.val_str().to_string()))
-        .collect();
+    // Built via an explicit loop (rather than .collect() into a HashMap) so a
+    // malformed/hostile peer advertising a duplicate TXT key doesn't silently
+    // drop one of the two values with no diagnostic trail.
+    let mut txt: HashMap<String, String> = HashMap::new();
+    for p in info.get_properties().iter() {
+        if txt.insert(p.key().to_string(), p.val_str().to_string()).is_some() {
+            warn!(
+                "Discovery: duplicate TXT key '{}' from {}",
+                p.key(),
+                info.get_fullname()
+            );
+        }
+    }
 
     let device_id = txt.get("device_id")?.clone();
     // device_id must match "XXXX-XXXX" format (9 chars); reject oversized values.
