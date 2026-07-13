@@ -47,6 +47,14 @@ struct AppState {
     relay_port: u16,
     /// Public hostname/IP for advertising to peers — read once at startup.
     public_host: String,
+    /// When true, reject Register messages that carry no Ed25519 ownership
+    /// proof instead of accepting them with a warning. Opt-in via
+    /// MIRU_REQUIRE_SIGNED_REGISTER=1. Default stays permissive for backward
+    /// compatibility with pre-signature clients; operators who have finished
+    /// migrating their fleet can flip this on to fully close the
+    /// unauthenticated-peer-registration attack surface (cf. RustDesk
+    /// CVE-2026-30784, docs/RESEARCH_NOTES.md §6).
+    require_signed_register: bool,
 }
 
 struct DeviceEntry {
@@ -97,6 +105,10 @@ impl AppState {
             .unwrap_or(DEFAULT_MAX_RELAY_SESSIONS);
         let public_host = std::env::var("MIRU_PUBLIC_HOST")
             .unwrap_or_else(|_| "localhost".to_string());
+        let require_signed_register = std::env::var("MIRU_REQUIRE_SIGNED_REGISTER").is_ok();
+        if require_signed_register {
+            info!("MIRU_REQUIRE_SIGNED_REGISTER set — unsigned Register messages will be rejected");
+        }
         Self {
             registry: Arc::new(DashMap::new()),
             relay_sessions: Arc::new(DashMap::new()),
@@ -105,6 +117,7 @@ impl AppState {
             max_relay_sessions,
             relay_port,
             public_host,
+            require_signed_register,
         }
     }
 
@@ -338,8 +351,25 @@ async fn process_rdv_msg(
             match miru_transport::signaling::verify_register_signature(&reg) {
                 Ok(true) => {} // verified — device owns the claimed pubkey
                 Ok(false) => {
-                    // Legacy client with no signature. Accept but log so operators
-                    // can track rollout progress.
+                    // Legacy client with no signature.
+                    if state.require_signed_register {
+                        // Strict mode: reject. Closes the unauthenticated
+                        // peer-registration surface (cf. RustDesk CVE-2026-30784).
+                        warn!(
+                            "Register rejected: {} has no ownership proof and \
+                            MIRU_REQUIRE_SIGNED_REGISTER is set",
+                            reg.device_id
+                        );
+                        let _ = tx
+                            .send(Msg::Error(miru_common::message::ErrorMsg {
+                                code: 403,
+                                message: "signed registration required".to_string(),
+                            }))
+                            .await;
+                        return;
+                    }
+                    // Permissive default: accept but log so operators can track
+                    // rollout progress before flipping on strict mode.
                     warn!(
                         "Register: {} has no ownership proof (upgrade miru-host/miru-client)",
                         reg.device_id

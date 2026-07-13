@@ -154,8 +154,12 @@ SLH-DSA をネイティブサポート。正しい combiner は「両鍵交換�
 
 **Miru への含意**: 本調査で判明した **具体的な次アクションは1つ** — 全クライアント
 が署名付き Register に移行し次第、`miru-signal` の未署名 Register 受理を
-reject に切り替える(CVE-2026-30784 の残存緩和点を閉じる)。それ以外の RustDesk
-2026 CVE は Miru の既存設計で構造的にカバー済み。
+reject に切り替える(CVE-2026-30784 の残存緩和点を閉じる)。→ **実装済み(要ビルド検証)**:
+`MIRU_REQUIRE_SIGNED_REGISTER=1` を設定すると未署名 Register を 403 で拒否する
+opt-in strict モードを追加(`MIRU_ALLOW_STUB`/`MIRU_REQUIRE_PAIRING_CONFIRM` と
+同じ「デフォルト維持・明示的 opt-in」パターン)。デフォルトは後方互換のため
+従来どおり警告付き受理。それ以外の RustDesk 2026 CVE は Miru の既存設計で
+構造的にカバー済み。
 
 **出典**:
 - https://www.sentinelone.com/vulnerability-database/cve-2026-30784/
