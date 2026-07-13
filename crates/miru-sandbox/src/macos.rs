@@ -75,7 +75,8 @@ pub fn apply(_policy: &Policy) -> Result<Outcome> {
         o.notes.push("PT_DENY_ATTACH applied".into());
     } else {
         o.notes.push(format!(
-            "ptrace(PT_DENY_ATTACH) failed (often expected when running unsigned)"
+            "ptrace(PT_DENY_ATTACH) failed: {} (often expected when running unsigned)",
+            std::io::Error::last_os_error()
         ));
     }
 

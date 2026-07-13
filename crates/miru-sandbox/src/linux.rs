@@ -42,6 +42,11 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
 
     // landlock 0.4 builder consumes self on add_rule. Use Option<_> shuttle
     // to thread the ruleset through loops without move-out errors.
+    // Tracks whether handle_access(net_access) succeeded, so the bind/connect
+    // rule loops below can be skipped on the fs-only fallback path — adding a
+    // NetPort rule to a ruleset that never declared net handling fails, which
+    // would otherwise abort the whole function (and its FS rules) early.
+    let mut net_handled = true;
     let mut rs_opt = match Ruleset::default()
         .handle_access(fs_access)
         .and_then(|rs| rs.handle_access(net_access))
@@ -49,8 +54,23 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
     {
         Ok(r) => Some(r),
         Err(e) => {
-            outcome.notes.push(format!("landlock unavailable: {e}"));
-            return;
+            // The doc comment above promises a v4 (FS+net) -> v3 (FS-only)
+            // fallback, but chaining handle_access(net_access) unconditionally
+            // meant a kernel that only supports v3 (6.1-6.3, no network
+            // rules) dropped FS restriction entirely along with net — the
+            // opposite of "degrades gracefully". Retry FS-only before giving
+            // up, so older kernels still get filesystem confinement.
+            outcome.notes.push(format!(
+                "landlock v4 (fs+net) unavailable: {e}, retrying fs-only (v3)"
+            ));
+            net_handled = false;
+            match Ruleset::default().handle_access(fs_access).and_then(|rs| rs.create()) {
+                Ok(r) => Some(r),
+                Err(e2) => {
+                    outcome.notes.push(format!("landlock unavailable: {e2}"));
+                    return;
+                }
+            }
         }
     };
 
@@ -108,36 +128,45 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
         }
     }
 
-    // Bind ports.
-    for port in &policy.tcp_bind_ports {
-        let Some(rs) = rs_opt.take() else {
-            return;
-        };
-        let rule = NetPort::new(*port, AccessNet::BindTcp);
-        match rs.add_rule(rule) {
-            Ok(r) => rs_opt = Some(r),
-            Err(e) => {
-                outcome.notes.push(format!("landlock bind {port}: {e}"));
-                return;
-            }
-        }
-    }
-
-    // Common outbound ports for TCP connect.
-    if policy.allow_tcp_connect {
-        for port in [80u16, 443, 21115, 21116, 21117, 3478, 5349] {
+    // Bind ports. Skipped on the fs-only fallback path (net_handled == false):
+    // adding a NetPort rule to a ruleset that never called handle_access(net)
+    // always errors, which would abort the function here and lose the FS
+    // rules already staged in rs_opt before restrict_self() ever runs.
+    if net_handled {
+        for port in &policy.tcp_bind_ports {
             let Some(rs) = rs_opt.take() else {
                 return;
             };
-            let rule = NetPort::new(port, AccessNet::ConnectTcp);
+            let rule = NetPort::new(*port, AccessNet::BindTcp);
             match rs.add_rule(rule) {
                 Ok(r) => rs_opt = Some(r),
                 Err(e) => {
-                    outcome.notes.push(format!("landlock connect {port}: {e}"));
+                    outcome.notes.push(format!("landlock bind {port}: {e}"));
                     return;
                 }
             }
         }
+
+        // Common outbound ports for TCP connect.
+        if policy.allow_tcp_connect {
+            for port in [80u16, 443, 21115, 21116, 21117, 3478, 5349] {
+                let Some(rs) = rs_opt.take() else {
+                    return;
+                };
+                let rule = NetPort::new(port, AccessNet::ConnectTcp);
+                match rs.add_rule(rule) {
+                    Ok(r) => rs_opt = Some(r),
+                    Err(e) => {
+                        outcome.notes.push(format!("landlock connect {port}: {e}"));
+                        return;
+                    }
+                }
+            }
+        }
+    } else if !policy.tcp_bind_ports.is_empty() || policy.allow_tcp_connect {
+        outcome
+            .notes
+            .push("landlock: network rules skipped (fs-only fallback active)".to_string());
     }
 
     // Engage.
@@ -148,7 +177,10 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
         Ok(status) => {
             outcome.fs_restricted = matches!(status.ruleset, RulesetStatus::FullyEnforced)
                 || matches!(status.ruleset, RulesetStatus::PartiallyEnforced);
-            outcome.net_restricted = outcome.fs_restricted;
+            // Only true when the ruleset actually declared net handling —
+            // the fs-only (v3) fallback path never does, so net_restricted
+            // must not simply mirror fs_restricted there.
+            outcome.net_restricted = net_handled && outcome.fs_restricted;
             outcome
                 .notes
                 .push(format!("landlock status: {:?}", status.ruleset));
