@@ -4,6 +4,7 @@
 //! JPEG via the `image` crate (always available).
 //! AV1 → dav1d, H264/H265 → ffmpeg (TODO v0.3).
 
+use crate::color::{bt601_uv, bt601_y};
 use crate::DecodedFrame;
 use anyhow::{bail, Result};
 use miru_common::message::VideoCodec;
@@ -84,22 +85,20 @@ pub(crate) fn rgb_to_i420(rgb: &image::RgbImage, w: u32, h: u32) -> (Vec<u8>, Ve
     let mut u_plane = Vec::with_capacity((w as usize / 2) * (h as usize / 2));
     let mut v_plane = Vec::with_capacity((w as usize / 2) * (h as usize / 2));
 
-    // Pass 1: Y luma — BT.601 limited range, fixed-point (<<8).
-    // Y = ((66*R + 129*G + 25*B + 128) >> 8) + 16  → [16, 235]
+    // Pass 1: Y luma — BT.601 limited range, fixed-point (<<8). See
+    // crate::color::bt601_y for the formula.
     for row in 0..h {
         for col in 0..w {
             let px = rgb.get_pixel(col, row);
             let r = px[0] as i32;
             let g = px[1] as i32;
             let b = px[2] as i32;
-            let yy = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-            y_plane.push(yy.clamp(16, 235) as u8);
+            y_plane.push(bt601_y(r, g, b));
         }
     }
 
-    // Pass 2: UV chroma — 2×2 block average, fixed-point (<<8).
-    // Cb = ((-38*R - 74*G + 112*B + 128) >> 8) + 128  → [16, 240]
-    // Cr = ((112*R - 94*G - 18*B + 128) >> 8) + 128
+    // Pass 2: UV chroma — 2×2 block average, fixed-point (<<8). See
+    // crate::color::bt601_uv for the formula.
     let h2 = h / 2;
     let w2 = w / 2;
     for row in 0..h2 {
@@ -120,10 +119,9 @@ pub(crate) fn rgb_to_i420(rgb: &image::RgbImage, w: u32, h: u32) -> (Vec<u8>, Ve
             let g = avg(1);
             let b = avg(2);
 
-            let cb = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-            let cr = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-            u_plane.push(cb.clamp(16, 240) as u8);
-            v_plane.push(cr.clamp(16, 240) as u8);
+            let (cb, cr) = bt601_uv(r, g, b);
+            u_plane.push(cb);
+            v_plane.push(cr);
         }
     }
 

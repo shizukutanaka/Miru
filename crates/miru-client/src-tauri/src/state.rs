@@ -44,14 +44,17 @@ pub struct AppState {
     stats: Arc<Mutex<SessionStats>>,
     pub recording: Arc<Mutex<Option<RecordingState>>>,
     discovery: Arc<Mutex<Option<miru_discovery::Discovery>>>,
-    /// Holds the oneshot sender for a pairing confirmation currently awaiting
-    /// a UI response. `None` when no pairing prompt is pending.
-    pending_pairing: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
 struct ActiveSession {
     tx: mpsc::Sender<Msg>,
     cancel: tokio::sync::oneshot::Sender<()>,
+    /// Holds the oneshot sender for a pairing confirmation currently awaiting
+    /// a UI response. `None` when no pairing prompt is pending. Scoped to this
+    /// session (not a single AppState-wide slot) so a superseded session that
+    /// hasn't fully exited yet can never be handed a confirmation meant for
+    /// the session that replaced it.
+    pending_pairing: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
 /// Maximum number of auto-reconnect attempts on unexpected disconnect.
@@ -89,7 +92,6 @@ impl AppState {
             stats: Arc::new(Mutex::new(SessionStats::default())),
             recording: Arc::new(Mutex::new(None)),
             discovery: Arc::new(Mutex::new(discovery)),
-            pending_pairing: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -102,10 +104,12 @@ impl AppState {
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Msg>(64);
         let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
+        let mut pending_pairing = Arc::new(Mutex::new(None));
 
         *self.session.lock() = Some(ActiveSession {
             tx: cmd_tx,
             cancel: cancel_tx,
+            pending_pairing: Arc::clone(&pending_pairing),
         });
 
         let identity = Arc::clone(&self.identity);
@@ -113,7 +117,6 @@ impl AppState {
         let recording = Arc::clone(&self.recording);
         let acl = Arc::clone(&self.acl);
         let acl_path = self.config_dir.join("acl.json");
-        let pending_pairing = Arc::clone(&self.pending_pairing);
         let app_clone = app.clone();
         let session_slot = Arc::clone(&self.session);
 
@@ -163,12 +166,14 @@ impl AppState {
                             host_pub_addr: None,
                         });
                         tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
-                        // Re-create cmd channel for the new attempt.
+                        // Re-create cmd channel (and pending_pairing slot) for the new attempt.
                         let (new_cmd_tx, new_cmd_rx) = mpsc::channel::<Msg>(64);
                         let (new_cancel_tx, new_cancel_rx) = tokio::sync::oneshot::channel();
+                        pending_pairing = Arc::new(Mutex::new(None));
                         *session_slot.lock() = Some(ActiveSession {
                             tx: new_cmd_tx,
                             cancel: new_cancel_tx,
+                            pending_pairing: Arc::clone(&pending_pairing),
                         });
                         cmd_rx = new_cmd_rx;
                         cancel_rx = new_cancel_rx;
@@ -274,13 +279,24 @@ impl AppState {
     }
 
     /// Resolve a pending first-connection pairing prompt (see session.rs's
-    /// TOFU gate). `accept = false` also covers "no prompt pending" — the
-    /// caller sees the send simply have no effect via `send().is_err()`
-    /// being ignored, which is fine: if the session already timed out the
-    /// gate has moved on regardless.
+    /// TOFU gate). Reads the pairing slot off the *current* session in
+    /// `self.session` rather than a single AppState-wide slot, so a stale
+    /// superseded session (mid-shutdown after a disconnect()) can never be
+    /// handed a confirmation meant for the session that replaced it.
+    /// `accept = false` also covers "no prompt pending" — the caller sees
+    /// the send simply have no effect via `send().is_err()` being ignored,
+    /// which is fine: if the session already timed out the gate has moved
+    /// on regardless.
     pub fn confirm_pairing(&self, accept: bool) {
-        if let Some(tx) = self.pending_pairing.lock().take() {
-            let _ = tx.send(accept);
+        let pending = self
+            .session
+            .lock()
+            .as_ref()
+            .map(|s| Arc::clone(&s.pending_pairing));
+        if let Some(pending) = pending {
+            if let Some(tx) = pending.lock().take() {
+                let _ = tx.send(accept);
+            }
         }
     }
 

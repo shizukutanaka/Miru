@@ -198,11 +198,23 @@ pub async fn run(
             emit_status_full(&app, "pairing_required", None, Some(host_fpr.clone()), host_pub_addr.clone());
 
             // 120s to give the user time to compare fingerprints out-of-band.
-            let accepted = time::timeout(std::time::Duration::from_secs(120), rx)
-                .await
-                .ok()
-                .and_then(|r| r.ok())
-                .unwrap_or(false);
+            // Also races cancel_rx: without this, a session superseded by a new
+            // connect() (state.rs's disconnect() only fire-and-forgets the
+            // cancel signal, it doesn't wait for this task to exit) would sit
+            // here for up to 120s, still holding pending_pairing and able to
+            // race a newer session for it.
+            let accepted = tokio::select! {
+                biased;
+                _ = &mut cancel_rx => {
+                    *pending_pairing.lock() = None;
+                    return Err(anyhow::Error::new(NoAutoRetry(
+                        "cancelled while awaiting pairing confirmation".to_string(),
+                    )));
+                }
+                r = time::timeout(std::time::Duration::from_secs(120), rx) => {
+                    r.ok().and_then(|r| r.ok()).unwrap_or(false)
+                }
+            };
             *pending_pairing.lock() = None;
 
             if !accepted {

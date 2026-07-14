@@ -221,6 +221,17 @@ const RENDEZVOUS_PING_INTERVAL: Duration = Duration::from_secs(30);
 /// stall a session task — and its registry/relay-slot cleanup — indefinitely.
 const SEND_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// Awaits a send future under `SEND_TIMEOUT`, collapsing "timed out" and "send
+/// errored" into a single bool so call sites don't repeat the
+/// `match tokio::time::timeout(...) { Ok(Ok(())) => {}, _ => break }` shuttle.
+/// `true` = sent; `false` = caller should treat the connection as dead.
+async fn send_timed<F, T, E>(fut: F) -> bool
+where
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    matches!(tokio::time::timeout(SEND_TIMEOUT, fut).await, Ok(Ok(_)))
+}
+
 async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<Msg>(32);
     let mut my_id: Option<String> = None;
@@ -232,10 +243,7 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
             // Forward outbound messages to WebSocket
             Some(msg) = rx.recv() => {
                 let Ok(json) = serde_json::to_string(&msg) else { continue };
-                match tokio::time::timeout(SEND_TIMEOUT, sock.send(Message::Text(json))).await {
-                    Ok(Ok(())) => {}
-                    _ => break,
-                }
+                if !send_timed(sock.send(Message::Text(json))).await { break; }
             }
             // Handle inbound WebSocket messages
             incoming = sock.recv() => {
@@ -247,7 +255,7 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
                         }
                     }
                     Some(Ok(Message::Ping(d))) => {
-                        let _ = tokio::time::timeout(SEND_TIMEOUT, sock.send(Message::Pong(d))).await;
+                        let _ = send_timed(sock.send(Message::Pong(d))).await;
                     }
                     Some(Ok(Message::Pong(_))) => {} // keepalive echo
                     _ => break,
@@ -255,10 +263,7 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
             }
             // Server-initiated keepalive ping to detect dead connections.
             _ = ping_ticker.tick() => {
-                match tokio::time::timeout(SEND_TIMEOUT, sock.send(Message::Ping(vec![]))).await {
-                    Ok(Ok(())) => {}
-                    _ => break,
-                }
+                if !send_timed(sock.send(Message::Ping(vec![]))).await { break; }
             }
         }
     }
@@ -705,10 +710,7 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
                             );
                             break;
                         }
-                        match tokio::time::timeout(SEND_TIMEOUT, peer_tx.send(data)).await {
-                            Ok(Ok(())) => {}
-                            _ => break,
-                        }
+                        if !send_timed(peer_tx.send(data)).await { break; }
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     _ => {}
@@ -718,10 +720,7 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
             data = fwd_rx.recv() => {
                 match data {
                     Some(d) => {
-                        match tokio::time::timeout(SEND_TIMEOUT, ws_tx.send(Message::Binary(d))).await {
-                            Ok(Ok(())) => {}
-                            _ => break,
-                        }
+                        if !send_timed(ws_tx.send(Message::Binary(d))).await { break; }
                     }
                     None => break,
                 }

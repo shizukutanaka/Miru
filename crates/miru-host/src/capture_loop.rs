@@ -12,6 +12,7 @@ use miru_capture::{
     frame::{PixelFormat, RawFrame},
     ScreenCapturer,
 };
+use miru_codec::color::{bt601_uv, bt601_y};
 use miru_codec::encoder::Encoder;
 use miru_common::message::{Msg, VideoCodec, VideoFrame};
 use std::sync::Arc;
@@ -212,8 +213,7 @@ fn packed32_to_i420(frame: &RawFrame, r_off: usize, g_off: usize, b_off: usize) 
             let r = src[i + r_off] as i32;
             let g = src[i + g_off] as i32;
             let b = src[i + b_off] as i32;
-            let y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-            y_plane[row * w + col] = y.clamp(16, 235) as u8;
+            y_plane[row * w + col] = bt601_y(r, g, b);
         }
     }
 
@@ -236,10 +236,9 @@ fn packed32_to_i420(frame: &RawFrame, r_off: usize, g_off: usize, b_off: usize) 
             let g = avg(g_off);
             let b = avg(b_off);
             let uv_i = (row / 2) * (w / 2) + col / 2;
-            let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-            let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-            u_plane[uv_i] = u.clamp(16, 240) as u8;
-            v_plane[uv_i] = v.clamp(16, 240) as u8;
+            let (u, v) = bt601_uv(r, g, b);
+            u_plane[uv_i] = u;
+            v_plane[uv_i] = v;
         }
     }
     out
