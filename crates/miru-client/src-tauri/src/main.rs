@@ -33,6 +33,7 @@ fn main() {
             commands::list_trusted_peers,
             commands::revoke_peer,
             commands::session_stats,
+            commands::set_decode_mode,
             commands::fingerprint,
             commands::issue_agent_token,
             commands::audit_summary,

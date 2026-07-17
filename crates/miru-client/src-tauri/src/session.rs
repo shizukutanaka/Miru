@@ -31,6 +31,20 @@ pub struct VideoFrameEvent {
     pub jpeg_b64: String,
 }
 
+/// A raw encoded video packet forwarded to the frontend for WebCodecs decode.
+/// Used only when the UI has enabled WebCodecs mode (see `set_decode_mode`):
+/// the host's VP9/VP8 bitstream is passed through untouched — no Rust decode,
+/// no JPEG re-encode — so the WebView's hardware `VideoDecoder` does the work
+/// and IPC carries only the compressed stream.
+#[derive(Serialize, Clone)]
+pub struct VideoPacketEvent {
+    /// Short codec tag the frontend maps to a WebCodecs codec string ("vp9"/"vp8").
+    pub codec: String,
+    pub keyframe: bool,
+    pub timestamp_ms: u64,
+    pub data_b64: String,
+}
+
 #[derive(Serialize, Clone)]
 pub struct SessionEvent {
     pub kind: String,
@@ -71,6 +85,7 @@ pub async fn run(
     acl: Arc<Mutex<AclStore>>,
     acl_path: std::path::PathBuf,
     pending_pairing: Arc<Mutex<Option<oneshot::Sender<bool>>>>,
+    webcodecs_decode: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
     emit_status(&app, "connecting", None, None);
 
@@ -325,6 +340,51 @@ pub async fn run(
                             seq_total += gap + 1;
                         }
                         last_seq = Some(vf.seq);
+
+                        // WebCodecs passthrough: when the UI has a working
+                        // VideoDecoder, forward the raw VP9/VP8 bitstream and
+                        // let the WebView decode it. No Rust decode, no JPEG
+                        // re-encode — IPC carries only the compressed stream.
+                        // Recording is intentionally skipped on this path: it
+                        // stores JPEG frames, which aren't produced here, so the
+                        // UI drops back to the Rust decode path while recording.
+                        if webcodecs_decode.load(std::sync::atomic::Ordering::Relaxed)
+                            && matches!(vf.codec, VideoCodec::Vp9 | VideoCodec::Vp8)
+                        {
+                            frame_count += 1;
+                            frames_since_update += 1;
+                            let elapsed = last_stats_update.elapsed();
+                            if elapsed.as_secs() >= 1 {
+                                let elapsed_secs = elapsed.as_secs_f32();
+                                let mut s = stats.lock();
+                                s.frames_decoded = frame_count;
+                                s.bytes_recv += bytes_since_update;
+                                s.fps = frames_since_update as f32 / elapsed_secs;
+                                s.bitrate_kbps = ((bytes_since_update * 8) as f32
+                                    / elapsed_secs / 1000.0) as u32;
+                                s.packet_loss_pct = if seq_total > 0 {
+                                    (seq_gaps as f32 / seq_total as f32) * 100.0
+                                } else {
+                                    0.0
+                                };
+                                bytes_since_update = 0;
+                                frames_since_update = 0;
+                                seq_gaps = 0;
+                                seq_total = 0;
+                                last_stats_update = std::time::Instant::now();
+                            }
+                            let codec = match vf.codec {
+                                VideoCodec::Vp8 => "vp8",
+                                _ => "vp9",
+                            };
+                            let _ = app.emit("video-packet", VideoPacketEvent {
+                                codec: codec.to_string(),
+                                keyframe: vf.keyframe,
+                                timestamp_ms: vf.timestamp_ms,
+                                data_b64: B64.encode(&vf.data),
+                            });
+                            continue;
+                        }
 
                         // JPEG fast path: skip decode+re-encode entirely.
                         // Passing host JPEG bytes straight to the frontend preserves

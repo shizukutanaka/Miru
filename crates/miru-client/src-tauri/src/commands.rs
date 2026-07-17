@@ -215,6 +215,17 @@ pub fn session_stats(state: State<'_, AppState>) -> SessionStats {
     state.stats()
 }
 
+/// Select the video decode path. `webcodecs = true` forwards raw VP9/VP8
+/// packets for the WebView's `VideoDecoder` to decode; `false` decodes in Rust
+/// and emits JPEG frames (required for recording). The frontend calls this once
+/// after detecting `VideoDecoder` support, and again to fall back on decoder
+/// error or while recording.
+#[tauri::command]
+pub fn set_decode_mode(webcodecs: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.set_decode_mode(webcodecs);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn fingerprint(state: tauri::State<'_, AppState>) -> String {
     state.fingerprint()

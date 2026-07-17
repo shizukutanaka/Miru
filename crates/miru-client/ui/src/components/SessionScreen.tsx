@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, SessionStats, DisplayInfo } from "../lib/tauri";
+import { WebCodecsRenderer, webcodecsVp9Supported } from "../lib/webcodecs-renderer";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
@@ -48,10 +49,30 @@ export function SessionScreen({ onDisconnect }: Props) {
   const pendingFrameRef = useRef<{ b64: string; w: number; h: number } | null>(null);
   const decodingRef = useRef(false);
 
+  // WebCodecs path (ADR 0013 follow-up): when the WebView can decode VP9, the
+  // host forwards raw packets (`video-packet`) and we decode them here instead
+  // of receiving JPEG. `supported` = probe result; `failed` = a runtime decoder
+  // error occurred (fall back for the rest of the session). Recording forces the
+  // Rust/JPEG path since it stores JPEG frames.
+  const rendererRef = useRef<WebCodecsRenderer | null>(null);
+  const wcSupportedRef = useRef(false);
+  const wcFailedRef = useRef(false);
+
+  // Pick the decode mode from current state and tell the backend. WebCodecs is
+  // used only when supported, not previously failed, and not recording.
+  const syncDecodeMode = (isRecording: boolean) => {
+    const useWebCodecs =
+      wcSupportedRef.current && !wcFailedRef.current && !isRecording;
+    void api.setDecodeMode(useWebCodecs);
+    if (!useWebCodecs) rendererRef.current?.reset();
+  };
+
   useEffect(() => {
     let unlistenVideo: (() => void) | null = null;
+    let unlistenPacket: (() => void) | null = null;
     let unlistenStatus: (() => void) | null = null;
     let unlistenQos: (() => void) | null = null;
+    let cancelled = false;
 
     const drainFrames = async () => {
       if (decodingRef.current) return;
@@ -89,6 +110,34 @@ export function SessionScreen({ onDisconnect }: Props) {
       setStalled(false);
       void drainFrames();
     }).then((fn) => (unlistenVideo = fn));
+
+    // WebCodecs decode path: forward raw packets to the VideoDecoder renderer.
+    api.onVideoPacket((e) => {
+      rendererRef.current?.push(e);
+      lastFrameRef.current = Date.now();
+      setStalled(false);
+    }).then((fn) => (cancelled ? fn() : (unlistenPacket = fn)));
+
+    // Probe VP9 WebCodecs support; if available, build the renderer and switch
+    // the backend to packet-forwarding. Any decoder error falls back to Rust
+    // JPEG decode for the rest of the session.
+    void webcodecsVp9Supported().then((ok) => {
+      if (cancelled) return;
+      wcSupportedRef.current = ok;
+      const canvas = canvasRef.current;
+      if (!ok || !canvas) return;
+      rendererRef.current = new WebCodecsRenderer(
+        canvas,
+        () => {
+          wcFailedRef.current = true;
+          rendererRef.current?.reset();
+          void api.setDecodeMode(false);
+        },
+        (w, h) => setResolution({ w, h }),
+      );
+      // Not recording at connect time; enable WebCodecs.
+      syncDecodeMode(false);
+    });
 
     api.onSessionEvent((e) => {
       if (e.kind === "connected") {
@@ -135,11 +184,15 @@ export function SessionScreen({ onDisconnect }: Props) {
     }, 500);
 
     return () => {
+      cancelled = true;
       unlistenVideo?.();
+      unlistenPacket?.();
       unlistenStatus?.();
       unlistenQos?.();
       unlistenDisplays?.();
       unlistenClipboard?.();
+      rendererRef.current?.destroy();
+      rendererRef.current = null;
       clearInterval(statsInterval);
     };
   }, [onDisconnect]);
@@ -317,8 +370,17 @@ export function SessionScreen({ onDisconnect }: Props) {
     if (recording) {
       try { await api.stopRecording(); } catch {}
       setRecording(false);
+      syncDecodeMode(false); // recording stopped — re-enable WebCodecs if available
     } else {
-      try { await api.startRecording(); setRecording(true); } catch {}
+      // Recording stores JPEG frames, which only the Rust decode path produces,
+      // so force it off the WebCodecs path before capturing starts.
+      syncDecodeMode(true);
+      try {
+        await api.startRecording();
+        setRecording(true);
+      } catch {
+        syncDecodeMode(false); // start failed — restore WebCodecs
+      }
     }
   };
 

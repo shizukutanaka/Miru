@@ -9,6 +9,7 @@ use uuid::Uuid;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
@@ -44,6 +45,12 @@ pub struct AppState {
     stats: Arc<Mutex<SessionStats>>,
     pub recording: Arc<Mutex<Option<RecordingState>>>,
     discovery: Arc<Mutex<Option<miru_discovery::Discovery>>>,
+    /// When true, VP9/VP8 frames are forwarded to the frontend as raw encoded
+    /// packets (WebCodecs decodes them in the WebView) instead of being decoded
+    /// to I420 and re-encoded to JPEG in Rust. Set by the UI once it detects
+    /// `VideoDecoder` support; cleared while recording (which needs JPEG frames).
+    /// Shared with the live `session::run` task, read once per frame.
+    webcodecs_decode: Arc<AtomicBool>,
 }
 
 struct ActiveSession {
@@ -92,7 +99,14 @@ impl AppState {
             stats: Arc::new(Mutex::new(SessionStats::default())),
             recording: Arc::new(Mutex::new(None)),
             discovery: Arc::new(Mutex::new(discovery)),
+            webcodecs_decode: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// UI toggle: forward raw VP9/VP8 packets for WebCodecs decode (true) vs.
+    /// decode in Rust and emit JPEG (false). Takes effect on the next frame.
+    pub fn set_decode_mode(&self, webcodecs: bool) {
+        self.webcodecs_decode.store(webcodecs, Ordering::Relaxed);
     }
 
     pub fn fingerprint(&self) -> String {
@@ -117,6 +131,7 @@ impl AppState {
         let recording = Arc::clone(&self.recording);
         let acl = Arc::clone(&self.acl);
         let acl_path = self.config_dir.join("acl.json");
+        let webcodecs_decode = Arc::clone(&self.webcodecs_decode);
         let app_clone = app.clone();
         let session_slot = Arc::clone(&self.session);
 
@@ -134,6 +149,7 @@ impl AppState {
                     Arc::clone(&acl),
                     acl_path.clone(),
                     Arc::clone(&pending_pairing),
+                    Arc::clone(&webcodecs_decode),
                 )
                 .await;
 

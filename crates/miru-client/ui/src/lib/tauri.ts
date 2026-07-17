@@ -36,6 +36,14 @@ export interface VideoFrameEvent {
   jpeg_b64: string;
 }
 
+export interface VideoPacketEvent {
+  /** "vp9" | "vp8" — mapped to a WebCodecs codec string by the renderer. */
+  codec: string;
+  keyframe: boolean;
+  timestamp_ms: number;
+  data_b64: string;
+}
+
 export interface SessionEvent {
   kind: SessionStatus;
   message?: string;
@@ -56,6 +64,14 @@ export const api = {
   /** Resolve a pending first-connection TOFU fingerprint confirmation. */
   confirmPairing: (accept: boolean) =>
     invoke<void>("confirm_pairing", { accept }),
+
+  /**
+   * Choose the video decode path. `webcodecs = true` forwards raw VP9/VP8
+   * packets for the WebView's VideoDecoder; `false` decodes in Rust and emits
+   * JPEG frames (needed for recording).
+   */
+  setDecodeMode: (webcodecs: boolean) =>
+    invoke<void>("set_decode_mode", { webcodecs }),
 
   sendInput: (input: {
     kind: string;
@@ -92,6 +108,8 @@ export const api = {
     listen<SessionEvent>("session-event", (e) => cb(e.payload)),
   onVideoFrame: (cb: (e: VideoFrameEvent) => void): Promise<UnlistenFn> =>
     listen<VideoFrameEvent>("video-frame", (e) => cb(e.payload)),
+  onVideoPacket: (cb: (e: VideoPacketEvent) => void): Promise<UnlistenFn> =>
+    listen<VideoPacketEvent>("video-packet", (e) => cb(e.payload)),
   onQosUpdate: (cb: (e: { fps: number; bitrate_kbps: number; quality: number }) => void): Promise<UnlistenFn> =>
     listen<{ fps: number; bitrate_kbps: number; quality: number }>("qos-update", (e) => cb(e.payload)),
   onDisplayList: (cb: (displays: DisplayInfo[]) => void): Promise<UnlistenFn> =>
