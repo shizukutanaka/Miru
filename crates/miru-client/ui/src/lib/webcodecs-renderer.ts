@@ -1,14 +1,17 @@
 /**
  * WebCodecs VP9/VP8 renderer.
  *
- * The correct fix for the double-codec path described in ADR 0013: instead of
- * decoding VP9 → I420 → JPEG in Rust and shipping JPEG over IPC, the host
- * forwards the raw VP9/VP8 bitstream (`video-packet` event) and this renderer
- * decodes it in the WebView with a hardware-accelerated `VideoDecoder`, drawing
- * straight to the session canvas. IPC then carries only the compressed stream.
+ * The correct fix for the double-codec path described in ADR 0013, with the
+ * runtime-fallback design recorded in ADR 0020: instead of decoding
+ * VP9 → I420 → JPEG in Rust and shipping JPEG over IPC, the host forwards the
+ * raw VP9/VP8 bitstream (`video-packet` event) and this renderer decodes it in
+ * the WebView with a hardware-accelerated `VideoDecoder`, drawing straight to
+ * the session canvas. IPC then carries only the compressed stream.
  *
  * On any decoder failure the `onError` callback fires; the caller falls back to
- * the Rust JPEG path (`api.setDecodeMode(false)`), which keeps working.
+ * the Rust JPEG path (`api.setDecodeMode(false)`), which keeps working. The
+ * JPEG path is deliberately NOT removed — it covers WebViews without VP9
+ * WebCodecs support (notably some Linux WebKitGTK builds) and recording.
  */
 export interface DecodePacket {
   codec: string;
