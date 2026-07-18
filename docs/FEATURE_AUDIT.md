@@ -59,7 +59,7 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 | 2 | QoS / バックプレッシャ | `crates/miru-host/src/qos_bbr.rs` (BBR 風制御) + `crates/miru-host/src/backpressure.rs`。RustDesk の AIMD より先進的 |
 | 3 | i18n + オンボーディング | `crates/miru-client/ui/src/locales/{ja,en}.json`、`OnboardingWizard.tsx` |
 | 4 | 配布基盤 | `scripts/install.sh` / `install.ps1`、`distribution/{aur,homebrew,scoop}/` |
-| 5 | テスト文化 | 統合テスト・ベンチ (`crates/miru-bench/`)・ファズ (`fuzz/`)・リグレッションテストが機能追加に伴い整備されている |
+| 5 | テスト文化 | 統合テスト・ベンチ (`crates/miru-bench/`)・ファズ (`fuzz/`)・リグレッションテストが機能追加に伴い整備されている。フロントエンドは従来テスト皆無だったが Vitest を導入し純粋ロジック(WebCodecs のコーデック判定・キーフレームゲーティング・base64 デコード)にテスト追加 (`npm test`、10件パス) |
 
 ## ⚠️ 要事実確認 — 過不足判定の前に確認が必要
 

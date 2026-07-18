@@ -34,6 +34,38 @@ export async function webcodecsVp9Supported(): Promise<boolean> {
 const VP9_CODEC = "vp09.00.10.08"; // profile 0, level 1.0, 8-bit
 const VP8_CODEC = "vp8";
 
+/** Decode-queue depth above which delta frames are dropped (latency guard). */
+export const MAX_QUEUE_BEFORE_DROP = 4;
+
+/** Map a short codec tag ("vp8"/"vp9") to a WebCodecs codec string. */
+export function codecStringFor(codec: string): string {
+  return codec === "vp8" ? VP8_CODEC : VP9_CODEC;
+}
+
+/**
+ * Pure gating decision for one packet — extracted so it can be unit-tested
+ * without a real VideoDecoder. A decoder can only start from a keyframe, and
+ * delta frames are dropped when the decode queue is backing up (keyframes are
+ * always kept so the picture recovers).
+ */
+export function shouldDecode(
+  keyframe: boolean,
+  gotKey: boolean,
+  queueSize: number,
+): boolean {
+  if (keyframe) return true;
+  if (!gotKey) return false;
+  return queueSize <= MAX_QUEUE_BEFORE_DROP;
+}
+
+/** Decode base64 → Uint8Array (BufferSource for EncodedVideoChunk). */
+export function b64ToBytes(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
 export class WebCodecsRenderer {
   private decoder: VideoDecoder | null = null;
   private configuredCodec: string | null = null;
@@ -51,12 +83,8 @@ export class WebCodecsRenderer {
       this.ensureDecoder(pkt.codec);
       const decoder = this.decoder;
       if (!decoder) return;
-      // A decoder can only start from a keyframe — drop deltas until one arrives.
-      if (!pkt.keyframe && !this.gotKey) return;
+      if (!shouldDecode(pkt.keyframe, this.gotKey, decoder.decodeQueueSize)) return;
       if (pkt.keyframe) this.gotKey = true;
-      // Latency guard: if the decode queue is backing up, drop delta frames
-      // (keyframes are always kept so the picture recovers).
-      if (!pkt.keyframe && decoder.decodeQueueSize > 4) return;
 
       const data = b64ToBytes(pkt.data_b64);
       const chunk = new EncodedVideoChunk({
@@ -91,7 +119,7 @@ export class WebCodecsRenderer {
       error: () => this.onError(),
     });
     decoder.configure({
-      codec: codec === "vp8" ? VP8_CODEC : VP9_CODEC,
+      codec: codecStringFor(codec),
       optimizeForLatency: true,
     });
     this.decoder = decoder;
@@ -116,12 +144,4 @@ export class WebCodecsRenderer {
   destroy(): void {
     this.reset();
   }
-}
-
-/** Decode base64 → Uint8Array (BufferSource for EncodedVideoChunk). */
-function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
 }
