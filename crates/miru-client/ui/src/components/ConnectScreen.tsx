@@ -10,7 +10,6 @@ export function ConnectScreen({ onConnect }: Props) {
   const [signalUrl, setSignalUrl] = useState(
     localStorage.getItem("miru.signal") || "ws://localhost:21115/ws",
   );
-  const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [peers, setPeers] = useState<TrustedPeer[]>([]);
@@ -44,7 +43,7 @@ export function ConnectScreen({ onConnect }: Props) {
     localStorage.setItem("miru.signal", signalUrl);
 
     try {
-      await api.connect(id, signalUrl, pin || undefined);
+      await api.connect(id, signalUrl);
       onConnect();
     } catch (e) {
       setError(String(e));
@@ -96,20 +95,6 @@ export function ConnectScreen({ onConnect }: Props) {
             value={signalUrl}
             onChange={(e) => setSignalUrl(e.target.value)}
             placeholder="ws://..."
-          />
-        </div>
-
-        <div className="field">
-          <label htmlFor="connect-pin">PIN（初回のみ）</label>
-          <input
-            id="connect-pin"
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={6}
-            placeholder="6桁の数字（任意）"
-            value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
           />
         </div>
 

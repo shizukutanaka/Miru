@@ -54,9 +54,9 @@ export interface SessionEvent {
 export const api = {
   fingerprint: () => invoke<string>("fingerprint"),
 
-  connect: (deviceId: string, signalUrl: string, pin?: string) =>
+  connect: (deviceId: string, signalUrl: string) =>
     invoke<void>("connect", {
-      args: { device_id: deviceId, signal_url: signalUrl, pin },
+      args: { device_id: deviceId, signal_url: signalUrl },
     }),
 
   disconnect: () => invoke<void>("disconnect"),

@@ -11,7 +11,12 @@ use tracing::info;
 pub struct ConnectArgs {
     pub device_id: String,
     pub signal_url: String,
-    pub pin: Option<String>,
+    // NOTE: a `pin` field used to live here and a matching input in
+    // ConnectScreen, but nothing ever read it — first-connection security is
+    // the TOFU fingerprint confirmation (session.rs). A PIN input that enforces
+    // nothing is a false sense of security, so it was removed. PIN pairing
+    // remains a documented future feature (CLAUDE.md 暗号/PIN); re-add the input
+    // only once it is wired to real host-side enforcement.
 }
 
 #[tauri::command]
