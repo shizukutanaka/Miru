@@ -219,6 +219,7 @@ impl AudioDecoder {
     }
 }
 
+pub mod capture;
 pub mod playback;
 
 #[cfg(test)]

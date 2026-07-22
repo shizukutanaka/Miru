@@ -324,12 +324,12 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         hw_decode: false,
         clipboard: true,
         file_transfer: true,
-        // No system-audio capture backend is wired into miru-host yet (no
-        // module here ever constructs an AudioEncoder or sends AudioFrame).
-        // Advertising `true` would tell viewers to expect audio that never
-        // arrives. Flip to true once a capture backend (e.g. WASAPI loopback
-        // / PulseAudio monitor / CoreAudio tap) lands.
-        audio: false,
+        // Advertise audio only when a loopback/monitor capture device actually
+        // exists (PulseAudio/PipeWire monitor source, or a virtual loopback
+        // device). Capturing the microphone and calling it "system audio" would
+        // be dishonest, so audio_loop uses monitor devices only; if none is
+        // present we advertise false and never send AudioFrame.
+        audio: miru_audio::capture::loopback_available(),
         multi_monitor: true,
     };
 
@@ -458,6 +458,22 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         capturer,
     )?;
 
+    // Optional system-audio capture. Only when the viewer negotiated Opus and a
+    // loopback/monitor device exists; otherwise degrade silently to no audio
+    // (the viewer already knows from Features.audio whether to expect it).
+    let mut audio_rx: Option<flume::Receiver<Msg>> =
+        if result.selected_audio_codec == AudioCodec::Opus {
+            match audio_loop::start(128) {
+                Ok(rx) => Some(rx),
+                Err(e) => {
+                    warn!("Audio capture unavailable (non-fatal): {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
     // Optional session recording (MIRU_RECORD_DIR=<dir> enables it).
     let mut recorder: Option<SessionRecorder> = if let Ok(dir) = std::env::var("MIRU_RECORD_DIR") {
         let sid = result.session_id.to_string().replace('-', "");
@@ -530,6 +546,19 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     bp.on_send();
                 }
                 if relay.send_msg(&msg).await.is_err() { break; }
+            }
+            // Outgoing: encoded system-audio frames (when audio is active).
+            // recv_audio stays pending forever once audio_rx is None, so this
+            // arm never busy-spins when audio is disabled or the thread exits.
+            audio = recv_audio(&audio_rx) => {
+                match audio {
+                    Some(msg) => {
+                        bytes_since_ping += msg_audio_len(&msg);
+                        if relay.send_msg(&msg).await.is_err() { break; }
+                    }
+                    // Capture thread exited — stop polling to avoid a busy loop.
+                    None => audio_rx = None,
+                }
             }
             // Incoming: input/control
             msg = relay.recv_msg() => {
@@ -827,6 +856,29 @@ fn now_ms() -> u64 {
 
 fn now_unix() -> u64 {
     now_ms() / 1000
+}
+
+/// Await the next audio frame from an optional capture receiver.
+///   `Some(msg)` — an `AudioFrame` to forward to the viewer.
+///   `None`      — the capture channel closed (thread exited); the caller
+///                 should stop polling.
+/// When `rx` is `None` this future stays pending forever, so the `select!` arm
+/// is effectively disabled and never busy-spins.
+async fn recv_audio(rx: &Option<flume::Receiver<Msg>>) -> Option<Msg> {
+    match rx {
+        Some(r) => r.recv_async().await.ok(),
+        None => std::future::pending::<Option<Msg>>().await,
+    }
+}
+
+/// Payload length of an `AudioFrame` message, for delivery-rate accounting.
+/// Zero for any non-audio message (never expected on the audio channel).
+fn msg_audio_len(msg: &Msg) -> u64 {
+    if let Msg::AudioFrame(af) = msg {
+        af.data.len() as u64
+    } else {
+        0
+    }
 }
 
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {

@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::info;
 
 mod agent_handler;
+mod audio_loop;
 mod backpressure;
 mod capture_loop;
 mod headless;
