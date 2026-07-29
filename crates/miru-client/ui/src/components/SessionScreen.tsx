@@ -27,6 +27,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [selectedDisplay, setSelectedDisplay] = useState(0);
   const [fileSending, setFileSending] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
@@ -366,6 +367,16 @@ export function SessionScreen({ onDisconnect }: Props) {
     try { await api.sendQosHint(next); } catch {}
   };
 
+  const handleToggleMute = async () => {
+    const next = !audioMuted;
+    setAudioMuted(next);
+    try {
+      await api.setAudioMuted(next);
+    } catch {
+      setAudioMuted(!next); // command failed — keep UI honest about actual state
+    }
+  };
+
   const handleToggleRecording = async () => {
     if (recording) {
       try { await api.stopRecording(); } catch {}
@@ -506,6 +517,14 @@ export function SessionScreen({ onDisconnect }: Props) {
           title={recording ? "録画を停止" : "録画を開始"}
         >
           {recording ? "録画停止" : "録画"}
+        </button>
+        <button
+          onClick={handleToggleMute}
+          disabled={status !== "connected"}
+          title={audioMuted ? "ホスト音声のミュートを解除" : "ホスト音声をミュート"}
+          aria-pressed={audioMuted}
+        >
+          {audioMuted ? "ミュート解除" : "ミュート"}
         </button>
         <button onClick={handleClipboardSync} title="ローカルのクリップボードをホストへ送信">
           クリップボード送信

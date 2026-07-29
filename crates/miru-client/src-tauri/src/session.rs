@@ -492,9 +492,15 @@ pub async fn run(
                         })).await;
                     }
                     Ok(Some(Msg::AudioFrame(af))) if audio_enabled => {
-                        if let Some(tx) = &audio_tx {
-                            // Non-blocking: drop frame on full queue (avoid latency drift)
-                            let _ = tx.try_send(af);
+                        // Mute drops frames here, at the network boundary: the
+                        // decoder/player thread stays idle rather than decoding
+                        // audio nobody hears. Unmute resumes with the next frame
+                        // (Opus frames are independent, so no resync is needed).
+                        if !audio_muted.load(std::sync::atomic::Ordering::Relaxed) {
+                            if let Some(tx) = &audio_tx {
+                                // Non-blocking: drop frame on full queue (avoid latency drift)
+                                let _ = tx.try_send(af);
+                            }
                         }
                     }
                     Ok(Some(Msg::DisplayList(mut dl))) => {

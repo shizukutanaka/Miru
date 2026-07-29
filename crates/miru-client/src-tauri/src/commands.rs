@@ -236,6 +236,15 @@ pub fn fingerprint(state: tauri::State<'_, AppState>) -> String {
     state.fingerprint()
 }
 
+/// Mute or unmute inbound host audio. Muting drops frames at the network
+/// boundary so nothing is decoded or played; unmuting resumes with the next
+/// frame. Applies to the live session only (not persisted).
+#[tauri::command]
+pub fn set_audio_muted(muted: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.set_audio_muted(muted);
+    Ok(())
+}
+
 // ─── Agent token issuance ────────────────────────────────────────────────────
 
 use miru_agent::{AgentToken, Capability};

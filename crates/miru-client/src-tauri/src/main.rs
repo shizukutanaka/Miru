@@ -34,6 +34,7 @@ fn main() {
             commands::revoke_peer,
             commands::session_stats,
             commands::set_decode_mode,
+            commands::set_audio_muted,
             commands::fingerprint,
             commands::issue_agent_token,
             commands::audit_summary,

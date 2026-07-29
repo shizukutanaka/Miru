@@ -51,6 +51,10 @@ pub struct AppState {
     /// `VideoDecoder` support; cleared while recording (which needs JPEG frames).
     /// Shared with the live `session::run` task, read once per frame.
     webcodecs_decode: Arc<AtomicBool>,
+    /// When true, inbound AudioFrames are dropped at the network boundary
+    /// instead of being decoded and played. Shared with the live `session::run`
+    /// task, read once per audio frame.
+    audio_muted: Arc<AtomicBool>,
 }
 
 struct ActiveSession {
@@ -100,7 +104,13 @@ impl AppState {
             recording: Arc::new(Mutex::new(None)),
             discovery: Arc::new(Mutex::new(discovery)),
             webcodecs_decode: Arc::new(AtomicBool::new(false)),
+            audio_muted: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Mute/unmute inbound host audio. Takes effect on the next audio frame.
+    pub fn set_audio_muted(&self, muted: bool) {
+        self.audio_muted.store(muted, Ordering::Relaxed);
     }
 
     /// UI toggle: forward raw VP9/VP8 packets for WebCodecs decode (true) vs.
@@ -132,6 +142,7 @@ impl AppState {
         let acl = Arc::clone(&self.acl);
         let acl_path = self.config_dir.join("acl.json");
         let webcodecs_decode = Arc::clone(&self.webcodecs_decode);
+        let audio_muted = Arc::clone(&self.audio_muted);
         let app_clone = app.clone();
         let session_slot = Arc::clone(&self.session);
 
@@ -150,6 +161,7 @@ impl AppState {
                     acl_path.clone(),
                     Arc::clone(&pending_pairing),
                     Arc::clone(&webcodecs_decode),
+                    Arc::clone(&audio_muted),
                 )
                 .await;
 

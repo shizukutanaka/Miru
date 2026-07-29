@@ -73,6 +73,10 @@ export const api = {
   setDecodeMode: (webcodecs: boolean) =>
     invoke<void>("set_decode_mode", { webcodecs }),
 
+  /** Mute/unmute inbound host audio (drops frames before decode). */
+  setAudioMuted: (muted: boolean) =>
+    invoke<void>("set_audio_muted", { muted }),
+
   sendInput: (input: {
     kind: string;
     x?: number; y?: number;
