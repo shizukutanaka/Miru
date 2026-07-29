@@ -52,6 +52,9 @@ pub struct SessionEvent {
     pub fingerprint: Option<String>,
     /// STUN-discovered public address of the host, if known ("直接" path possible).
     pub host_pub_addr: Option<String>,
+    /// Host can actually send system audio. The UI hides audio controls when
+    /// this is false so it never offers a mute for a silent stream.
+    pub audio_available: Option<bool>,
 }
 
 /// Marker error for failures the auto-reconnect loop (state.rs) must NOT
@@ -210,7 +213,7 @@ pub async fn run(
         TrustDecision::Unknown => {
             let (tx, rx) = oneshot::channel::<bool>();
             *pending_pairing.lock() = Some(tx);
-            emit_status_full(&app, "pairing_required", None, Some(host_fpr.clone()), host_pub_addr.clone());
+            emit_status_full(&app, "pairing_required", None, Some(host_fpr.clone()), host_pub_addr.clone(), None);
 
             // 120s to give the user time to compare fingerprints out-of-band.
             // Also races cancel_rx: without this, a session superseded by a new
@@ -262,13 +265,27 @@ pub async fn run(
     // Install ciphers (separate keys per direction, no nonce-reuse risk)
     relay.install_ciphers(result.tx, result.rx).await;
 
-    emit_status_full(&app, "connected", None, Some(host_fpr), host_pub_addr);
+    // Both conditions matter: the codec must be negotiated AND the host must
+    // actually be able to capture. Negotiation alone succeeds even on a host
+    // with no loopback device, which would leave the audio thread parked
+    // forever on a channel nothing ever sends to — and would show the user
+    // audio controls for a stream that never arrives.
+    let audio_enabled =
+        result.selected_audio_codec == AudioCodec::Opus && result.audio_available;
+
+    emit_status_full(
+        &app,
+        "connected",
+        None,
+        Some(host_fpr),
+        host_pub_addr,
+        Some(audio_enabled),
+    );
 
     // 6. Video decoder + audio pipeline
     let mut decoder: Option<Decoder> = None;
     // Audio: cpal::Stream is !Send, so the decoder+player run on a dedicated
     // std::thread. The session loop sends AudioFrame payloads via a channel.
-    let audio_enabled = result.selected_audio_codec == AudioCodec::Opus;
     let audio_tx: Option<std::sync::mpsc::SyncSender<miru_common::message::AudioFrame>> =
         if audio_enabled {
             let (tx, rx) = std::sync::mpsc::sync_channel::<miru_common::message::AudioFrame>(16);
@@ -648,7 +665,7 @@ fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
 }
 
 fn emit_status(app: &AppHandle, kind: &str, message: Option<String>, fingerprint: Option<String>) {
-    emit_status_full(app, kind, message, fingerprint, None);
+    emit_status_full(app, kind, message, fingerprint, None, None);
 }
 
 fn emit_status_full(
@@ -657,6 +674,7 @@ fn emit_status_full(
     message: Option<String>,
     fingerprint: Option<String>,
     host_pub_addr: Option<String>,
+    audio_available: Option<bool>,
 ) {
     let _ = app.emit(
         "session-event",
@@ -665,6 +683,7 @@ fn emit_status_full(
             message,
             fingerprint,
             host_pub_addr,
+            audio_available,
         },
     );
 }

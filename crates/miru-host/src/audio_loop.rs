@@ -6,6 +6,15 @@
 //! When the session drops that receiver (session end), the encode thread's
 //! `try_send` reports Disconnected and the thread exits, which drops the cpal
 //! stream and stops capture.
+//!
+//! KNOWN LIMITATION — multiple concurrent viewers: `handle_viewer` is spawned
+//! per incoming connection with no concurrency cap, so each session calls
+//! `start()` and opens its own capture stream on the same monitor device.
+//! System audio is really a singleton resource, so the second and later viewers
+//! may fail to open it (device busy) — that path degrades safely (a warning is
+//! logged and only that session is silent; nothing crashes), but it is wasteful
+//! and inconsistent. The correct design is one capture fanned out to all
+//! sessions via a broadcast channel; see docs/FEATURE_AUDIT.md item 1.
 
 use anyhow::Result;
 use flume::{Receiver, TrySendError};

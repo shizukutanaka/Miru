@@ -28,6 +28,10 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [fileSending, setFileSending] = useState(false);
   const [recording, setRecording] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
+  // Host-reported capture capability. Audio controls stay hidden unless the
+  // host can actually send audio — offering a mute for a silent stream would
+  // be a false affordance.
+  const [audioAvailable, setAudioAvailable] = useState(false);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
@@ -146,6 +150,7 @@ export function SessionScreen({ onDisconnect }: Props) {
         setStatusMessage(null);
         connectedAtRef.current = Date.now();
         setHostPubAddr(e.host_pub_addr ?? null);
+        setAudioAvailable(e.audio_available === true);
       } else if (e.kind === "reconnecting") {
         setStatus("reconnecting");
         setStatusMessage(e.message ?? null);
@@ -518,14 +523,19 @@ export function SessionScreen({ onDisconnect }: Props) {
         >
           {recording ? "録画停止" : "録画"}
         </button>
-        <button
-          onClick={handleToggleMute}
-          disabled={status !== "connected"}
-          title={audioMuted ? "ホスト音声のミュートを解除" : "ホスト音声をミュート"}
-          aria-pressed={audioMuted}
-        >
-          {audioMuted ? "ミュート解除" : "ミュート"}
-        </button>
+        {/* Only shown when the host reported it can actually capture system
+            audio. Offering a mute for a stream that never arrives would be a
+            false affordance, so the control is hidden rather than disabled. */}
+        {audioAvailable && (
+          <button
+            onClick={handleToggleMute}
+            disabled={status !== "connected"}
+            title={audioMuted ? "ホスト音声のミュートを解除" : "ホスト音声をミュート"}
+            aria-pressed={audioMuted}
+          >
+            {audioMuted ? "ミュート解除" : "ミュート"}
+          </button>
+        )}
         <button onClick={handleClipboardSync} title="ローカルのクリップボードをホストへ送信">
           クリップボード送信
         </button>

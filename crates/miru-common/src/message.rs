@@ -126,6 +126,19 @@ pub struct HelloAck {
     pub encrypted_key: Vec<u8>,
     pub selected_codec: VideoCodec,
     pub selected_audio: AudioCodec,
+    /// Whether the host can actually capture system audio right now.
+    ///
+    /// `selected_audio` only reports which codec *would* be used — negotiation
+    /// succeeds whenever both sides support Opus, even on a host with no
+    /// loopback/monitor capture device. Without this flag the viewer would spin
+    /// up a decoder and show audio controls for a stream that never arrives, so
+    /// the host's real capability is reported separately here.
+    ///
+    /// `serde(default)` = false keeps older hosts (which never send this field)
+    /// decodable: they are treated as "no audio", which matches reality since
+    /// no host before this field existed sent AudioFrames.
+    #[serde(default)]
+    pub audio_available: bool,
 }
 
 // ─── Signaling ────────────────────────────────────────────────────────────────

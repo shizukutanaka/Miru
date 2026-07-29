@@ -49,6 +49,8 @@ export interface SessionEvent {
   message?: string;
   fingerprint?: string;
   host_pub_addr?: string;
+  /** Host can actually send system audio (present on the "connected" event). */
+  audio_available?: boolean;
 }
 
 export const api = {
