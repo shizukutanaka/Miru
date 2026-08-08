@@ -1,7 +1,14 @@
 //! Linux input injection via /dev/uinput virtual device.
 //!
-//! Works on both X11 and Wayland — kernel-level, no display server dependency.
-//! Requires: user in `input` group or CAP_SYS_ADMIN, or udev rule.
+//! Key and pointer injection is kernel-level and works on both X11 and Wayland
+//! — no display server dependency. Requires: user in `input` group or
+//! CAP_SYS_ADMIN, or a udev rule.
+//!
+//! **Clipboard and `InputKind::Text` are X11-only**, because they shell out to
+//! `xclip`. The header used to claim blanket Wayland support, which was wrong
+//! for those two paths. `Text` additionally overwrites the user's clipboard and
+//! does not work where Ctrl+V is not paste (most terminals) — see ADR 0021 for
+//! why the mechanism has not simply been swapped for key synthesis.
 
 use anyhow::{Context, Result};
 use miru_common::message::{InputEvent, InputKind, MouseButton};
@@ -269,11 +276,14 @@ pub fn inject(event: &InputEvent) -> Result<()> {
 }
 
 /// Inject text by writing to clipboard then pressing Ctrl+V.
+/// Inject text by placing it on the clipboard and synthesising Ctrl+V.
+///
+/// Caveats (ADR 0021): overwrites the user's clipboard, requires `xclip` so it
+/// is X11-only, and silently does nothing where Ctrl+V is not paste.
 fn inject_text(text: &str) -> Result<()> {
-    if let Err(e) = set_clipboard(text) {
-        warn!("Text injection: clipboard write failed: {e}");
-        return Ok(());
-    }
+    // Propagate instead of returning Ok: reporting success for text that was
+    // never typed hides a hard failure (no xclip / no X11) from the caller.
+    set_clipboard(text).context("text injection: clipboard write failed")?;
     let guard = match UINPUT.lock() {
         Ok(g) => g,
         Err(p) => {
