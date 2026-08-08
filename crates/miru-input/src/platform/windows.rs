@@ -29,8 +29,11 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             }
             Ok(())
         }
-        InputKind::KeyDown { key, .. } => key_event(*key, false),
-        InputKind::KeyUp { key, .. } => key_event(*key, true),
+        // Windows VK and the browser keyCode largely coincide, so the legacy
+        // path mostly worked here — but `code` is still preferred because it
+        // is layout-independent and distinguishes left/right modifiers.
+        InputKind::KeyDown { key, code, .. } => key_event(vk_code(*key, code), false),
+        InputKind::KeyUp { key, code, .. } => key_event(vk_code(*key, code), true),
         InputKind::Text { text } => {
             for ch in text.chars() {
                 unicode_key(ch)?;
@@ -92,6 +95,14 @@ fn key_event(vk: u32, key_up: bool) -> Result<()> {
             },
         },
     })
+}
+
+/// Resolve the Windows virtual-key code, preferring the W3C physical `code`.
+fn vk_code(legacy_key: u32, code: &Option<String>) -> u32 {
+    code.as_deref()
+        .and_then(crate::keymap::code_to_vk)
+        .map(u32::from)
+        .unwrap_or(legacy_key)
 }
 
 fn unicode_key(ch: char) -> Result<()> {

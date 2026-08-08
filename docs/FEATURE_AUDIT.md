@@ -47,6 +47,22 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 | 11 | ~~存在しない `miru.app` ドメインへの依存~~ → **解消済み** | `MIRU_SIGNAL` のデフォルト値が未登録の `signal.miru.app` を指していた(`main.rs`/`scripts/install.sh` 双方)。`PRIVACY.md` は実装ゼロのクラッシュレポート機能を実在するかのように詳述していた(`--enable-crash-reports` フラグはコード上皆無、`grep` で確認済み)。全て `localhost` デフォルトへの修正、または「未実装/未稼働」の正直な注記に置換 | 完了 |
 | 12 | `PairPrompt.tsx` が `PairingDialog.tsx` と同様の完全なデッドコード | `crates/miru-client/ui/src/components/PairPrompt.tsx` — ホスト側ペアリング確認 UI として完成度は高いが、`grep -rn "PairPrompt" src/` でヒットが定義行のみ(import 0件)。`miru-host` は Tauri UI を持たないヘッドレス CLI のため、このコンポーネントを呼び出す先が構造的に存在しない | 将来のホスト GUI モード構想の名残りか、削除候補か要判断。規模: 判断のみ(小) |
 
+## 🔴 追加(2026-08 First Principles 再監査 — 入力経路)
+
+「①画面が見える ②操作できる」が中核という第一原理から入力経路を精査した結果、
+**従来の監査が一件も捉えていなかった中核機能の破綻**を発見。13〜15 は本ブランチで修正済み。
+
+| # | 項目 | 根拠 | 状態 |
+|---|------|------|------|
+| 13 | **キーコードが無変換で3つの別番号空間へキャストされていた(最重要)** | ビューアは `e.keyCode`(Windows VK 由来)を送信し、各バックエンドが変換せず OS API へ渡していた。evdev(`KEY_A`=30)/ CGKeyCode(`A`=0)/ VK(`A`=65)は**互いに無関係な番号空間**のため、`A` が Linux で `KEY_F7`、macOS で別キーになる。変換表はリポジトリ内に存在しなかった。`miru-mcp/src/server.rs:459` は "host translates per OS" と契約を書いていたが**ホストは変換していなかった** | **修正済**。`miru-input/src/keymap.rs` を新設し W3C `code`("KeyA")→ evdev / CGKeyCode / VK の変換表を実装(数値は Chromium `keycode_converter_data.inc` = USB HID Usage Tables + W3C UI Events 準拠)。プロトコルに `code: Option<String>`(`serde(default)`)を追加し双方向後方互換。`code` 不在時は旧来の生キャストへフォールバック |
+| 14 | **押しっぱなしキーが永久に解放されない** | 修飾キーの状態追跡もリリース処理も皆無。ビューアは `blur`/`visibilitychange` を監視せず、Alt+Tab 離脱で Alt-up が送られない。`SessionScreen.tsx` の `Ctrl+W` 早期 return は Ctrl の key_down 送信**後**に発火し構造的に Ctrl-up が欠落。Linux の uinput デバイスはプロセス寿命の `static` のため**stuck キーが再接続をまたいで残存** | **修正済**。ホスト: `InputHandler` が押下中キーを追跡し `release_all_keys()` をセッション終了時に実行 + `Drop` 実装で `?` 早期 return も含む全経路を網羅(単体テスト3件付き)。ビューア: 押下中キーを追跡し blur / visibilitychange / unmount で key_up を送出 |
+| 15 | Linux スクロールの実装バグ2件 | `if dy > 0.0 { 1 } else { -1 }` により **`dy == 0.0` が「下スクロール」**になっていた(横スクロール専用イベントが縦に誤動作)。また `REL_HWHEEL` が uinput デバイスに未登録で**横スクロールが構造的に不可能**、`dx` は破棄されていた | **修正済**。ゼロ delta は no-op 化、`REL_HWHEEL` を登録し `dx` を注入 |
+| 16 | Ctrl+Alt+Del(SAS)を送る手段が無い | `InputKind` に該当 variant が無く、Windows の `SendInput` では原理的に生成不可(設計上の制約)。ログイン画面・UAC プロンプト・ロック画面へ到達できない | **未着手**。`SendSAS` / セキュアデスクトップ対応が必要な独立課題。規模: 中 |
+| 17 | `MouseMove.display` が全OSで破棄されている | 3バックエンドとも `..` で読み捨て。macOS の `screen_point()` は `CGDisplay::main()` 固定のため、**マルチモニタのセカンダリへカーソルを移動できない** | **未着手**。規模: 小〜中 |
+| 18 | Linux の `Text` 注入がクリップボードを破壊する | `platform/linux.rs` はクリップボードへ書いて Ctrl+V を合成する実装。(a) ユーザーのクリップボード内容を毎回破壊 (b) `xclip` 依存で**X11 限定**(ファイル冒頭は "Works on both X11 and Wayland" と誤記) (c) Ctrl+V が貼り付けでない端末等では動作しない | **未着手**。`XTestFakeKeyEvent` 相当か、レイアウト解決による直接キー合成が必要。規模: 中 |
+| 19 | MCP エージェント経路は依然として旧キャストのまま | `miru-mcp/src/server.rs` の `parse_key` は VK コードを生成し `code: None` で送るため、項目13のフォールバック(生キャスト)経路に乗る。人間ビューア経路は修正済みだが**エージェント経路の Linux/macOS は未修正** | **未着手**。`parse_key` を W3C `code` 文字列に変更すれば解消。規模: 小 |
+
+
 ## 🟡 過剰 — 品質は高いがコア未完成の段階では時期尚早(追加投資を凍結)
 
 | # | 機能 | 証拠 | 判断理由 |

@@ -705,6 +705,11 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
 
     info!("Session {} ended", result.session_id);
 
+    // Un-stick any key the viewer pressed but never released. Every `break`
+    // out of the loop above lands here, so a crashed/disconnected viewer can't
+    // leave a modifier latched on the host.
+    input_handler.release_all_keys();
+
     // Clean up any file transfers that never completed (peer disconnected mid-transfer).
     for (id, rx) in file_transfers.drain() {
         warn!("FileTransfer {}: session ended without completion — removing temp file", id);

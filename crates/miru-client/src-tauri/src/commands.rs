@@ -52,6 +52,9 @@ pub struct SendInputArgs {
     pub button: Option<String>,
     pub key: Option<u32>,
     pub modifiers: Option<u8>,
+    /// W3C UI Events physical-key identifier ("KeyA"). Layout-independent and
+    /// the only reliable way to inject keys on Linux/macOS hosts.
+    pub code: Option<String>,
     pub dx: Option<f32>,
     pub dy: Option<f32>,
     pub text: Option<String>,
@@ -82,10 +85,12 @@ pub async fn send_input(args: SendInputArgs, state: State<'_, AppState>) -> Resu
             y: args.y.unwrap_or(0.0),
         },
         "key_down" => InputKind::KeyDown {
+            code: args.code.clone(),
             key: args.key.unwrap_or(0),
             modifiers: args.modifiers.unwrap_or(0),
         },
         "key_up" => InputKind::KeyUp {
+            code: args.code.clone(),
             key: args.key.unwrap_or(0),
             modifiers: args.modifiers.unwrap_or(0),
         },

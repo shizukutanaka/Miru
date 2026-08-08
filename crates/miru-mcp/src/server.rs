@@ -359,11 +359,11 @@ impl McpServer {
         let key = parse_key(key_str)?;
 
         let down = InputEvent {
-            kind: InputKind::KeyDown { key, modifiers },
+            kind: InputKind::KeyDown { key, modifiers, code: None },
             timestamp_ms: now_ms(),
         };
         let up = InputEvent {
-            kind: InputKind::KeyUp { key, modifiers },
+            kind: InputKind::KeyUp { key, modifiers, code: None },
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(down).await?;

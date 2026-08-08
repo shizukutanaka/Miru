@@ -84,6 +84,8 @@ export const api = {
     x?: number; y?: number;
     button?: string;
     key?: number; modifiers?: number;
+    /** W3C physical-key id ("KeyA") — layout-independent; hosts prefer this. */
+    code?: string;
     dx?: number; dy?: number;
     text?: string;
   }) => invoke<void>("send_input", { args: input }),

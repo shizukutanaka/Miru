@@ -310,8 +310,24 @@ pub enum InputKind {
     MouseDown { button: MouseButton, x: f32, y: f32 },
     MouseUp { button: MouseButton, x: f32, y: f32 },
     Scroll { dx: f32, dy: f32, x: f32, y: f32 },
-    KeyDown { key: u32, modifiers: u8 },
-    KeyUp { key: u32, modifiers: u8 },
+    /// `key` is the legacy browser `keyCode` (kept for older viewers).
+    /// `code` is the W3C UI Events physical-key identifier ("KeyA", "Enter").
+    /// Hosts MUST prefer `code` when present: `keyCode` is layout-dependent and
+    /// lives in a different numbering space from evdev/CGKeyCode, so injecting
+    /// it directly types the wrong character on Linux and macOS.
+    /// `serde(default)` keeps pre-`code` viewers decodable.
+    KeyDown {
+        key: u32,
+        modifiers: u8,
+        #[serde(default)]
+        code: Option<String>,
+    },
+    KeyUp {
+        key: u32,
+        modifiers: u8,
+        #[serde(default)]
+        code: Option<String>,
+    },
     Text { text: String },
 }
 

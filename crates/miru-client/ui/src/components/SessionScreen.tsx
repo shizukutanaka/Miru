@@ -310,6 +310,13 @@ export function SessionScreen({ onDisconnect }: Props) {
 
   // Keyboard
   useEffect(() => {
+    // Physical keys currently held down, tracked so they can be released if we
+    // lose focus. Without this, alt-tabbing away while a modifier is held sends
+    // key_down with no matching key_up and the key stays stuck on the host —
+    // on Linux the uinput device outlives the session, so it stays stuck across
+    // reconnects too.
+    const held = new Set<string>();
+
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
       // Don't intercept window-management keys
       if ((e.ctrlKey || e.metaKey) && ["q", "w", "h", "m"].includes(e.key.toLowerCase())) return;
@@ -319,19 +326,42 @@ export function SessionScreen({ onDisconnect }: Props) {
         (e.ctrlKey ? 0x02 : 0) |
         (e.altKey ? 0x04 : 0) |
         (e.metaKey ? 0x08 : 0);
+      if (down) held.add(e.code);
+      else held.delete(e.code);
       api.sendInput({
         kind: down ? "key_down" : "key_up",
+        // `code` is the physical key and is layout-independent; `keyCode` is
+        // sent only so older hosts keep working.
+        code: e.code,
         key: e.keyCode,
         modifiers: mods,
       });
     };
+
+    // Release everything still held when the window loses focus or is hidden.
+    const releaseAll = () => {
+      for (const code of held) {
+        api.sendInput({ kind: "key_up", code, key: 0, modifiers: 0 });
+      }
+      held.clear();
+    };
+    const onVisibility = () => {
+      if (document.hidden) releaseAll();
+    };
+
     const dn = onKey(true);
     const up = onKey(false);
     window.addEventListener("keydown", dn);
     window.addEventListener("keyup", up);
+    window.addEventListener("blur", releaseAll);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("keydown", dn);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", releaseAll);
+      document.removeEventListener("visibilitychange", onVisibility);
+      // Unmounting (disconnect) must not leave keys pressed on the host.
+      releaseAll();
     };
   }, []);
 

@@ -31,6 +31,7 @@ const BTN_EXTRA: u16 = 0x114; // X2 — browser forward
 const REL_X: u16 = 0x00;
 const REL_Y: u16 = 0x01;
 const REL_WHEEL: u16 = 0x08;
+const REL_HWHEEL: u16 = 0x06;
 const ABS_X: u16 = 0x00;
 const ABS_Y: u16 = 0x01;
 
@@ -88,6 +89,9 @@ impl UinputDevice {
             libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_X as libc::c_int);
             libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_Y as libc::c_int);
             libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_WHEEL as libc::c_int);
+            // Without REL_HWHEEL the device cannot emit horizontal scroll at
+            // all, so dx was structurally impossible before this.
+            libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_HWHEEL as libc::c_int);
 
             // Enable absolute axes (for absolute mouse positioning)
             libc::ioctl(fd, UI_SET_ABSBIT as libc::c_ulong, ABS_X as libc::c_int);
@@ -190,10 +194,23 @@ impl UinputDevice {
         self.syn();
     }
 
-    fn scroll(&self, dy: f32) {
-        let v = if dy > 0.0 { 1 } else { -1 };
-        self.write_event(EV_REL, REL_WHEEL, v);
-        self.syn();
+    /// Scroll by wheel clicks. A zero delta must be a no-op — the previous
+    /// `if dy > 0.0 { 1 } else { -1 }` turned `dy == 0.0` into a scroll *down*,
+    /// so horizontal-only wheel events scrolled the page vertically.
+    fn scroll(&self, dx: f32, dy: f32) {
+        let clicks = |d: f32| if d > 0.0 { 1 } else { -1 };
+        let mut moved = false;
+        if dy != 0.0 {
+            self.write_event(EV_REL, REL_WHEEL, clicks(dy));
+            moved = true;
+        }
+        if dx != 0.0 {
+            self.write_event(EV_REL, REL_HWHEEL, clicks(dx));
+            moved = true;
+        }
+        if moved {
+            self.syn();
+        }
     }
 
     fn key(&self, scancode: u32, down: bool) {
@@ -233,9 +250,12 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             dev.mouse_move_abs(*x, *y);
             dev.mouse_button(btn_code(button), false);
         }
-        InputKind::Scroll { dy, .. } => dev.scroll(*dy),
-        InputKind::KeyDown { key, .. } => dev.key(*key, true),
-        InputKind::KeyUp { key, .. } => dev.key(*key, false),
+        InputKind::Scroll { dx, dy, .. } => dev.scroll(*dx, *dy),
+        // Prefer the physical `code`: evdev numbering is unrelated to the
+        // browser keyCode (VK 65 'A' would land on evdev 65 = KEY_F7).
+        // Fall back to the raw cast only for pre-`code` viewers.
+        InputKind::KeyDown { key, code, .. } => dev.key(evdev_code(*key, code), true),
+        InputKind::KeyUp { key, code, .. } => dev.key(evdev_code(*key, code), false),
         InputKind::Text { text } => {
             // Clipboard-paste: write text to clipboard, then inject Ctrl+V.
             // Works on X11 and Wayland desktop apps.
@@ -271,6 +291,16 @@ fn inject_text(text: &str) -> Result<()> {
     dev.key(KEY_V, false);
     dev.key(KEY_LEFTCTRL, false);
     Ok(())
+}
+
+/// Resolve the evdev key code for a key event. Prefers the W3C physical
+/// `code`; falls back to the legacy raw `keyCode` cast for viewers that
+/// predate the `code` field (wrong for most keys, but no worse than before).
+fn evdev_code(legacy_key: u32, code: &Option<String>) -> u32 {
+    code.as_deref()
+        .and_then(crate::keymap::code_to_evdev)
+        .map(u32::from)
+        .unwrap_or(legacy_key)
 }
 
 fn btn_code(btn: &MouseButton) -> u16 {
