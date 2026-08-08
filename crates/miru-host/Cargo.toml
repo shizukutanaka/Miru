@@ -15,6 +15,7 @@ miru-capture = { workspace = true }
 miru-transport = { workspace = true }
 miru-input = { workspace = true }
 miru-codec = { workspace = true }
+miru-audio = { path = "../miru-audio" }
 miru-auth = { path = "../miru-auth" }
 miru-agent = { path = "../miru-agent" }
 miru-transparency = { path = "../miru-transparency" }

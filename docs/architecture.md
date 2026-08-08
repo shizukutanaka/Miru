@@ -137,7 +137,7 @@ services:
 ### 環境変数
 | 変数 | デフォルト | 説明 |
 |------|-----------|------|
-| `MIRU_SIGNAL` | `ws://signal.miru.app:21115/ws` | シグナルサーバーURL |
+| `MIRU_SIGNAL` | `ws://localhost:21115/ws` | シグナルサーバーURL(自己ホスト。既定は開発用ローカルホスト) |
 | `MIRU_LOG` | `info` | ログレベル |
 | `MIRU_MAX_FPS` | `60` | 最大フレームレート |
 | `MIRU_CODEC` | `auto` | 強制コーデック |

@@ -4,7 +4,8 @@
 //! optionally post the commitment to a Rekor instance for public verifiability.
 //!
 //! Format used: Rekor's `intoto` v0.0.2 attestation type, which accepts
-//! arbitrary JSON predicates. Our predicate type is `https://miru.app/v0/session-commitment`.
+//! arbitrary JSON predicates. Our predicate type is
+//! `https://github.com/shizukutanaka/miru/v0/session-commitment`.
 //!
 //! The cost of posting is one HTTPS request; the benefit is anyone can later
 //! prove the commitment existed at a particular point in time without trusting
@@ -18,7 +19,9 @@ use serde_json::json;
 pub const DEFAULT_REKOR_URL: &str = "https://rekor.sigstore.dev";
 
 /// In-toto attestation predicate type for Miru session commitments.
-pub const PREDICATE_TYPE: &str = "https://miru.app/v0/session-commitment";
+/// Namespaced under the real project repository — `miru.app` was a
+/// placeholder domain that was never registered.
+pub const PREDICATE_TYPE: &str = "https://github.com/shizukutanaka/miru/v0/session-commitment";
 
 /// Build the in-toto statement that gets posted to Rekor.
 pub fn build_statement(

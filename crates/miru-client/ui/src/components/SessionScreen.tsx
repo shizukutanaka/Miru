@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, SessionStats, DisplayInfo } from "../lib/tauri";
+import { WebCodecsRenderer, webcodecsVp9Supported } from "../lib/webcodecs-renderer";
 import { DisplayTabs } from "./DisplayTabs";
+import { PairingDialog } from "./PairingDialog";
 
 interface Props {
   onDisconnect: () => void;
@@ -15,7 +17,9 @@ export function SessionScreen({ onDisconnect }: Props) {
     bytes_recv: 0, frames_decoded: 0, packet_loss_pct: 0,
   });
   const [resolution, setResolution] = useState({ w: 0, h: 0 });
-  const [status, setStatus] = useState<"connecting" | "connected" | "disconnected" | "reconnecting">("connecting");
+  const [status, setStatus] = useState<
+    "connecting" | "connected" | "disconnected" | "reconnecting" | "pairing_required"
+  >("connecting");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [fingerprint, setFingerprint] = useState<string | null>(null);
   const [hostQos, setHostQos] = useState<{ fps: number; bitrate_kbps: number; quality: number } | null>(null);
@@ -23,6 +27,11 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [selectedDisplay, setSelectedDisplay] = useState(0);
   const [fileSending, setFileSending] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
+  // Host-reported capture capability. Audio controls stay hidden unless the
+  // host can actually send audio — offering a mute for a silent stream would
+  // be a false affordance.
+  const [audioAvailable, setAudioAvailable] = useState(false);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
@@ -45,10 +54,30 @@ export function SessionScreen({ onDisconnect }: Props) {
   const pendingFrameRef = useRef<{ b64: string; w: number; h: number } | null>(null);
   const decodingRef = useRef(false);
 
+  // WebCodecs path (ADR 0013 follow-up): when the WebView can decode VP9, the
+  // host forwards raw packets (`video-packet`) and we decode them here instead
+  // of receiving JPEG. `supported` = probe result; `failed` = a runtime decoder
+  // error occurred (fall back for the rest of the session). Recording forces the
+  // Rust/JPEG path since it stores JPEG frames.
+  const rendererRef = useRef<WebCodecsRenderer | null>(null);
+  const wcSupportedRef = useRef(false);
+  const wcFailedRef = useRef(false);
+
+  // Pick the decode mode from current state and tell the backend. WebCodecs is
+  // used only when supported, not previously failed, and not recording.
+  const syncDecodeMode = (isRecording: boolean) => {
+    const useWebCodecs =
+      wcSupportedRef.current && !wcFailedRef.current && !isRecording;
+    void api.setDecodeMode(useWebCodecs);
+    if (!useWebCodecs) rendererRef.current?.reset();
+  };
+
   useEffect(() => {
     let unlistenVideo: (() => void) | null = null;
+    let unlistenPacket: (() => void) | null = null;
     let unlistenStatus: (() => void) | null = null;
     let unlistenQos: (() => void) | null = null;
+    let cancelled = false;
 
     const drainFrames = async () => {
       if (decodingRef.current) return;
@@ -87,15 +116,49 @@ export function SessionScreen({ onDisconnect }: Props) {
       void drainFrames();
     }).then((fn) => (unlistenVideo = fn));
 
+    // WebCodecs decode path: forward raw packets to the VideoDecoder renderer.
+    api.onVideoPacket((e) => {
+      rendererRef.current?.push(e);
+      lastFrameRef.current = Date.now();
+      setStalled(false);
+    }).then((fn) => (cancelled ? fn() : (unlistenPacket = fn)));
+
+    // Probe VP9 WebCodecs support; if available, build the renderer and switch
+    // the backend to packet-forwarding. Any decoder error falls back to Rust
+    // JPEG decode for the rest of the session.
+    void webcodecsVp9Supported().then((ok) => {
+      if (cancelled) return;
+      wcSupportedRef.current = ok;
+      const canvas = canvasRef.current;
+      if (!ok || !canvas) return;
+      rendererRef.current = new WebCodecsRenderer(
+        canvas,
+        () => {
+          wcFailedRef.current = true;
+          rendererRef.current?.reset();
+          void api.setDecodeMode(false);
+        },
+        (w, h) => setResolution({ w, h }),
+      );
+      // Not recording at connect time; enable WebCodecs.
+      syncDecodeMode(false);
+    });
+
     api.onSessionEvent((e) => {
       if (e.kind === "connected") {
         setStatus("connected");
         setStatusMessage(null);
         connectedAtRef.current = Date.now();
         setHostPubAddr(e.host_pub_addr ?? null);
+        setAudioAvailable(e.audio_available === true);
       } else if (e.kind === "reconnecting") {
         setStatus("reconnecting");
         setStatusMessage(e.message ?? null);
+      } else if (e.kind === "pairing_required") {
+        // First-time connection to this device_id — hold here until the
+        // user compares the fingerprint out-of-band and confirms/cancels.
+        setStatus("pairing_required");
+        setStatusMessage(null);
       } else if (e.kind === "disconnected" || e.kind === "error") {
         setStatus("disconnected");
         setStatusMessage(e.message ?? null);
@@ -127,11 +190,15 @@ export function SessionScreen({ onDisconnect }: Props) {
     }, 500);
 
     return () => {
+      cancelled = true;
       unlistenVideo?.();
+      unlistenPacket?.();
       unlistenStatus?.();
       unlistenQos?.();
       unlistenDisplays?.();
       unlistenClipboard?.();
+      rendererRef.current?.destroy();
+      rendererRef.current = null;
       clearInterval(statsInterval);
     };
   }, [onDisconnect]);
@@ -243,6 +310,13 @@ export function SessionScreen({ onDisconnect }: Props) {
 
   // Keyboard
   useEffect(() => {
+    // Physical keys currently held down, tracked so they can be released if we
+    // lose focus. Without this, alt-tabbing away while a modifier is held sends
+    // key_down with no matching key_up and the key stays stuck on the host —
+    // on Linux the uinput device outlives the session, so it stays stuck across
+    // reconnects too.
+    const held = new Set<string>();
+
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
       // Don't intercept window-management keys
       if ((e.ctrlKey || e.metaKey) && ["q", "w", "h", "m"].includes(e.key.toLowerCase())) return;
@@ -252,19 +326,42 @@ export function SessionScreen({ onDisconnect }: Props) {
         (e.ctrlKey ? 0x02 : 0) |
         (e.altKey ? 0x04 : 0) |
         (e.metaKey ? 0x08 : 0);
+      if (down) held.add(e.code);
+      else held.delete(e.code);
       api.sendInput({
         kind: down ? "key_down" : "key_up",
+        // `code` is the physical key and is layout-independent; `keyCode` is
+        // sent only so older hosts keep working.
+        code: e.code,
         key: e.keyCode,
         modifiers: mods,
       });
     };
+
+    // Release everything still held when the window loses focus or is hidden.
+    const releaseAll = () => {
+      for (const code of held) {
+        api.sendInput({ kind: "key_up", code, key: 0, modifiers: 0 });
+      }
+      held.clear();
+    };
+    const onVisibility = () => {
+      if (document.hidden) releaseAll();
+    };
+
     const dn = onKey(true);
     const up = onKey(false);
     window.addEventListener("keydown", dn);
     window.addEventListener("keyup", up);
+    window.addEventListener("blur", releaseAll);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       window.removeEventListener("keydown", dn);
       window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", releaseAll);
+      document.removeEventListener("visibilitychange", onVisibility);
+      // Unmounting (disconnect) must not leave keys pressed on the host.
+      releaseAll();
     };
   }, []);
 
@@ -305,12 +402,31 @@ export function SessionScreen({ onDisconnect }: Props) {
     try { await api.sendQosHint(next); } catch {}
   };
 
+  const handleToggleMute = async () => {
+    const next = !audioMuted;
+    setAudioMuted(next);
+    try {
+      await api.setAudioMuted(next);
+    } catch {
+      setAudioMuted(!next); // command failed — keep UI honest about actual state
+    }
+  };
+
   const handleToggleRecording = async () => {
     if (recording) {
       try { await api.stopRecording(); } catch {}
       setRecording(false);
+      syncDecodeMode(false); // recording stopped — re-enable WebCodecs if available
     } else {
-      try { await api.startRecording(); setRecording(true); } catch {}
+      // Recording stores JPEG frames, which only the Rust decode path produces,
+      // so force it off the WebCodecs path before capturing starts.
+      syncDecodeMode(true);
+      try {
+        await api.startRecording();
+        setRecording(true);
+      } catch {
+        syncDecodeMode(false); // start failed — restore WebCodecs
+      }
     }
   };
 
@@ -341,10 +457,24 @@ export function SessionScreen({ onDisconnect }: Props) {
 
   return (
     <div className="session">
-      <div className="video-stage" ref={stageRef}>
-        <canvas ref={canvasRef} tabIndex={0} />
+      {status === "pairing_required" && (
+        <PairingDialog
+          fingerprint={fingerprint ?? ""}
+          requirePin={false}
+          onConfirm={() => {
+            void api.confirmPairing(true);
+          }}
+          onCancel={() => {
+            void api.confirmPairing(false);
+            onDisconnect();
+          }}
+        />
+      )}
 
-        <div className="session-overlay">
+      <div className="video-stage" ref={stageRef}>
+        <canvas ref={canvasRef} tabIndex={0} aria-label="リモートホストの画面" role="img" />
+
+        <div className="session-overlay" role="status" aria-live="polite" aria-label="接続統計">
           <div className="stat-row"><span className="label">FPS</span><span className="value">{stats.fps.toFixed(1)}</span></div>
           <div className="stat-row"><span className="label">RTT</span><span className="value">{stats.rtt_ms} ms</span></div>
           <div className="stat-row"><span className="label">BW</span><span className="value">{stats.bitrate_kbps} kbps</span></div>
@@ -380,12 +510,12 @@ export function SessionScreen({ onDisconnect }: Props) {
       <DisplayTabs displays={displays} selected={selectedDisplay} onSelect={handleSelectDisplay} />
 
       {status === "connected" && stalled && (
-        <div className="quality-banner quality-poor">
+        <div className="quality-banner quality-poor" role="alert">
           映像が停止しています — ホストが応答していない可能性があります
         </div>
       )}
       {status === "connected" && !stalled && connQuality !== "good" && (
-        <div className={`quality-banner quality-${connQuality}`}>
+        <div className={`quality-banner quality-${connQuality}`} role="status" aria-live="polite">
           {connQuality === "poor"
             ? `接続が不安定 — RTT ${stats.rtt_ms}ms / 損失 ${stats.packet_loss_pct.toFixed(1)}%`
             : `接続状態が低下 — RTT ${stats.rtt_ms}ms`}
@@ -395,19 +525,21 @@ export function SessionScreen({ onDisconnect }: Props) {
       <input
         ref={fileInputRef}
         type="file"
+        aria-label="ホストへ送信するファイルを選択"
         style={{ display: "none" }}
         onChange={handleFileSend}
       />
 
       <div className="toolbar">
-        <span className="status-pill">
+        <span className="status-pill" role="status" aria-live="polite">
           <span className={`status-dot ${
             status === "connected" ? "ok"
-            : status === "reconnecting" ? "warn"
+            : status === "reconnecting" || status === "pairing_required" ? "warn"
             : status === "connecting" ? "info"
             : "error"
           }`} />
           {status === "connected" ? "接続中"
+            : status === "pairing_required" ? "指紋の確認待ち"
             : status === "reconnecting" ? (statusMessage ?? "再接続中...")
             : status === "connecting" ? "接続しています"
             : "切断"}
@@ -421,6 +553,19 @@ export function SessionScreen({ onDisconnect }: Props) {
         >
           {recording ? "録画停止" : "録画"}
         </button>
+        {/* Only shown when the host reported it can actually capture system
+            audio. Offering a mute for a stream that never arrives would be a
+            false affordance, so the control is hidden rather than disabled. */}
+        {audioAvailable && (
+          <button
+            onClick={handleToggleMute}
+            disabled={status !== "connected"}
+            title={audioMuted ? "ホスト音声のミュートを解除" : "ホスト音声をミュート"}
+            aria-pressed={audioMuted}
+          >
+            {audioMuted ? "ミュート解除" : "ミュート"}
+          </button>
+        )}
         <button onClick={handleClipboardSync} title="ローカルのクリップボードをホストへ送信">
           クリップボード送信
         </button>

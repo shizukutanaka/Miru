@@ -47,6 +47,14 @@ struct AppState {
     relay_port: u16,
     /// Public hostname/IP for advertising to peers — read once at startup.
     public_host: String,
+    /// When true, reject Register messages that carry no Ed25519 ownership
+    /// proof instead of accepting them with a warning. Opt-in via
+    /// MIRU_REQUIRE_SIGNED_REGISTER=1. Default stays permissive for backward
+    /// compatibility with pre-signature clients; operators who have finished
+    /// migrating their fleet can flip this on to fully close the
+    /// unauthenticated-peer-registration attack surface (cf. RustDesk
+    /// CVE-2026-30784, docs/RESEARCH_NOTES.md §6).
+    require_signed_register: bool,
 }
 
 struct DeviceEntry {
@@ -97,6 +105,10 @@ impl AppState {
             .unwrap_or(DEFAULT_MAX_RELAY_SESSIONS);
         let public_host = std::env::var("MIRU_PUBLIC_HOST")
             .unwrap_or_else(|_| "localhost".to_string());
+        let require_signed_register = std::env::var("MIRU_REQUIRE_SIGNED_REGISTER").is_ok();
+        if require_signed_register {
+            info!("MIRU_REQUIRE_SIGNED_REGISTER set — unsigned Register messages will be rejected");
+        }
         Self {
             registry: Arc::new(DashMap::new()),
             relay_sessions: Arc::new(DashMap::new()),
@@ -105,6 +117,7 @@ impl AppState {
             max_relay_sessions,
             relay_port,
             public_host,
+            require_signed_register,
         }
     }
 
@@ -202,6 +215,22 @@ async fn rendezvous_handler(
 
 /// Interval between server-initiated WebSocket pings.
 const RENDEZVOUS_PING_INTERVAL: Duration = Duration::from_secs(30);
+/// Max time to wait for a single WebSocket send before treating the peer as
+/// wedged (stopped reading but hasn't closed the TCP connection). Without
+/// this, a client that fills its receive buffer and never drains it can
+/// stall a session task — and its registry/relay-slot cleanup — indefinitely.
+const SEND_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Awaits a send future under `SEND_TIMEOUT`, collapsing "timed out" and "send
+/// errored" into a single bool so call sites don't repeat the
+/// `match tokio::time::timeout(...) { Ok(Ok(())) => {}, _ => break }` shuttle.
+/// `true` = sent; `false` = caller should treat the connection as dead.
+async fn send_timed<F, T, E>(fut: F) -> bool
+where
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    matches!(tokio::time::timeout(SEND_TIMEOUT, fut).await, Ok(Ok(_)))
+}
 
 async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAddr) {
     let (tx, mut rx) = mpsc::channel::<Msg>(32);
@@ -214,7 +243,7 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
             // Forward outbound messages to WebSocket
             Some(msg) = rx.recv() => {
                 let Ok(json) = serde_json::to_string(&msg) else { continue };
-                if sock.send(Message::Text(json)).await.is_err() { break }
+                if !send_timed(sock.send(Message::Text(json))).await { break; }
             }
             // Handle inbound WebSocket messages
             incoming = sock.recv() => {
@@ -225,16 +254,16 @@ async fn rendezvous_session(mut sock: WebSocket, state: AppState, peer_ip: IpAdd
                             Err(e) => warn!("parse error: {e}"),
                         }
                     }
-                    Some(Ok(Message::Ping(d))) => { let _ = sock.send(Message::Pong(d)).await; }
+                    Some(Ok(Message::Ping(d))) => {
+                        let _ = send_timed(sock.send(Message::Pong(d))).await;
+                    }
                     Some(Ok(Message::Pong(_))) => {} // keepalive echo
                     _ => break,
                 }
             }
             // Server-initiated keepalive ping to detect dead connections.
             _ = ping_ticker.tick() => {
-                if sock.send(Message::Ping(vec![])).await.is_err() {
-                    break;
-                }
+                if !send_timed(sock.send(Message::Ping(vec![]))).await { break; }
             }
         }
     }
@@ -255,6 +284,20 @@ async fn process_rdv_msg(
 ) {
     match msg {
         Msg::Register(reg) => {
+            // Rate-limit Register the same way Connect already is: each Register
+            // performs an Ed25519 signature verification (non-trivial CPU cost)
+            // plus a registry insert/remove, so a single connection looping
+            // Register requests would otherwise have no per-IP throttle.
+            if !state.check_connect_rate(peer_ip) {
+                warn!("Register rate limit exceeded for {}", peer_ip);
+                let _ = tx
+                    .send(Msg::Error(miru_common::message::ErrorMsg {
+                        code: 429,
+                        message: "too many requests — retry later".to_string(),
+                    }))
+                    .await;
+                return;
+            }
             // Reject absurdly long device IDs before they reach the DashMap.
             // A UUID hex + optional prefix is always < 128 bytes; 256 is generous.
             if reg.device_id.len() > 256 {
@@ -313,8 +356,25 @@ async fn process_rdv_msg(
             match miru_transport::signaling::verify_register_signature(&reg) {
                 Ok(true) => {} // verified — device owns the claimed pubkey
                 Ok(false) => {
-                    // Legacy client with no signature. Accept but log so operators
-                    // can track rollout progress.
+                    // Legacy client with no signature.
+                    if state.require_signed_register {
+                        // Strict mode: reject. Closes the unauthenticated
+                        // peer-registration surface (cf. RustDesk CVE-2026-30784).
+                        warn!(
+                            "Register rejected: {} has no ownership proof and \
+                            MIRU_REQUIRE_SIGNED_REGISTER is set",
+                            reg.device_id
+                        );
+                        let _ = tx
+                            .send(Msg::Error(miru_common::message::ErrorMsg {
+                                code: 403,
+                                message: "signed registration required".to_string(),
+                            }))
+                            .await;
+                        return;
+                    }
+                    // Permissive default: accept but log so operators can track
+                    // rollout progress before flipping on strict mode.
                     warn!(
                         "Register: {} has no ownership proof (upgrade miru-host/miru-client)",
                         reg.device_id
@@ -597,6 +657,10 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
         None => {
             let deadline = tokio::time::sleep(Duration::from_secs(30));
             tokio::pin!(deadline);
+            // Reuse a single interval instead of constructing a fresh `sleep`
+            // every loop iteration — avoids per-tick allocation churn when
+            // many connections are simultaneously waiting for their peer.
+            let mut poll = tokio::time::interval(Duration::from_millis(100));
             loop {
                 tokio::select! {
                     // Deadline fired — give up and clean up the slot.
@@ -614,7 +678,7 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
                         // Ignore any data frames during the wait phase
                     }
                     // Poll check every 100ms
-                    _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                    _ = poll.tick() => {
                         let slot = state.relay_sessions.get(&token);
                         let found = if is_host {
                             slot.and_then(|s| s.viewer.clone())
@@ -646,7 +710,7 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
                             );
                             break;
                         }
-                        if peer_tx.send(data).await.is_err() { break }
+                        if !send_timed(peer_tx.send(data)).await { break; }
                     }
                     Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                     _ => {}
@@ -656,7 +720,7 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
             data = fwd_rx.recv() => {
                 match data {
                     Some(d) => {
-                        if ws_tx.send(Message::Binary(d)).await.is_err() { break }
+                        if !send_timed(ws_tx.send(Message::Binary(d))).await { break; }
                     }
                     None => break,
                 }

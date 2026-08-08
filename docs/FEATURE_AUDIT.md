@@ -1,0 +1,118 @@
+# Miru 機能過不足監査 (FEATURE_AUDIT)
+
+作成: 2026-07 / ブランチ: `claude/sweet-franklin-l5a1yw`
+
+> **2026-07 更新**: 本ブランチで項目 3(WebGL2→WebCodecs)・7・8(TOFU)・9(PIN デッド
+> コード)・10(a11y)・11(miru.app)が解消済み。残タスク(音声キャプチャ・HW エンコード・
+> Wayland・macOS・CI・cargo 検証)を **後続エージェントが追加調査なしで着手できる粒度**に
+> 落とした実行指示書は **`docs/WORK_INSTRUCTIONS.md`** を参照。本監査は履歴として保持。
+
+## このドキュメントの目的と読み方
+
+これは **前提知識ゼロの引き継ぎ先(人間・LLM いずれも)に向けたハンドオフ文書** です。
+Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗号化、P2P 優先」を
+目的とする Rust + Tauri v2 製リモートデスクトップです(ルートの `CLAUDE.md` 参照)。
+
+本文書は全 crate のコードを実際に読んで機能の「不足・過剰・適正」を選別した結果です。
+**各項目には根拠となるファイルパスを付してあるので、鵜呑みにせず該当ファイルを
+開いて現状を再確認してから作業してください**(本文書作成後に実装が進んでいる
+可能性があるため)。関連文書: `docs/PRODUCT_REVIEW.md`(実ビルド検証付きレビュー)、
+`docs/roadmap.md` セクション 0(優先順位の意思決定記録)・セクション 0.5
+(市販レベル品質へのロードマップ — コード署名/自動更新/クラッシュレポート等、
+本文書がカバーしないコア機能以外の商用リリース要件)。
+
+## 判定基準(1文)
+
+> 「今日この製品を人に配って、音声付き 60fps HW エンコード映像が初回接続で
+> 見られるか」に寄与しない実装は v0.1 では凍結する。
+
+この基準に照らして全機能を 4 区分に選別した。
+
+---
+
+## 🔴 不足 — コア目的に必須なのに欠けている(優先実装対象)
+
+| # | 機能 | 現状の証拠(ファイルパス) | 対応方針 / 規模 |
+|---|------|---------------------------|------------------|
+| 1 | ~~ホスト側システム音声キャプチャ~~ → **loopback/monitor デバイス経由で実装(要 cargo test + 実機検証)** | `crates/miru-audio/src/capture.rs`(新規 `SystemAudioCapture` = cpal 入力ストリーム、48kHz stereo f32 固定)+ `crates/miru-host/src/audio_loop.rs`(新規、`capture_loop.rs` と同型に専用スレッドで capture→Opus encode→`flume::Receiver<Msg>`)。`session.rs` は `Features.audio` を `loopback_available()` で広告、Opus 交渉時のみ `audio_loop::start` を起動し select ループの新アーム `recv_audio` で `Msg::AudioFrame` を転送。**honest-disclosure: マイクにはフォールバックせず monitor/loopback デバイスのみ使用**(Linux は PulseAudio/PipeWire の monitor ソースで即動作、macOS/Windows は BlackHole/VB-Cable 等の仮想デバイスが要る — ネイティブ loopback は follow-up)。デバイス不在なら `audio:false` で劣化。viewer 側は受信・再生実装済みで変更不要 | 完了。次は Rust ビルド検証 + 実機での loopback E2E(接続→音声→切断)。**残: (a) ネイティブ WASAPI/CoreAudio loopback(仮想デバイス不要化)、(b) 複数 viewer 同時接続時の共有キャプチャ** — 現在は `handle_viewer` が接続ごとに spawn され上限が無いため各セッションが独自に capture を開く。システム音声はシングルトン資源なので2人目以降はデバイス使用中で失敗しうる(warn ログを出しそのセッションのみ無音 = クラッシュはしない)。正しくは1キャプチャを broadcast で全セッションへファンアウト |
+| 2 | HW エンコード (AV1/H264/H265) | `crates/miru-codec/src/ffmpeg_enc.rs` — `encode()` が `bail!("FFmpegEncoder not yet wired")` を返すだけのスタブ。実コーデックは JPEG と VP9 (feature `vpx`) のみ | ffmpeg-next の実配線。ソース内 TODO コメントに実装手順の骨子あり。規模: 中 (2-3週) |
+| 3 | ~~WebGL2 YUV 描画パス~~ → **WebCodecs パスとして実装(要 cargo test / 実機検証)** | ADR 0013 の通り WebGL2 に生 I420 を IPC 転送する設計は帯域 ~15x 退行のため凍結が正しく、真の解は WebCodecs `VideoDecoder`。実装済み: host が VP9/VP8 ビットストリームをそのまま `video-packet` イベントで転送(`session.rs`、`webcodecs_decode: AtomicBool` で分岐)、フロントは `lib/webcodecs-renderer.ts` の `VideoDecoder` でデコードして canvas 描画。`VideoDecoder.isConfigSupported` で対応判定し、デコードエラー時は `set_decode_mode(false)` で Rust JPEG パスへ自動フォールバック。録画中は JPEG が必要なため WebCodecs を自動的に無効化。TypeScript は `tsc --noEmit` でエラーゼロを実機検証済み。`yuv-renderer.ts` は参照用として凍結のまま(将来削除候補) | 完了。次は Rust ビルド検証 + 実機での VP9 セッション描画・フォールバック確認 |
+| 4 | Wayland / PipeWire キャプチャ | `crates/miru-capture/src/platform/pipewire.rs` がスタブ。Ubuntu 22.04+ / Fedora の標準セッション(Wayland)で動かない | xdg-desktop-portal (zbus) + pipewire-rs。規模: 中 (2-3週) |
+| 5 | macOS 60fps キャプチャ | `crates/miru-capture/src/platform/macos.rs` — deprecated な CGDisplayCreateImage で ~20fps | ScreenCaptureKit (SCStream) へ移行。規模: 中 (1-2週) |
+| 6 | CI/CD が稼働していない | ワークフローが `.github/workflows/` ではなく `.github/workflows-proposed/` に隔離されたまま。push する GitHub App に `workflows` 権限が無く自動化エージェントでは移動できない(実際に push が拒否されることを確認済み) | **リポジトリ管理者の手作業が必要**: `git mv .github/workflows-proposed/*.yml .github/workflows/`。規模: 極小 |
+| 7 | ~~クライアント側 TOFU 確認ダイアログが完全に未接続~~ → **実装済み(要 cargo test 検証)** | `crates/miru-client/src-tauri/src/session.rs` のハンドシェイク直後に TOFU ゲートを追加: viewer 側 `AclStore`(`crates/miru-auth/src/lib.rs`)の `check()`/`trust()`/`touch()` を初めて呼び出すよう配線。`TrustDecision::Unknown`(初回接続)は `pending_pairing` oneshot チャネル経由でフロントエンドの確認を待ち(120秒タイムアウト)、`PairingDialog.tsx`(`requirePin={false}` モード)で指紋を能動的に確認させてから `TrustedPeer` を永続化する。`TrustDecision::PubkeyMismatch`(鍵変更 = MITM の可能性)は `NoAutoRetry` マーカーエラーで即座に拒否し、再接続ループが自動リトライしないようにも対応済み。新規 Tauri command `confirm_pairing`。TypeScript 側は `npx tsc -b --noEmit` でエラーゼロを実機検証済み。**Rust 側はサンドボックスの crates.io 遮断によりコンパイル未検証** — マージ前に必ず `cargo test --workspace` を実行すること | 完了。次のアクションは Rust ビルド検証のみ |
+| 8 | ~~ホスト側 TOFU が無条件自動承認~~ → **オプトイン強化モードを追加(要 cargo test 検証)** | `crates/miru-host/src/session.rs` の `check_or_pair()`。`miru-host` は GUI の無い純粋な CLI/ヘッドレスバイナリのため viewer 側と同じ対話的確認ダイアログは実装できない。デフォルト挙動(初回接続は自動承認)を無断で変える判断は破壊的変更のリスクがあるため、**デフォルトは変更せず** `HostConfig::require_pairing_confirm`(`MIRU_REQUIRE_PAIRING_CONFIRM=1` で有効化、`main.rs` で一度だけ読み取り)を追加。`MIRU_ALLOW_STUB` の「デフォルト維持・明示的 opt-in」パターンを踏襲 | 完了。次のアクションは Rust ビルド検証のみ |
+| 9 | ~~`ConnectArgs.pin` フィールドが実質デッドコード~~ → **誤解を招く入力欄を削除(tsc 検証済み)** | 検証の結果、PIN は `ConnectScreen` → `api.connect` → `ConnectArgs.pin` と流れるが `session.rs`/`state.rs` のどこからも読まれない完全なデッドコードと確定。初回接続のセキュリティは実際には TOFU 指紋確認ダイアログ(項目7)であり、何も強制しない PIN 入力は「保護されている」という誤った安心感を与えるため削除。UI 入力・`api.connect` の `pin` 引数・`ConnectArgs.pin` フィールドを一括除去。PIN ペアリング自体は `CLAUDE.md`(暗号/PIN、PBKDF2-SHA256)の将来機能として維持し、ホスト側の実強制と配線する時点で入力欄を再追加する旨をコード内コメントに明記 | 完了(将来 PIN 機能実装時に再配線) |
+| 10 | ~~UI アクセシビリティ欠如~~ → **解消済み(12/12コンポーネント)** | 商用品質監査(2026-07)で確認: 12個の `.tsx` 全体で `aria-*`/`role=` 使用が実質ゼロだった。全コンポーネントに基礎対応済み: label/input 関連付け、`role="dialog"`/`"alert"`/`"status"`、`aria-live`、ナビゲーションの `aria-current`、識別可能な `aria-label`。特筆: `TimelineScrubber.tsx` のシークバーはキーボード操作が皆無だったため `role="slider"` + 矢印キーハンドラを新規実装、`ConstellationMap.tsx` の SVG可視化はキーボード到達不能な複製UIのため `aria-hidden` で隠し実アクセス手段(device-list の `<button>`)のみ露出。全て `tsc` 検証済み | 完了。今後は実スクリーンリーダー(NVDA/VoiceOver)での実機検証が望ましい |
+| 11 | ~~存在しない `miru.app` ドメインへの依存~~ → **解消済み** | `MIRU_SIGNAL` のデフォルト値が未登録の `signal.miru.app` を指していた(`main.rs`/`scripts/install.sh` 双方)。`PRIVACY.md` は実装ゼロのクラッシュレポート機能を実在するかのように詳述していた(`--enable-crash-reports` フラグはコード上皆無、`grep` で確認済み)。全て `localhost` デフォルトへの修正、または「未実装/未稼働」の正直な注記に置換 | 完了 |
+| 12 | `PairPrompt.tsx` が `PairingDialog.tsx` と同様の完全なデッドコード | `crates/miru-client/ui/src/components/PairPrompt.tsx` — ホスト側ペアリング確認 UI として完成度は高いが、`grep -rn "PairPrompt" src/` でヒットが定義行のみ(import 0件)。`miru-host` は Tauri UI を持たないヘッドレス CLI のため、このコンポーネントを呼び出す先が構造的に存在しない | 将来のホスト GUI モード構想の名残りか、削除候補か要判断。規模: 判断のみ(小) |
+
+## 🔴 追加(2026-08 First Principles 再監査 — 入力経路)
+
+「①画面が見える ②操作できる」が中核という第一原理から入力経路を精査した結果、
+**従来の監査が一件も捉えていなかった中核機能の破綻**を発見。13〜15 は本ブランチで修正済み。
+
+| # | 項目 | 根拠 | 状態 |
+|---|------|------|------|
+| 13 | **キーコードが無変換で3つの別番号空間へキャストされていた(最重要)** | ビューアは `e.keyCode`(Windows VK 由来)を送信し、各バックエンドが変換せず OS API へ渡していた。evdev(`KEY_A`=30)/ CGKeyCode(`A`=0)/ VK(`A`=65)は**互いに無関係な番号空間**のため、`A` が Linux で `KEY_F7`、macOS で別キーになる。変換表はリポジトリ内に存在しなかった。`miru-mcp/src/server.rs:459` は "host translates per OS" と契約を書いていたが**ホストは変換していなかった** | **修正済**。`miru-input/src/keymap.rs` を新設し W3C `code`("KeyA")→ evdev / CGKeyCode / VK の変換表を実装(数値は Chromium `keycode_converter_data.inc` = USB HID Usage Tables + W3C UI Events 準拠)。プロトコルに `code: Option<String>`(`serde(default)`)を追加し双方向後方互換。`code` 不在時は旧来の生キャストへフォールバック |
+| 14 | **押しっぱなしキーが永久に解放されない** | 修飾キーの状態追跡もリリース処理も皆無。ビューアは `blur`/`visibilitychange` を監視せず、Alt+Tab 離脱で Alt-up が送られない。`SessionScreen.tsx` の `Ctrl+W` 早期 return は Ctrl の key_down 送信**後**に発火し構造的に Ctrl-up が欠落。Linux の uinput デバイスはプロセス寿命の `static` のため**stuck キーが再接続をまたいで残存** | **修正済**。ホスト: `InputHandler` が押下中キーを追跡し `release_all_keys()` をセッション終了時に実行 + `Drop` 実装で `?` 早期 return も含む全経路を網羅(単体テスト3件付き)。ビューア: 押下中キーを追跡し blur / visibilitychange / unmount で key_up を送出 |
+| 15 | Linux スクロールの実装バグ2件 | `if dy > 0.0 { 1 } else { -1 }` により **`dy == 0.0` が「下スクロール」**になっていた(横スクロール専用イベントが縦に誤動作)。また `REL_HWHEEL` が uinput デバイスに未登録で**横スクロールが構造的に不可能**、`dx` は破棄されていた | **修正済**。ゼロ delta は no-op 化、`REL_HWHEEL` を登録し `dx` を注入 |
+| 16 | Ctrl+Alt+Del(SAS)を送る手段が無い | `InputKind` に該当 variant が無く、Windows の `SendInput` では原理的に生成不可(設計上の制約)。ログイン画面・UAC プロンプト・ロック画面へ到達できない | **未着手**。`SendSAS` / セキュアデスクトップ対応が必要な独立課題。規模: 中 |
+| 17 | `MouseMove.display` が全OSで破棄されている | 3バックエンドとも `..` で読み捨て。macOS の `screen_point()` は `CGDisplay::main()` 固定のため、**マルチモニタのセカンダリへカーソルを移動できない** | **未着手**。規模: 小〜中 |
+| 18 | Linux の `Text` 注入がクリップボードを破壊する | `platform/linux.rs` はクリップボードへ書いて Ctrl+V を合成する実装。(a) ユーザーのクリップボード内容を毎回破壊 (b) `xclip` 依存で**X11 限定**(ファイル冒頭は "Works on both X11 and Wayland" と誤記) (c) Ctrl+V が貼り付けでない端末等では動作しない | **未着手**。`XTestFakeKeyEvent` 相当か、レイアウト解決による直接キー合成が必要。規模: 中 |
+| 19 | MCP エージェント経路は依然として旧キャストのまま | `miru-mcp/src/server.rs` の `parse_key` は VK コードを生成し `code: None` で送るため、項目13のフォールバック(生キャスト)経路に乗る。人間ビューア経路は修正済みだが**エージェント経路の Linux/macOS は未修正** | **未着手**。`parse_key` を W3C `code` 文字列に変更すれば解消。規模: 小 |
+
+
+## 🟡 過剰 — 品質は高いがコア未完成の段階では時期尚早(追加投資を凍結)
+
+| # | 機能 | 証拠 | 判断理由 |
+|---|------|------|---------|
+| 1 | AI エージェント統治基盤 6 crate | `crates/miru-agent/` (11 capability × 3 セキュリティ層のトークン)、`crates/miru-mcp/` (MCP サーバ)、`crates/miru-sandbox/`、`crates/miru-constellation/`、`crates/miru-discovery/`、`crates/miru-transparency/` (Rekor 透明性ログ) | 「人間向けリモートデスクトップ」という一次ゴールの定義外。設計品質は業界水準以上だが、実利用データが無いまま拡張するべきではない。**削除はしない。凍結のみ** |
+| 2 | セッション録画 | `crates/miru-host/src/recording.rs` + `crates/miru-client/ui/src/components/TimelineScrubber.tsx` | ライブ接続の基本体験(音声・HW エンコード)が未完成な段階での拡張機能 |
+| 3 | NAT 越えのさらなる高度化 | `crates/miru-transport/src/nat.rs` — STUN + hole-punch + NAT タイプ判定は実装済み | 現状で十分。ソース内コメント通り Symmetric NAT/CGNAT は元々リレー行きであり、これ以上磨いても回収が薄い |
+| 4 | AI エージェント系 UI のトップレベル露出 | `crates/miru-client/ui/src/components/` の `ConstellationMap.tsx` / `AuditLogViewer.tsx` / `AgentTokenIssue.tsx` — トップレベル 9 コンポーネント中 3 つが一般ユーザーに無関係 | 削除ではなく「詳細設定の奥へ再配置」または起動フラグの配下に隠す情報アーキテクチャ変更が correct fix |
+
+## 🟢 適正 — 過不足なし(触らない)
+
+| # | 機能 | 証拠 |
+|---|------|------|
+| 1 | 暗号層 | `crates/miru-common/src/crypto.rs` — X25519 ephemeral + ChaCha20-Poly1305、方向別サブ鍵、128-bit sliding window リプレイ保護。`crates/miru-transport/src/handshake.rs` — Ed25519 `verify_strict` + TOFU |
+| 2 | QoS / バックプレッシャ | `crates/miru-host/src/qos_bbr.rs` (BBR 風制御) + `crates/miru-host/src/backpressure.rs`。RustDesk の AIMD より先進的 |
+| 3 | i18n + オンボーディング | `crates/miru-client/ui/src/locales/{ja,en}.json`、`OnboardingWizard.tsx` |
+| 4 | 配布基盤 | `scripts/install.sh` / `install.ps1`、`distribution/{aur,homebrew,scoop}/` |
+| 5 | テスト文化 | 統合テスト・ベンチ (`crates/miru-bench/`)・ファズ (`fuzz/`)・リグレッションテストが機能追加に伴い整備されている。フロントエンドは従来テスト皆無だったが Vitest を導入し純粋ロジック(WebCodecs のコーデック判定・キーフレームゲーティング・base64 デコード)にテスト追加 (`npm test`、10件パス) |
+
+## ⚠️ 要事実確認 — 過不足判定の前に確認が必要
+
+1. **配布経路が既に一般公開されているか** — `distribution/` のパッケージ定義が
+   AUR/Homebrew/Scoop に実際に登録済みなら、「音声も HW エンコードも動かない版」が
+   ユーザーの手元に届いている実害リスクがある。公開状況を確認せよ。
+2. **Merkle 木の RFC 6962 非準拠** — `crates/miru-transparency/` は odd leaf を
+   self-hash する実装で、内部一貫性はあるが他実装と相互運用できない
+   (`docs/PRODUCT_REVIEW.md` 参照)。外部相互運用が要件になるかで過剰/欠陥の判定が変わる。
+
+---
+
+## 本ブランチで適用済みの修正(引き継ぎ時の注意)
+
+ブランチ `claude/sweet-franklin-l5a1yw` に20コミット以上を追加済み。主な内容
+(詳細は `git log` を参照):
+
+- perf: RGBA/BGRA→I420 変換の高速化(clone排除・固定小数点化)、後に
+  `packed32_to_i420` へ重複排除して統合
+- fix: relay接続タイムアウト、クリップボードサイズ上限、backpressureの
+  atomic ordering、MCPレート制限の切り上げ除算、display index範囲チェック
+- fix: `Features.audio` の虚偽広告修正
+- feat: viewer側TOFU確認ゲート、host側 opt-in強化モード(`MIRU_REQUIRE_PAIRING_CONFIRM`)
+- feat: UI アクセシビリティ基礎対応(2/12コンポーネント)
+- fix: 存在しない `miru.app` ドメインへの依存を解消(コード・配布パッケージ・
+  法的文書すべて)
+- docs: `PRODUCT_REVIEW.md`/`roadmap.md`(優先順位分析 + 商用品質ロードマップ)/
+  `MODEL_GUIDE.md`(モデル・skill・Agent・Loop使い分け)の新規作成・更新
+- `/code-review`・`/simplify` スキルによるセルフレビューを実施済み(clippy警告
+  修正、BGRA/RGBA変換の重複排除、env変数のconfig field化)
+
+**重要**: これらのコード変更は目視レビューのみで **コンパイル未検証** です。
+作成時のサンドボックスは crates.io (`static.crates.io`) への通信がプロキシポリシーで
+403 拒否され `cargo check` が実行できませんでした。引き継いだら **まず
+`cargo test --workspace` を実行して全変更をビルド・テスト検証してください**。

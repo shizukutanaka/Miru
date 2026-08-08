@@ -257,19 +257,29 @@ jobs:
           files: lcov.info
           fail_ci_if_error: false
 
-  # ─── Frontend build (Tauri UI) ─────────────────────────────────────────────
+  # ─── Frontend (Tauri UI): typecheck + unit tests + build ───────────────────
   frontend:
-    name: Frontend Build
+    name: Frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm', cache-dependency-path: crates/miru-client/ui/package-lock.json }
-      - working-directory: crates/miru-client/ui
-        run: |
-          npm ci || npm install
-          npm run build
-        continue-on-error: true   # UI is in early dev; don't block other jobs
+      - name: Install deps
+        working-directory: crates/miru-client/ui
+        run: npm ci || npm install
+      # typecheck + tests are deterministic and green — block on them.
+      - name: Typecheck
+        working-directory: crates/miru-client/ui
+        run: npm run typecheck
+      - name: Unit tests (Vitest)
+        working-directory: crates/miru-client/ui
+        run: npm test
+      # Full Vite build still tolerated to fail while UI is in early dev.
+      - name: Build
+        working-directory: crates/miru-client/ui
+        run: npm run build
+        continue-on-error: true
 
   # ─── Benchmarks (informational) ────────────────────────────────────────────
   bench:

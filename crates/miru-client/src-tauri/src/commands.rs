@@ -11,7 +11,12 @@ use tracing::info;
 pub struct ConnectArgs {
     pub device_id: String,
     pub signal_url: String,
-    pub pin: Option<String>,
+    // NOTE: a `pin` field used to live here and a matching input in
+    // ConnectScreen, but nothing ever read it — first-connection security is
+    // the TOFU fingerprint confirmation (session.rs). A PIN input that enforces
+    // nothing is a false sense of security, so it was removed. PIN pairing
+    // remains a documented future feature (CLAUDE.md 暗号/PIN); re-add the input
+    // only once it is wired to real host-side enforcement.
 }
 
 #[tauri::command]
@@ -30,6 +35,15 @@ pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve a pending first-connection TOFU pairing prompt (see the
+/// "pairing_required" session-event). Called from the fingerprint
+/// confirmation dialog once the user has compared it out-of-band.
+#[tauri::command]
+pub fn confirm_pairing(accept: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.confirm_pairing(accept);
+    Ok(())
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SendInputArgs {
     pub kind: String, // "mouse_move", "mouse_down", etc.
@@ -38,6 +52,9 @@ pub struct SendInputArgs {
     pub button: Option<String>,
     pub key: Option<u32>,
     pub modifiers: Option<u8>,
+    /// W3C UI Events physical-key identifier ("KeyA"). Layout-independent and
+    /// the only reliable way to inject keys on Linux/macOS hosts.
+    pub code: Option<String>,
     pub dx: Option<f32>,
     pub dy: Option<f32>,
     pub text: Option<String>,
@@ -68,10 +85,12 @@ pub async fn send_input(args: SendInputArgs, state: State<'_, AppState>) -> Resu
             y: args.y.unwrap_or(0.0),
         },
         "key_down" => InputKind::KeyDown {
+            code: args.code.clone(),
             key: args.key.unwrap_or(0),
             modifiers: args.modifiers.unwrap_or(0),
         },
         "key_up" => InputKind::KeyUp {
+            code: args.code.clone(),
             key: args.key.unwrap_or(0),
             modifiers: args.modifiers.unwrap_or(0),
         },
@@ -109,6 +128,10 @@ fn parse_button(s: &Option<String>) -> MouseButton {
 
 #[tauri::command]
 pub async fn send_clipboard(text: String, state: State<'_, AppState>) -> Result<(), String> {
+    const MAX_CLIPBOARD_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+    if text.len() > MAX_CLIPBOARD_BYTES {
+        return Err("clipboard content too large (max 10 MiB)".to_string());
+    }
     state.send_clipboard(text).await.map_err(|e| e.to_string())
 }
 
@@ -202,9 +225,29 @@ pub fn session_stats(state: State<'_, AppState>) -> SessionStats {
     state.stats()
 }
 
+/// Select the video decode path. `webcodecs = true` forwards raw VP9/VP8
+/// packets for the WebView's `VideoDecoder` to decode; `false` decodes in Rust
+/// and emits JPEG frames (required for recording). The frontend calls this once
+/// after detecting `VideoDecoder` support, and again to fall back on decoder
+/// error or while recording.
+#[tauri::command]
+pub fn set_decode_mode(webcodecs: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.set_decode_mode(webcodecs);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn fingerprint(state: tauri::State<'_, AppState>) -> String {
     state.fingerprint()
+}
+
+/// Mute or unmute inbound host audio. Muting drops frames at the network
+/// boundary so nothing is decoded or played; unmuting resumes with the next
+/// frame. Applies to the live session only (not persisted).
+#[tauri::command]
+pub fn set_audio_muted(muted: bool, state: State<'_, AppState>) -> Result<(), String> {
+    state.set_audio_muted(muted);
+    Ok(())
 }
 
 // ─── Agent token issuance ────────────────────────────────────────────────────

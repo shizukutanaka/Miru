@@ -28,7 +28,8 @@ const PROBE_RTT_INTERVAL: Duration = Duration::from_secs(10);
 /// BBR-style controller.
 pub struct BbrQos {
     /// Best (minimum) RTT we've seen recently — proxy for propagation delay.
-    rtt_min_us: u32,
+    /// None until the first RTT sample arrives.
+    rtt_min_us: Option<u32>,
     /// Max delivery rate we've seen recently — proxy for bottleneck bandwidth.
     bw_max_kbps: u32,
 
@@ -91,7 +92,7 @@ impl BbrQos {
     pub fn new(initial_fps: u8, initial_kbps: u32) -> Self {
         let now = Instant::now();
         Self {
-            rtt_min_us: u32::MAX,
+            rtt_min_us: None,
             // Prime the BW estimate with the configured rate so the first BBR
             // tick targets initial_kbps × pacing_gain rather than clamping to
             // 500 kbps (the floor) for the 200ms until delivery data arrives.
@@ -137,12 +138,7 @@ impl BbrQos {
         {
             self.rtt_samples.pop_front();
         }
-        self.rtt_min_us = self
-            .rtt_samples
-            .iter()
-            .map(|(_, v)| *v)
-            .min()
-            .unwrap_or(rtt_us);
+        self.rtt_min_us = self.rtt_samples.iter().map(|(_, v)| *v).min();
     }
 
     /// Feed an observed delivery rate (bytes acknowledged / interval).
@@ -191,14 +187,11 @@ impl BbrQos {
         // Skip adjustment until we have real RTT data (rtt_min_us == u32::MAX means no samples).
         let fps_ceil = if self.hint_max_fps > 0 { self.hint_max_fps } else { 60 };
         let fps_floor = if self.hint_mode == HintMode::Smooth { 30u8 } else { 15u8 };
-        let target_fps = if self.rtt_min_us == u32::MAX {
-            self.cur_fps.min(fps_ceil)
-        } else if self.rtt_min_us > 100_000 {
-            self.cur_fps.saturating_sub(5).max(fps_floor)
-        } else if self.rtt_min_us < 30_000 && self.cur_fps < fps_ceil {
-            (self.cur_fps + 5).min(fps_ceil)
-        } else {
-            self.cur_fps.min(fps_ceil)
+        let target_fps = match self.rtt_min_us {
+            None => self.cur_fps.min(fps_ceil),
+            Some(rtt) if rtt > 100_000 => self.cur_fps.saturating_sub(5).max(fps_floor),
+            Some(rtt) if rtt < 30_000 && self.cur_fps < fps_ceil => (self.cur_fps + 5).min(fps_ceil),
+            _ => self.cur_fps.min(fps_ceil),
         };
 
         let changed = target != self.cur_bitrate_kbps || target_fps != self.cur_fps;
@@ -255,7 +248,8 @@ impl BbrQos {
     fn quality_estimate(&self) -> u8 {
         // Heuristic: high BW + low RTT → high quality
         let bw_score = (self.cur_bitrate_kbps as f32 / 100.0).min(50.0);
-        let rtt_penalty = (self.rtt_min_us as f32 / 1000.0 / 10.0).min(50.0);
+        let rtt_us = self.rtt_min_us.unwrap_or(0);
+        let rtt_penalty = (rtt_us as f32 / 1000.0 / 10.0).min(50.0);
         let base = (50.0 + bw_score - rtt_penalty).clamp(20.0, 95.0) as u8;
         // Quality mode biases the estimate upward; smooth mode downward.
         let biased = match self.hint_mode {
@@ -273,8 +267,8 @@ impl BbrQos {
         self.cur_bitrate_kbps
     }
     #[allow(dead_code)]
-    pub fn rtt_min_ms(&self) -> u32 {
-        self.rtt_min_us / 1000
+    pub fn rtt_min_ms(&self) -> Option<u32> {
+        self.rtt_min_us.map(|us| us / 1000)
     }
 }
 

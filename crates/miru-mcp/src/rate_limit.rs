@@ -53,17 +53,22 @@ impl Policy {
     }
 
     fn per_second(burst: u32, daily_max: u32) -> Self {
+        let b = burst.max(1) as u64;
+        // Ceiling division so the true refill rate never exceeds the
+        // configured burst/sec (floor division would round the interval
+        // down, letting the bucket refill slightly faster than intended).
         Self {
             burst,
-            refill_every: Duration::from_millis(1000 / burst.max(1) as u64),
+            refill_every: Duration::from_millis((1000 + b - 1) / b),
             daily_max,
         }
     }
 
     fn per_minute(burst: u32, daily_max: u32) -> Self {
+        let b = burst.max(1) as u64;
         Self {
             burst,
-            refill_every: Duration::from_secs(60 / burst.max(1) as u64),
+            refill_every: Duration::from_secs((60 + b - 1) / b),
             daily_max,
         }
     }
@@ -110,7 +115,11 @@ impl Bucket {
         // elapsed time — this carries the sub-token remainder forward so it counts
         // toward the next refill rather than being silently discarded.
         let elapsed = now.duration_since(self.last_refill);
-        let refilled = (elapsed.as_nanos() / self.policy.refill_every.as_nanos().max(1)) as u32;
+        let refilled_u128 = elapsed.as_nanos() / self.policy.refill_every.as_nanos().max(1);
+        // Clamp before the u128 → u32 cast: an extreme clock jump (e.g. system
+        // suspend/resume) could otherwise wrap silently instead of just
+        // saturating the bucket at its burst size on the next line.
+        let refilled = refilled_u128.min(u32::MAX as u128) as u32;
         if refilled > 0 {
             self.tokens = (self.tokens + refilled).min(self.policy.burst);
             self.last_refill += self.policy.refill_every * refilled;

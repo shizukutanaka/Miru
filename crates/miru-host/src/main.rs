@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tracing::info;
 
 mod agent_handler;
+mod audio_loop;
 mod backpressure;
 mod capture_loop;
 mod headless;
@@ -114,8 +115,11 @@ async fn main() -> Result<()> {
     // Print startup banner (Device ID + fingerprint for out-of-band verification).
     ui::print_banner(&device_id, &identity);
 
-    let signal_url = std::env::var("MIRU_SIGNAL")
-        .unwrap_or_else(|_| "ws://signal.miru.app:21115/ws".to_string());
+    // Default to a local signal server — Miru is self-hosted by design (see
+    // CLAUDE.md), and `signal.miru.app` was a placeholder domain that was
+    // never registered. Set MIRU_SIGNAL to point at a real deployment.
+    let signal_url =
+        std::env::var("MIRU_SIGNAL").unwrap_or_else(|_| "ws://localhost:21115/ws".to_string());
     info!("Signal: {}", signal_url);
 
     // Apply OS-level sandboxing AFTER all privileged init is done.
@@ -191,6 +195,7 @@ async fn main() -> Result<()> {
         identity,
         acl,
         config_dir,
+        require_pairing_confirm: std::env::var("MIRU_REQUIRE_PAIRING_CONFIRM").is_ok(),
     };
     let result = session::run(device_id, signal_url, config).await;
 

@@ -47,7 +47,7 @@ impl AgentHandler {
                 "scroll",
                 json!({"dx": dx, "dy": dy, "x": x, "y": y}),
             ),
-            InputKind::KeyDown { key, modifiers } | InputKind::KeyUp { key, modifiers } => {
+            InputKind::KeyDown { key, modifiers, .. } | InputKind::KeyUp { key, modifiers, .. } => {
                 if *modifiers == 0 {
                     (Capability::KeyType, "key", json!({"key": key}))
                 } else {
@@ -159,6 +159,7 @@ mod tests {
             kind: InputKind::KeyDown {
                 key: 65,
                 modifiers: 0,
+                code: Some("KeyA".into()),
             },
             timestamp_ms: 0,
         };

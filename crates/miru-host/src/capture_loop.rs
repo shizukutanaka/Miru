@@ -12,6 +12,7 @@ use miru_capture::{
     frame::{PixelFormat, RawFrame},
     ScreenCapturer,
 };
+use miru_codec::color::{bt601_uv, bt601_y};
 use miru_codec::encoder::Encoder;
 use miru_common::message::{Msg, VideoCodec, VideoFrame};
 use std::sync::Arc;
@@ -124,17 +125,20 @@ pub fn start(
                     continue; // unreachable: init branch either set Some or continued
                 };
 
-                // Convert to I420 if needed
-                let i420 = match frame.format {
-                    PixelFormat::I420 => frame.data.to_vec(),
-                    PixelFormat::Bgra32 => bgra_to_i420(&frame),
-                    PixelFormat::Nv12 => nv12_to_i420(&frame),
-                    PixelFormat::Rgba32 => rgba_to_i420(&frame),
+                // Convert to I420 if needed.
+                // I420 frames are already in the right format — borrow the
+                // Bytes slice directly rather than copying into a new Vec.
+                let i420_owned: Vec<u8>;
+                let i420: &[u8] = match frame.format {
+                    PixelFormat::I420 => &frame.data,
+                    PixelFormat::Bgra32 => { i420_owned = bgra_to_i420(&frame); &i420_owned }
+                    PixelFormat::Nv12 => { i420_owned = nv12_to_i420(&frame); &i420_owned }
+                    PixelFormat::Rgba32 => { i420_owned = rgba_to_i420(&frame); &i420_owned }
                 };
 
                 // Encode
                 match enc.encode(
-                    &i420,
+                    i420,
                     frame.width,
                     frame.height,
                     frame.timestamp_ms,
@@ -184,9 +188,13 @@ pub fn start(
 
 // ─── Color conversion ─────────────────────────────────────────────────────────
 
-/// BGRA32 → I420 (YUV 4:2:0 planar).
-/// Two-pass: Y in one linear scan, UV with 2×2 block averaging (BT.601).
-fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
+/// Generic packed 32-bit-per-pixel → I420 conversion, parameterized by the
+/// byte offset of R/G/B within each pixel (alpha is always ignored). Shared
+/// by BGRA32 (r_off=2,g_off=1,b_off=0) and RGBA32 (r_off=0,g_off=1,b_off=2) —
+/// the two formats differ only in channel order, so the BT.601 fixed-point
+/// math and 2×2 chroma averaging were previously duplicated line-for-line.
+/// Two-pass: Y in one linear scan, UV with 2×2 block averaging.
+fn packed32_to_i420(frame: &RawFrame, r_off: usize, g_off: usize, b_off: usize) -> Vec<u8> {
     let w = frame.width as usize;
     let h = frame.height as usize;
     let src = &frame.data;
@@ -202,11 +210,10 @@ fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
     for row in 0..h {
         for col in 0..w {
             let i = row * stride + col * 4;
-            let b = src[i] as i32;
-            let g = src[i + 1] as i32;
-            let r = src[i + 2] as i32;
-            let y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-            y_plane[row * w + col] = y.clamp(16, 235) as u8;
+            let r = src[i + r_off] as i32;
+            let g = src[i + g_off] as i32;
+            let b = src[i + b_off] as i32;
+            y_plane[row * w + col] = bt601_y(r, g, b);
         }
     }
 
@@ -218,21 +225,20 @@ fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
         for col in (0..w).step_by(2) {
             let c0 = col;
             let c1 = (col + 1).min(w - 1);
-            let avg = |ch: usize| {
-                (src[r0 * stride + c0 * 4 + ch] as i32
-                    + src[r0 * stride + c1 * 4 + ch] as i32
-                    + src[r1 * stride + c0 * 4 + ch] as i32
-                    + src[r1 * stride + c1 * 4 + ch] as i32)
+            let avg = |off: usize| {
+                (src[r0 * stride + c0 * 4 + off] as i32
+                    + src[r0 * stride + c1 * 4 + off] as i32
+                    + src[r1 * stride + c0 * 4 + off] as i32
+                    + src[r1 * stride + c1 * 4 + off] as i32)
                     / 4
             };
-            let b = avg(0);
-            let g = avg(1);
-            let r = avg(2);
+            let r = avg(r_off);
+            let g = avg(g_off);
+            let b = avg(b_off);
             let uv_i = (row / 2) * (w / 2) + col / 2;
-            let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-            let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-            u_plane[uv_i] = u.clamp(16, 240) as u8;
-            v_plane[uv_i] = v.clamp(16, 240) as u8;
+            let (u, v) = bt601_uv(r, g, b);
+            u_plane[uv_i] = u;
+            v_plane[uv_i] = v;
         }
     }
     out
@@ -270,23 +276,14 @@ fn nv12_to_i420(frame: &RawFrame) -> Vec<u8> {
     out
 }
 
+/// BGRA32 → I420 (YUV 4:2:0 planar). See [`packed32_to_i420`].
+fn bgra_to_i420(frame: &RawFrame) -> Vec<u8> {
+    packed32_to_i420(frame, 2, 1, 0)
+}
+
+/// RGBA32 → I420 (YUV 4:2:0 planar). See [`packed32_to_i420`].
 fn rgba_to_i420(frame: &RawFrame) -> Vec<u8> {
-    // Same as BGRA but swap R and B channels
-    let mut swapped = frame.data.to_vec();
-    for i in (0..swapped.len()).step_by(4) {
-        swapped.swap(i, i + 2); // R ↔ B
-    }
-    let frame2 = RawFrame {
-        format: PixelFormat::Bgra32,
-        data: bytes::Bytes::from(swapped),
-        display_idx: frame.display_idx,
-        width: frame.width,
-        height: frame.height,
-        stride: frame.stride,
-        timestamp_ms: frame.timestamp_ms,
-        dirty_rects: frame.dirty_rects.clone(),
-    };
-    bgra_to_i420(&frame2)
+    packed32_to_i420(frame, 0, 1, 2)
 }
 
 #[cfg(test)]

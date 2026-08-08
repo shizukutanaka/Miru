@@ -55,7 +55,9 @@ curl -L https://github.com/shizukutanaka/miru/releases/v0.1.0/SHA256SUMS -o SHA2
 curl -L https://github.com/shizukutanaka/miru/releases/v0.1.0/SHA256SUMS.sig -o SHA256SUMS.sig
 
 # 公開鍵 (Sigstore Rekor にも登録)
-curl -L https://miru.app/release-pubkey.txt -o release-pubkey.txt
+# NOTE: 専用ホスティングドメインは未確保です。公開鍵は GitHub リリースページの
+# アセットとして配布してください (miru.app 等の外部ドメインには依存しない)。
+curl -L https://github.com/shizukutanaka/miru/releases/download/v0.1.0/release-pubkey.txt -o release-pubkey.txt
 
 # 署名検証
 miru-host verify-release SHA256SUMS SHA256SUMS.sig release-pubkey.txt
@@ -116,6 +118,8 @@ RustDesk が抱えた既知の脆弱性に対する Miru の対応:
 | CVE-2026-30798 | Heartbeat 改ざん | 全制御メッセージ AEAD 暗号化 |
 | CVE-2026-2490 | シンボリックリンク漏洩 | O_NOFOLLOW + path 検証 |
 | CVE-2024-25140 | テスト証明書出荷 | ビルドプロセスで本番/テスト分離 |
+| CVE-2026-30784 | rendezvous/relay の未認証 RegisterPeer 登録による権限昇格 | `miru-signal` の Register ハンドラは Ed25519 所有権証明 (`verify_register_signature`) + identity-lock で他デバイス ID の乗っ取りを拒否。`MIRU_REQUIRE_SIGNED_REGISTER=1` で未署名登録を完全拒否する strict モードあり(デフォルトは後方互換のため警告付き受理、全クライアント移行後に有効化推奨。docs/RESEARCH_NOTES.md §6) |
+| CVE-2026-30795 | Heartbeat 同期ループの平文送信 | Miru の全セッションメッセージ (Ping/Pong 含む) は ChaCha20-Poly1305 で暗号化。signal 経由の Register/Connect は device_id/pubkey のみでセッション内容を含まない |
 
 ## 7. プライバシー検証
 
@@ -123,7 +127,9 @@ Miru が**何も送信していないこと**を自分で検証する方法:
 
 ```bash
 # Wireshark / tcpdump で送信パケット監視
-sudo tcpdump -i any host signal.miru.app
+# <your-signal-host> は MIRU_SIGNAL に設定した自分の signal サーバーのホスト名/IPに置き換えてください
+# (Miru は自己ホスト型で、公式にホストされた既定の signal サーバーは存在しません)
+sudo tcpdump -i any host <your-signal-host>
 
 # 接続中以外、何も流れないはずです
 ```
@@ -139,7 +145,8 @@ v1.0 公開時に Bug Bounty プログラム開始予定:
 - Medium: $500+
 - Low: $100+
 
-報告先: `security@miru.app` (PGP 暗号化推奨)。
+報告先: [SECURITY.md](SECURITY.md) 参照(GitHub Private Vulnerability Reporting が
+現時点で唯一機能している窓口。`security@miru.app` のメール受付はまだ稼働していません)。
 
 ## 9. 外部依存の信頼境界
 
@@ -162,5 +169,7 @@ v1.0 公開時に Bug Bounty プログラム開始予定:
 ## 連絡先
 
 - 技術質問: GitHub Issues
-- セキュリティ報告: security@miru.app (PGP)
-- 監査依頼: trust@miru.app
+- セキュリティ報告: [SECURITY.md](SECURITY.md) の GitHub Private Vulnerability
+  Reporting 経由(`security@miru.app` はまだ稼働していません)
+- 監査依頼: 現時点で専用窓口は未設置。GitHub Issues でご連絡ください
+  (`trust@miru.app` はまだ稼働していません)

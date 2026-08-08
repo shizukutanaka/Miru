@@ -9,6 +9,7 @@ use uuid::Uuid;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
@@ -44,11 +45,27 @@ pub struct AppState {
     stats: Arc<Mutex<SessionStats>>,
     pub recording: Arc<Mutex<Option<RecordingState>>>,
     discovery: Arc<Mutex<Option<miru_discovery::Discovery>>>,
+    /// When true, VP9/VP8 frames are forwarded to the frontend as raw encoded
+    /// packets (WebCodecs decodes them in the WebView) instead of being decoded
+    /// to I420 and re-encoded to JPEG in Rust. Set by the UI once it detects
+    /// `VideoDecoder` support; cleared while recording (which needs JPEG frames).
+    /// Shared with the live `session::run` task, read once per frame.
+    webcodecs_decode: Arc<AtomicBool>,
+    /// When true, inbound AudioFrames are dropped at the network boundary
+    /// instead of being decoded and played. Shared with the live `session::run`
+    /// task, read once per audio frame.
+    audio_muted: Arc<AtomicBool>,
 }
 
 struct ActiveSession {
     tx: mpsc::Sender<Msg>,
     cancel: tokio::sync::oneshot::Sender<()>,
+    /// Holds the oneshot sender for a pairing confirmation currently awaiting
+    /// a UI response. `None` when no pairing prompt is pending. Scoped to this
+    /// session (not a single AppState-wide slot) so a superseded session that
+    /// hasn't fully exited yet can never be handed a confirmation meant for
+    /// the session that replaced it.
+    pending_pairing: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
 /// Maximum number of auto-reconnect attempts on unexpected disconnect.
@@ -86,7 +103,20 @@ impl AppState {
             stats: Arc::new(Mutex::new(SessionStats::default())),
             recording: Arc::new(Mutex::new(None)),
             discovery: Arc::new(Mutex::new(discovery)),
+            webcodecs_decode: Arc::new(AtomicBool::new(false)),
+            audio_muted: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Mute/unmute inbound host audio. Takes effect on the next audio frame.
+    pub fn set_audio_muted(&self, muted: bool) {
+        self.audio_muted.store(muted, Ordering::Relaxed);
+    }
+
+    /// UI toggle: forward raw VP9/VP8 packets for WebCodecs decode (true) vs.
+    /// decode in Rust and emit JPEG (false). Takes effect on the next frame.
+    pub fn set_decode_mode(&self, webcodecs: bool) {
+        self.webcodecs_decode.store(webcodecs, Ordering::Relaxed);
     }
 
     pub fn fingerprint(&self) -> String {
@@ -98,15 +128,21 @@ impl AppState {
 
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Msg>(64);
         let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel();
+        let mut pending_pairing = Arc::new(Mutex::new(None));
 
         *self.session.lock() = Some(ActiveSession {
             tx: cmd_tx,
             cancel: cancel_tx,
+            pending_pairing: Arc::clone(&pending_pairing),
         });
 
         let identity = Arc::clone(&self.identity);
         let stats = Arc::clone(&self.stats);
         let recording = Arc::clone(&self.recording);
+        let acl = Arc::clone(&self.acl);
+        let acl_path = self.config_dir.join("acl.json");
+        let webcodecs_decode = Arc::clone(&self.webcodecs_decode);
+        let audio_muted = Arc::clone(&self.audio_muted);
         let app_clone = app.clone();
         let session_slot = Arc::clone(&self.session);
 
@@ -121,6 +157,11 @@ impl AppState {
                     app_clone.clone(),
                     Arc::clone(&stats),
                     Arc::clone(&recording),
+                    Arc::clone(&acl),
+                    acl_path.clone(),
+                    Arc::clone(&pending_pairing),
+                    Arc::clone(&webcodecs_decode),
+                    Arc::clone(&audio_muted),
                 )
                 .await;
 
@@ -129,6 +170,12 @@ impl AppState {
 
                 match result {
                     Ok(()) => break, // clean exit (user disconnect or host close)
+                    Err(e) if e.downcast_ref::<crate::session::NoAutoRetry>().is_some() => {
+                        // Security-policy refusal (pubkey mismatch) or explicit
+                        // user pairing rejection — never auto-retry these.
+                        tracing::warn!("Session ended without auto-retry: {}", e);
+                        break;
+                    }
                     Err(e) => {
                         attempt += 1;
                         if attempt > MAX_RECONNECT_ATTEMPTS {
@@ -147,12 +194,14 @@ impl AppState {
                             host_pub_addr: None,
                         });
                         tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
-                        // Re-create cmd channel for the new attempt.
+                        // Re-create cmd channel (and pending_pairing slot) for the new attempt.
                         let (new_cmd_tx, new_cmd_rx) = mpsc::channel::<Msg>(64);
                         let (new_cancel_tx, new_cancel_rx) = tokio::sync::oneshot::channel();
+                        pending_pairing = Arc::new(Mutex::new(None));
                         *session_slot.lock() = Some(ActiveSession {
                             tx: new_cmd_tx,
                             cancel: new_cancel_tx,
+                            pending_pairing: Arc::clone(&pending_pairing),
                         });
                         cmd_rx = new_cmd_rx;
                         cancel_rx = new_cancel_rx;
@@ -255,6 +304,28 @@ impl AppState {
             .map_err(|_| anyhow::anyhow!("session closed"))?;
 
         Ok(())
+    }
+
+    /// Resolve a pending first-connection pairing prompt (see session.rs's
+    /// TOFU gate). Reads the pairing slot off the *current* session in
+    /// `self.session` rather than a single AppState-wide slot, so a stale
+    /// superseded session (mid-shutdown after a disconnect()) can never be
+    /// handed a confirmation meant for the session that replaced it.
+    /// `accept = false` also covers "no prompt pending" — the caller sees
+    /// the send simply have no effect via `send().is_err()` being ignored,
+    /// which is fine: if the session already timed out the gate has moved
+    /// on regardless.
+    pub fn confirm_pairing(&self, accept: bool) {
+        let pending = self
+            .session
+            .lock()
+            .as_ref()
+            .map(|s| Arc::clone(&s.pending_pairing));
+        if let Some(pending) = pending {
+            if let Some(tx) = pending.lock().take() {
+                let _ = tx.send(accept);
+            }
+        }
     }
 
     pub fn list_peers(&self) -> Vec<TrustedPeer> {
@@ -455,7 +526,8 @@ impl AppState {
             "duration_ms": duration_ms,
             "frame_count": frame_count,
         });
-        std::fs::write(rec.dir.join("meta.json"), meta.to_string()).ok();
+        std::fs::write(rec.dir.join("meta.json"), meta.to_string())
+            .map_err(|e| anyhow::anyhow!("failed to write recording metadata: {e}"))?;
         info!("Recording stopped: {} ({} frames)", rec.session_id, frame_count);
 
         Ok(crate::commands::RecordingSummary {
@@ -489,7 +561,10 @@ impl AppState {
 
         // Read (offset, size) from offsets.bin — 12 bytes per frame.
         let mut idx_file = std::fs::File::open(base.join("offsets.bin"))?;
-        idx_file.seek(SeekFrom::Start(frame_idx * 12))?;
+        let seek_off = frame_idx
+            .checked_mul(12)
+            .ok_or_else(|| anyhow::anyhow!("frame_idx overflow"))?;
+        idx_file.seek(SeekFrom::Start(seek_off))?;
         let mut entry = [0u8; 12];
         idx_file.read_exact(&mut entry)?;
         let offset = u64::from_le_bytes(entry[..8].try_into()?);

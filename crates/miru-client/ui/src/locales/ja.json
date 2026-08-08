@@ -2,6 +2,7 @@
   "app.name": "Miru",
   "app.tagline": "AI 時代の安全な PC fabric",
 
+  "nav.main_label": "メインナビゲーション",
   "nav.connect": "接続",
   "nav.constellation": "Constellation",
   "nav.ai_authorize": "AI 許可",

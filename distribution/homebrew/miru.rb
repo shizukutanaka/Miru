@@ -1,6 +1,6 @@
 class Miru < Formula
   desc "AI-era secure PC fabric: remote desktop + AI agent + verifiable E2E + constellation"
-  homepage "https://miru.app"
+  homepage "https://github.com/shizukutanaka/miru"
   license "MIT"
   version "0.1.0"
 

@@ -151,10 +151,10 @@ PR を歓迎しています (locales/README.md 参照)。
 | 用途 | 連絡先 |
 |------|-------|
 | 一般的な質問 | GitHub Discussions |
-| プレス/メディア | `press@miru.app` |
-| パートナーシップ | `partnerships@miru.app` |
-| セキュリティ | `security@miru.app` (PGP) |
-| 法務 | `legal@miru.app` |
+| プレス/メディア | 専用アドレス未設置(GitHub Issues 経由。`press@miru.app` はまだ稼働していません) |
+| パートナーシップ | 専用アドレス未設置(GitHub Issues 経由。`partnerships@miru.app` はまだ稼働していません) |
+| セキュリティ | [SECURITY.md](../SECURITY.md) 参照(`security@miru.app` はまだ稼働していません) |
+| 法務 | 専用アドレス未設置(GitHub Issues 経由。`legal@miru.app` はまだ稼働していません) |
 
 ## 引用 OK 文章
 

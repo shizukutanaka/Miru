@@ -126,6 +126,19 @@ pub struct HelloAck {
     pub encrypted_key: Vec<u8>,
     pub selected_codec: VideoCodec,
     pub selected_audio: AudioCodec,
+    /// Whether the host can actually capture system audio right now.
+    ///
+    /// `selected_audio` only reports which codec *would* be used — negotiation
+    /// succeeds whenever both sides support Opus, even on a host with no
+    /// loopback/monitor capture device. Without this flag the viewer would spin
+    /// up a decoder and show audio controls for a stream that never arrives, so
+    /// the host's real capability is reported separately here.
+    ///
+    /// `serde(default)` = false keeps older hosts (which never send this field)
+    /// decodable: they are treated as "no audio", which matches reality since
+    /// no host before this field existed sent AudioFrames.
+    #[serde(default)]
+    pub audio_available: bool,
 }
 
 // ─── Signaling ────────────────────────────────────────────────────────────────
@@ -297,8 +310,24 @@ pub enum InputKind {
     MouseDown { button: MouseButton, x: f32, y: f32 },
     MouseUp { button: MouseButton, x: f32, y: f32 },
     Scroll { dx: f32, dy: f32, x: f32, y: f32 },
-    KeyDown { key: u32, modifiers: u8 },
-    KeyUp { key: u32, modifiers: u8 },
+    /// `key` is the legacy browser `keyCode` (kept for older viewers).
+    /// `code` is the W3C UI Events physical-key identifier ("KeyA", "Enter").
+    /// Hosts MUST prefer `code` when present: `keyCode` is layout-dependent and
+    /// lives in a different numbering space from evdev/CGKeyCode, so injecting
+    /// it directly types the wrong character on Linux and macOS.
+    /// `serde(default)` keeps pre-`code` viewers decodable.
+    KeyDown {
+        key: u32,
+        modifiers: u8,
+        #[serde(default)]
+        code: Option<String>,
+    },
+    KeyUp {
+        key: u32,
+        modifiers: u8,
+        #[serde(default)]
+        code: Option<String>,
+    },
     Text { text: String },
 }
 

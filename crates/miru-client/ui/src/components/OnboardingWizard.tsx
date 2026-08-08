@@ -17,19 +17,32 @@ export function OnboardingWizard({ fingerprint, onComplete }: Props) {
     onComplete();
   };
 
+  const steps: Step[] = ["welcome", "fingerprint", "trust_axes", "ready"];
+  const stepIndex = steps.indexOf(step);
+
   return (
     <div className="onboarding">
       <div className="onboarding-card">
-        <div className="onboarding-progress">
-          {(["welcome", "fingerprint", "trust_axes", "ready"] as Step[]).map((s, i) => (
+        <div
+          className="onboarding-progress"
+          role="progressbar"
+          aria-valuemin={1}
+          aria-valuemax={steps.length}
+          aria-valuenow={stepIndex + 1}
+          aria-valuetext={`ステップ ${stepIndex + 1} / ${steps.length}`}
+        >
+          {steps.map((s) => (
             <div
               key={s}
+              aria-hidden="true"
               className={`progress-dot ${
                 step === s ? "active" : isStepDone(step, s) ? "done" : ""
               }`}
             />
           ))}
         </div>
+
+        <div aria-live="polite">
 
         {step === "welcome" && (
           <>
@@ -122,6 +135,7 @@ export function OnboardingWizard({ fingerprint, onComplete }: Props) {
             </button>
           </>
         )}
+        </div>
 
         <button className="onboarding-skip" onClick={finish}>スキップ</button>
       </div>

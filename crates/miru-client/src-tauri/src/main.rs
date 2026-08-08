@@ -23,6 +23,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::disconnect,
+            commands::confirm_pairing,
             commands::send_input,
             commands::send_clipboard,
             commands::request_clipboard,
@@ -32,6 +33,8 @@ fn main() {
             commands::list_trusted_peers,
             commands::revoke_peer,
             commands::session_stats,
+            commands::set_decode_mode,
+            commands::set_audio_muted,
             commands::fingerprint,
             commands::issue_agent_token,
             commands::audit_summary,

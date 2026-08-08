@@ -1,5 +1,6 @@
 //! Video codec abstraction.
 
+pub mod color;
 pub mod decoder;
 pub mod encoder;
 pub mod hw;

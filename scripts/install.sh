@@ -104,7 +104,7 @@ Type=simple
 ExecStart=/usr/local/bin/miru-host
 Restart=on-failure
 RestartSec=5
-Environment=MIRU_SIGNAL=ws://signal.miru.app:21115/ws
+Environment=MIRU_SIGNAL=ws://localhost:21115/ws
 
 [Install]
 WantedBy=graphical.target

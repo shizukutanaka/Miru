@@ -3,6 +3,70 @@
 ## 目的
 プロダクトを30%向上、10年間動かせる基盤を確立。
 
+## 0. 優先順位の見直し (2026-06、ソクラテス式問答による分析)
+
+CLAUDE.md の WHY は「TeamViewer/AnyDesk代替」であり、評価基準は
+「今日配って、音声付き60fps HWエンコード映像が初回接続で見えるか」の一点に
+尽きる。この基準で現状を棚卸しした結果:
+
+**決定的に不足 (v0.1優先で着手)**:
+- ホスト側システム音声キャプチャ — `miru-audio` の Opus encode/decode/playback
+  は完成しているが、`miru-host` がどこからも呼んでおらず AudioFrame が
+  一度も送信されない (Features.audio は誤って true を広告していたため
+  false に修正済み)
+- HW エンコード (AV1/H264/H265) — `ffmpeg_enc.rs` は全メソッドが `bail!`
+- WebGL2 YUV→RGB 描画パス — JPEG プレビューのみが本番導線
+- Wayland/PipeWire キャプチャ — スタブ
+- CI/CD — `.github/workflows/` ではなく `workflows-proposed/` に隔離されたまま
+  実行されていない (GitHub App の `workflows` 権限不足、要手動対応)
+
+**質は高いが時期尚早 (中核完成までは追加投資を凍結)**:
+- NAT越え高度化(STUN/ホールパンチ/NATタイプ判定) — 実装済みで十分。
+  これ以上の最適化より上記の「不足」に資源を回す
+- セッション録画(`miru-host/src/recording.rs`) — ライブ接続の基本体験が
+  未完成な段階での拡張は優先度を下げる
+- `miru-agent`/`miru-mcp`/`miru-sandbox`/`miru-constellation`/
+  `miru-discovery`/`miru-transparency` (AIエージェント統治基盤) — 暗号設計・
+  capability トークン設計は業界水準以上に高品質だが、これは「人間向け
+  リモートデスクトップ」という一次ゴールの外側にある別プロダクトの種。
+  実利用データが無いまま capability 粒度を増やすより、実際に使われてから
+  拡張すべき
+
+## 0.5 市販レベル品質へのロードマップ (2026-07)
+
+「市販レベル」は機能完成度(セクション0)に加えて、一般消費者/企業に事故なく
+配布・運用できる状態を要求する。コード実査で確認したハードブロッカー順に記載。
+各フェーズをどのモデル(Haiku/Sonnet/Opus/Fable5)で実装すべきかは
+`docs/MODEL_GUIDE.md` を参照。
+
+**フェーズ0(即着手・低リスク)**: ✅ 完了 — `SECURITY.md`/`CONTRIBUTING.md` の
+PGP鍵プレースホルダ・機能していない連絡先メールの虚偽表示を是正し、GitHub Private
+Vulnerability Reporting を唯一の稼働窓口として明記。
+
+**フェーズ1: コア体験を「動く」状態にする** — セクション0の🔴不足項目そのもの
+(音声キャプチャ・HWエンコード・WebGL2・Wayland・CI稼働・TOFUペアリングのビルド検証)。
+
+**フェーズ2: 配布パイプラインを商用水準にする**(いずれも未着手、要ビルド環境):
+- `release.yml` は現状 `miru-signal` しかビルドしておらず、配布物としての
+  クライアント/ホストバイナリを一切生成していない — まずこれを修正
+- Windows Authenticode 署名・macOS notarization が皆無。Sigstore cosign は
+  サプライチェーン証明のみで OS の信頼(SmartScreen/Gatekeeper)とは無関係。
+  署名なしバイナリは一般消費者に「不明な発行元」警告を出し続ける
+- `tauri-plugin-updater` が未実装(`docs/updater.md` に設計のみ存在、依存関係
+  にすら未追加)
+
+**フェーズ3: 運用品質**(未着手):
+- クラッシュレポート/オプトイン診断が皆無(panic hook なし)
+- アプリ内「問題を報告」導線が皆無
+- UI アクセシビリティ基礎対応が皆無(12個の `.tsx` 全体で `aria-*`/`role=`
+  実質ゼロ、企業調達の WCAG/Section 508 要件では通らない)
+
+**確認済み・問題なし**: MIT ライセンス表記は一貫、ja/en i18n は106キーで
+完全一致(ドリフト無し)。
+
+**フェーズ4**: セクション0の「凍結」判断(AIエージェント統治6クレートの扱い、
+`ConnectArgs.pin` デッドコード)の最終決定。
+
 ---
 
 ## 1. 信頼性 (10年運用前提)
@@ -36,13 +100,22 @@
 - [ ] フレームスキップ: 直前フレームと完全一致なら送信スキップ
 
 ### エンコード
-- [ ] **AV1 HW**: NVENC (RTX 40+), QSV (Arc), AMF (RX 7000+) — 同品質で帯域30%減
+- [ ] **AV1 HW**: NVENC (RTX 40+), QSV (Arc), AMF (RX 7000+) — 同品質で帯域30%減。
+      2026年時点の外部評価ではリアルタイム用途の AV1 は HW エンコーダ必須
+      (SW リアルタイムは非現実的)で、HW が無い環境の低遅延現実解は H.265。
+      AV1 配線時は SCC (Screen Content Coding) の有効化を必須要件とする
+      (`docs/RESEARCH_NOTES.md` §1)
 - [ ] **適応ビットレート**: AIMD実装済み → BBR風アルゴリズム検討
 - [ ] **可変フレームレート**: 静止画は5fps、動画は60fps切替
-- [ ] スクリーンコンテントモード (SCM): VP9/AV1で文字フォントに最適化
+- [x] スクリーンコンテントモード (SCM): VP9 は `vpx.rs` に
+      `VP9E_SET_TUNE_CONTENT=1` を設定済み(要ビルド検証)。残りは AV1 配線時の
+      SCC ツール有効化 (`docs/RESEARCH_NOTES.md` §1)
 
 ### トランスポート
-- [ ] **QUIC優先パス**: P2P成功時はリレー切断 — 帯域・レイテンシ削減
+- [ ] **QUIC優先パス**: P2P成功時はリレー切断 — 帯域・レイテンシ削減。
+      設計先として IETF MoQ (draft-ietf-moq-transport) を必読文献とする —
+      リモートデスクトップが明示的ターゲット用途で、多ストリーム/優先度/
+      部分信頼性を標準化済み (`docs/RESEARCH_NOTES.md` §3)
 - [ ] **多ストリーム並列**: 動画/音声/入力で別ストリーム → HOL-blocking回避
 - [ ] **0-RTT再接続**: 同一ピア再接続時にハンドシェイクスキップ
 - [ ] **FEC (Forward Error Correction)**: パケット損失5%まで再送なしで復元
@@ -57,7 +130,10 @@
 ## 3. セキュリティ (継続強化)
 
 ### 暗号進化
-- [ ] **PQC ハイブリッド**: X25519 + Kyber768 の二重鍵交換 (post-quantum対応)
+- [ ] **PQC ハイブリッド**: X25519 + ML-KEM-768 (旧称 Kyber768) の二重鍵交換。
+      2026年時点で X25519MLKEM768 は Chrome/Edge/Firefox デフォルト有効の
+      事実上の業界標準。combiner は「並列実行 → 共有秘密連結 → HKDF」
+      (`docs/RESEARCH_NOTES.md` §4)。RustCrypto の ml-kem crate が利用可能
 - [ ] **HKDF**: shared secret から専用キー導出 (現在は直接使用)
 - [ ] 定期 rekey: 1時間毎にセッションキー再生成
 

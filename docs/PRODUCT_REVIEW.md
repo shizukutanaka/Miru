@@ -66,6 +66,22 @@
 | 17 | README の数値が古い(89/89 テスト、ADR 0001-0009、rustc 1.80) | 実態(173 テスト、ADR 12本、rustc 1.88)に更新 |
 | 18 | ヘッドレス host の確認コールバックが無言で `false`(なぜ拒否されたか分からない) | 拒否理由を warn ログに出力。Dangerous 操作の常時拒否は safe-by-default として維持 |
 
+### ✅ その後のセッションで追加修正済み(2026-06 以降)
+
+上記レビュー後の別セッションで以下も対応済み(コード上で確認 — このリストの
+旧版に「未対応」として残っていたが実装が追いついていた項目):
+
+- **XRandR マルチモニタ**: `linux.rs` の `X11Capturer` は `monitors: Vec<Monitor>`
+  を保持し、`displays()`/`select_display()`/`capture_region()` が
+  複数モニタを正しく列挙・選択する。単一ディスプレイへのフォールバックは
+  RandR が使えない場合のみ。
+- **StubBridge のフェイルラウド化**: `miru-mcp/src/main.rs` は
+  `DISPLAY` も `MIRU_HOST_DEVICE_ID` も無い場合、`MIRU_ALLOW_STUB=1` が
+  明示されていなければ `bail!` で起動失敗する(黙ったスタブ化はしない)。
+- レート制限の切り上げ除算化・display index 範囲チェック・backpressure の
+  atomic ordering 強化・RGBA→I420 変換の余分な alloc 削除など、性能/堅牢性の
+  小粒な修正を別途実施(git log 参照)。
+
 ### ⏳ 未対応(設計済み・別スプリント向け)
 
 優先度順:
@@ -82,15 +98,20 @@
    encode は常に bail、`ffmpeg_enc.rs` は未配線)— `available_codecs()` が
    H265 等を広告しないようにするか、ffmpeg-next を配線する。
    暫定では JPEG / VP9(feature `vpx`)のみが実コーデック
-5. **XRandR マルチモニタ**(`linux.rs` は常に単一ディスプレイを返す)
-   規模: 小(数時間)
-6. **未配線モジュールの統合**: `miru-host` の backpressure / metrics /
+5. **未配線モジュールの統合**: `miru-host` の backpressure / metrics /
    recording / safe_fs / qos_bbr は実装済みだが session ループに未配線
    (`#[allow(dead_code)]`)。配線して E2E で検証する
-7. **Merkle tree の RFC 6962 非準拠**(odd leaf を self-hash)— 内部一貫性は
+6. **Merkle tree の RFC 6962 非準拠**(odd leaf を self-hash)— 内部一貫性は
    あるが他実装と相互運用不可。参照実装との比較テストを足すか準拠に戻す
-8. **音声コーデックのネゴシエーション**(host が Opus を hard-code)
-9. **CHANGELOG の整理** — 現在は開発セッションログ(Sprint 22-26 形式)。
+7. **ホスト側の音声キャプチャが完全に未実装**(想定より大きなギャップ):
+   `miru-audio`(Opus encode/decode + playback)と `negotiate_audio`
+   (Opus/PCM 優先度ネゴシエーション)は完成しているが、`miru-host` の
+   どこにも `AudioEncoder` を呼ぶコードが無く、`AudioFrame` が一度も
+   送信されない。にもかかわらず `Features.audio = true` を広告しており
+   viewer に「音声あり」と誤って伝えていた点は本セッションで
+   `audio: false` に修正済み。本実装には WASAPI ループバック
+   (Windows)/ PulseAudio monitor(Linux)/ CoreAudio tap(macOS)による
+   システム音声キャプチャの新規実装が必要(規模: 中、`cpal` 等の新規
+   依存の検討を含む)
+8. **CHANGELOG の整理** — 現在は開発セッションログ(Sprint 22-26 形式)。
    公開リリースノート形式(Keep a Changelog)への移行を推奨
-10. **StubBridge のフェイルラウド化** — `$DISPLAY` 無しで黙って 1x1 PNG を
-    返すより、明示フラグ(`MIRU_ALLOW_STUB=1`)が無ければエラーにする

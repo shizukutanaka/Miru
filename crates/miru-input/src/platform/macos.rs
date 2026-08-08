@@ -62,15 +62,15 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             ev.post(CGEventTapLocation::HID);
         }
 
-        InputKind::KeyDown { key, modifiers } => {
-            let ev = CGEvent::new_keyboard_event(src, *key as CGKeyCode, true)
+        InputKind::KeyDown { key, modifiers, code } => {
+            let ev = CGEvent::new_keyboard_event(src, cg_code(*key, code), true)
                 .map_err(|_| anyhow::anyhow!("keydown event"))?;
             ev.set_flags(modifier_flags(*modifiers));
             ev.post(CGEventTapLocation::HID);
         }
 
-        InputKind::KeyUp { key, modifiers } => {
-            let ev = CGEvent::new_keyboard_event(src, *key as CGKeyCode, false)
+        InputKind::KeyUp { key, modifiers, code } => {
+            let ev = CGEvent::new_keyboard_event(src, cg_code(*key, code), false)
                 .map_err(|_| anyhow::anyhow!("keyup event"))?;
             ev.set_flags(modifier_flags(*modifiers));
             ev.post(CGEventTapLocation::HID);
@@ -89,6 +89,16 @@ pub fn inject(event: &InputEvent) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Resolve the CGKeyCode for a key event. Prefers the W3C physical `code`;
+/// falls back to the legacy raw cast for pre-`code` viewers. The raw cast is
+/// wrong for nearly every key (CGKeyCode numbering is unrelated to the browser
+/// keyCode), but preserving it keeps old viewers no worse off than before.
+fn cg_code(legacy_key: u32, code: &Option<String>) -> CGKeyCode {
+    code.as_deref()
+        .and_then(crate::keymap::code_to_cgkeycode)
+        .unwrap_or(legacy_key as CGKeyCode)
 }
 
 fn screen_point(x: f32, y: f32) -> CGPoint {

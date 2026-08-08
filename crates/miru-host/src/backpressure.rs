@@ -76,7 +76,8 @@ impl FrameController {
     /// (i.e. the viewer hasn't kept up).
     pub fn should_capture(&self) -> bool {
         self.captured.fetch_add(1, Ordering::Relaxed);
-        let in_flight = self.in_flight.load(Ordering::Relaxed);
+        // Acquire so that writes from on_send/on_pong (other threads) are visible here.
+        let in_flight = self.in_flight.load(Ordering::Acquire);
         if in_flight >= MAX_IN_FLIGHT {
             self.skipped.fetch_add(1, Ordering::Relaxed);
             debug!("backpressure: skip (in_flight={})", in_flight);
@@ -87,7 +88,8 @@ impl FrameController {
 
     /// Called when a frame goes onto the wire.
     pub fn on_send(&self) {
-        self.in_flight.fetch_add(1, Ordering::Relaxed);
+        // Release so the capture thread's next Acquire load sees the increment.
+        self.in_flight.fetch_add(1, Ordering::Release);
         self.sent.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -118,7 +120,7 @@ impl FrameController {
     /// (~3-4 fps). Instead, a Pong resets the window: the viewer has confirmed
     /// it's healthy so we start the next in-flight window from zero.
     pub fn on_pong(&self) {
-        self.in_flight.store(0, Ordering::Relaxed);
+        self.in_flight.store(0, Ordering::Release);
     }
 
     /// Returns true if the controller wants a keyframe (to recover from a stall).

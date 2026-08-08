@@ -11,6 +11,8 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use tracing::info;
 
+const RELAY_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 use crate::handshake::MsgChannel;
 
 pub struct RelayTransport {
@@ -31,8 +33,9 @@ impl RelayTransport {
         // the session token (allows relay session hijacking if logs are leaked).
         info!("Relay connect: {relay_url}/relay?role={role}");
 
-        let (ws_stream, _) = connect_async(&url)
+        let (ws_stream, _) = tokio::time::timeout(RELAY_CONNECT_TIMEOUT, connect_async(&url))
             .await
+            .context("relay WebSocket connect timed out")?
             .context("relay WebSocket connect failed")?;
         let (mut ws_tx, mut ws_rx) = ws_stream.split();
 

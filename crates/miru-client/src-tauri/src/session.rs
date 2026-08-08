@@ -3,7 +3,7 @@
 use anyhow::Result;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use miru_audio::{playback::AudioPlayer, AudioDecoder, Layout};
-use miru_auth::DeviceIdentity;
+use miru_auth::{AclStore, DeviceIdentity, Permission, TrustDecision, TrustedPeer};
 use miru_codec::{i420_to_jpeg, Decoder};
 use miru_common::{
     message::{AudioCodec, Features, Msg, VideoCodec},
@@ -31,6 +31,20 @@ pub struct VideoFrameEvent {
     pub jpeg_b64: String,
 }
 
+/// A raw encoded video packet forwarded to the frontend for WebCodecs decode.
+/// Used only when the UI has enabled WebCodecs mode (see `set_decode_mode`):
+/// the host's VP9/VP8 bitstream is passed through untouched — no Rust decode,
+/// no JPEG re-encode — so the WebView's hardware `VideoDecoder` does the work
+/// and IPC carries only the compressed stream.
+#[derive(Serialize, Clone)]
+pub struct VideoPacketEvent {
+    /// Short codec tag the frontend maps to a WebCodecs codec string ("vp9"/"vp8").
+    pub codec: String,
+    pub keyframe: bool,
+    pub timestamp_ms: u64,
+    pub data_b64: String,
+}
+
 #[derive(Serialize, Clone)]
 pub struct SessionEvent {
     pub kind: String,
@@ -38,7 +52,30 @@ pub struct SessionEvent {
     pub fingerprint: Option<String>,
     /// STUN-discovered public address of the host, if known ("直接" path possible).
     pub host_pub_addr: Option<String>,
+    /// Host can actually send system audio. The UI hides audio controls when
+    /// this is false so it never offers a mute for a silent stream.
+    pub audio_available: Option<bool>,
 }
+
+/// Marker error for failures the auto-reconnect loop (state.rs) must NOT
+/// retry: a security-policy refusal (pubkey mismatch) or an explicit user
+/// rejection of a pairing prompt. Retrying either automatically would be
+/// wrong — a changed host key isn't a transient network blip, and retrying
+/// after the user said "no" would just re-show the same prompt.
+///
+/// Constructed via `anyhow::Error::new(NoAutoRetry(..))` — NOT wrapped with
+/// `.context()`, which would make `downcast_ref` in state.rs miss it (context
+/// wrapping replaces the top-level concrete type anyhow's downcast checks).
+#[derive(Debug)]
+pub struct NoAutoRetry(pub String);
+
+impl std::fmt::Display for NoAutoRetry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for NoAutoRetry {}
 
 pub async fn run(
     args: crate::commands::ConnectArgs,
@@ -48,6 +85,10 @@ pub async fn run(
     app: AppHandle,
     stats: Arc<Mutex<SessionStats>>,
     recording: Arc<Mutex<Option<RecordingState>>>,
+    acl: Arc<Mutex<AclStore>>,
+    acl_path: std::path::PathBuf,
+    pending_pairing: Arc<Mutex<Option<oneshot::Sender<bool>>>>,
+    webcodecs_decode: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
     emit_status(&app, "connecting", None, None);
 
@@ -137,16 +178,114 @@ pub async fn run(
         result.selected_video_codec, host_fpr
     );
 
+    // TOFU gate: verify or record trust in this host's identity key BEFORE
+    // installing ciphers / accepting any video or input. Three outcomes:
+    //   - Trusted: pubkey matches what we saved on a prior connection — proceed.
+    //   - PubkeyMismatch: the host's key changed since we last connected — this
+    //     is exactly what TOFU exists to catch (possible MITM); refuse outright,
+    //     do not offer a click-through override.
+    //   - Unknown: first time seeing this device_id — pause and ask the UI to
+    //     show the fingerprint for out-of-band verification before proceeding.
+    let pubkey_b64 = B64.encode(result.peer_identity_pubkey);
+    let decision = acl.lock().check(&args.device_id, &pubkey_b64);
+    match decision {
+        TrustDecision::Trusted(_) => {
+            let now = now_ms();
+            let mut guard = acl.lock();
+            guard.touch(&args.device_id, now);
+            let _ = guard.save(&acl_path);
+        }
+        TrustDecision::PubkeyMismatch => {
+            emit_status(
+                &app,
+                "error",
+                Some(format!(
+                    "セキュリティ警告: {} の鍵が以前の接続時と異なります。中間者攻撃の可能性があるため接続を中止しました。",
+                    args.device_id
+                )),
+                Some(host_fpr),
+            );
+            return Err(anyhow::Error::new(NoAutoRetry(format!(
+                "pubkey mismatch for {} — refusing to connect (possible MITM)",
+                args.device_id
+            ))));
+        }
+        TrustDecision::Unknown => {
+            let (tx, rx) = oneshot::channel::<bool>();
+            *pending_pairing.lock() = Some(tx);
+            emit_status_full(&app, "pairing_required", None, Some(host_fpr.clone()), host_pub_addr.clone(), None);
+
+            // 120s to give the user time to compare fingerprints out-of-band.
+            // Also races cancel_rx: without this, a session superseded by a new
+            // connect() (state.rs's disconnect() only fire-and-forgets the
+            // cancel signal, it doesn't wait for this task to exit) would sit
+            // here for up to 120s, still holding pending_pairing and able to
+            // race a newer session for it.
+            let accepted = tokio::select! {
+                biased;
+                _ = &mut cancel_rx => {
+                    *pending_pairing.lock() = None;
+                    return Err(anyhow::Error::new(NoAutoRetry(
+                        "cancelled while awaiting pairing confirmation".to_string(),
+                    )));
+                }
+                r = time::timeout(std::time::Duration::from_secs(120), rx) => {
+                    r.ok().and_then(|r| r.ok()).unwrap_or(false)
+                }
+            };
+            *pending_pairing.lock() = None;
+
+            if !accepted {
+                emit_status(
+                    &app,
+                    "disconnected",
+                    Some("ペアリングが拒否またはタイムアウトしました".to_string()),
+                    None,
+                );
+                return Err(anyhow::Error::new(NoAutoRetry(
+                    "pairing not confirmed by user (rejected or timed out)".to_string(),
+                )));
+            }
+
+            let now = now_ms();
+            let mut guard = acl.lock();
+            guard.trust(TrustedPeer {
+                device_id: args.device_id.clone(),
+                pubkey_b64,
+                fingerprint: host_fpr.clone(),
+                permission: Permission::Control,
+                first_seen: now,
+                last_seen: now,
+                friendly_name: None,
+            });
+            let _ = guard.save(&acl_path);
+        }
+    }
+
     // Install ciphers (separate keys per direction, no nonce-reuse risk)
     relay.install_ciphers(result.tx, result.rx).await;
 
-    emit_status_full(&app, "connected", None, Some(host_fpr), host_pub_addr);
+    // Both conditions matter: the codec must be negotiated AND the host must
+    // actually be able to capture. Negotiation alone succeeds even on a host
+    // with no loopback device, which would leave the audio thread parked
+    // forever on a channel nothing ever sends to — and would show the user
+    // audio controls for a stream that never arrives.
+    let audio_enabled =
+        result.selected_audio_codec == AudioCodec::Opus && result.audio_available;
+
+    emit_status_full(
+        &app,
+        "connected",
+        None,
+        Some(host_fpr),
+        host_pub_addr,
+        Some(audio_enabled),
+    );
 
     // 6. Video decoder + audio pipeline
     let mut decoder: Option<Decoder> = None;
     // Audio: cpal::Stream is !Send, so the decoder+player run on a dedicated
     // std::thread. The session loop sends AudioFrame payloads via a channel.
-    let audio_enabled = result.selected_audio_codec == AudioCodec::Opus;
     let audio_tx: Option<std::sync::mpsc::SyncSender<miru_common::message::AudioFrame>> =
         if audio_enabled {
             let (tx, rx) = std::sync::mpsc::sync_channel::<miru_common::message::AudioFrame>(16);
@@ -218,6 +357,51 @@ pub async fn run(
                             seq_total += gap + 1;
                         }
                         last_seq = Some(vf.seq);
+
+                        // WebCodecs passthrough: when the UI has a working
+                        // VideoDecoder, forward the raw VP9/VP8 bitstream and
+                        // let the WebView decode it. No Rust decode, no JPEG
+                        // re-encode — IPC carries only the compressed stream.
+                        // Recording is intentionally skipped on this path: it
+                        // stores JPEG frames, which aren't produced here, so the
+                        // UI drops back to the Rust decode path while recording.
+                        if webcodecs_decode.load(std::sync::atomic::Ordering::Relaxed)
+                            && matches!(vf.codec, VideoCodec::Vp9 | VideoCodec::Vp8)
+                        {
+                            frame_count += 1;
+                            frames_since_update += 1;
+                            let elapsed = last_stats_update.elapsed();
+                            if elapsed.as_secs() >= 1 {
+                                let elapsed_secs = elapsed.as_secs_f32();
+                                let mut s = stats.lock();
+                                s.frames_decoded = frame_count;
+                                s.bytes_recv += bytes_since_update;
+                                s.fps = frames_since_update as f32 / elapsed_secs;
+                                s.bitrate_kbps = ((bytes_since_update * 8) as f32
+                                    / elapsed_secs / 1000.0) as u32;
+                                s.packet_loss_pct = if seq_total > 0 {
+                                    (seq_gaps as f32 / seq_total as f32) * 100.0
+                                } else {
+                                    0.0
+                                };
+                                bytes_since_update = 0;
+                                frames_since_update = 0;
+                                seq_gaps = 0;
+                                seq_total = 0;
+                                last_stats_update = std::time::Instant::now();
+                            }
+                            let codec = match vf.codec {
+                                VideoCodec::Vp8 => "vp8",
+                                _ => "vp9",
+                            };
+                            let _ = app.emit("video-packet", VideoPacketEvent {
+                                codec: codec.to_string(),
+                                keyframe: vf.keyframe,
+                                timestamp_ms: vf.timestamp_ms,
+                                data_b64: B64.encode(&vf.data),
+                            });
+                            continue;
+                        }
 
                         // JPEG fast path: skip decode+re-encode entirely.
                         // Passing host JPEG bytes straight to the frontend preserves
@@ -325,9 +509,15 @@ pub async fn run(
                         })).await;
                     }
                     Ok(Some(Msg::AudioFrame(af))) if audio_enabled => {
-                        if let Some(tx) = &audio_tx {
-                            // Non-blocking: drop frame on full queue (avoid latency drift)
-                            let _ = tx.try_send(af);
+                        // Mute drops frames here, at the network boundary: the
+                        // decoder/player thread stays idle rather than decoding
+                        // audio nobody hears. Unmute resumes with the next frame
+                        // (Opus frames are independent, so no resync is needed).
+                        if !audio_muted.load(std::sync::atomic::Ordering::Relaxed) {
+                            if let Some(tx) = &audio_tx {
+                                // Non-blocking: drop frame on full queue (avoid latency drift)
+                                let _ = tx.try_send(af);
+                            }
                         }
                     }
                     Ok(Some(Msg::DisplayList(mut dl))) => {
@@ -414,14 +604,16 @@ fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &
     // partial write so the index stays consistent (the frame is simply absent).
     // Writing the index first would leave a dangling entry pointing to data
     // that may never be fully written, corrupting the index on crash.
-    if rec.frames_file.write_all(jpeg).is_err() {
+    if let Err(e) = rec.frames_file.write_all(jpeg) {
+        tracing::warn!("recording: frames_file write failed, dropping frame: {e}");
         return;
     }
 
     let mut entry = [0u8; 12];
     entry[..8].copy_from_slice(&offset.to_le_bytes());
     entry[8..12].copy_from_slice(&size.to_le_bytes());
-    if rec.offsets_file.write_all(&entry).is_err() {
+    if let Err(e) = rec.offsets_file.write_all(&entry) {
+        tracing::warn!("recording: offsets_file write failed, dropping frame: {e}");
         return;
     }
 
@@ -456,6 +648,13 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
     let d = ring::digest::digest(&ring::digest::SHA256, pk);
     d.as_ref()[..8]
@@ -466,7 +665,7 @@ fn pubkey_fingerprint(pk: &[u8; 32]) -> String {
 }
 
 fn emit_status(app: &AppHandle, kind: &str, message: Option<String>, fingerprint: Option<String>) {
-    emit_status_full(app, kind, message, fingerprint, None);
+    emit_status_full(app, kind, message, fingerprint, None, None);
 }
 
 fn emit_status_full(
@@ -475,6 +674,7 @@ fn emit_status_full(
     message: Option<String>,
     fingerprint: Option<String>,
     host_pub_addr: Option<String>,
+    audio_available: Option<bool>,
 ) {
     let _ = app.emit(
         "session-event",
@@ -483,6 +683,7 @@ fn emit_status_full(
             message,
             fingerprint,
             host_pub_addr,
+            audio_available,
         },
     );
 }

@@ -33,6 +33,10 @@ pub struct HandshakeResult {
     pub peer_identity_pubkey: [u8; 32],
     pub selected_video_codec: VideoCodec,
     pub selected_audio_codec: AudioCodec,
+    /// Host-reported: system audio capture is actually available. Distinct from
+    /// `selected_audio_codec`, which only says which codec was negotiated. On
+    /// the host side this echoes the `Features.audio` it advertised.
+    pub audio_available: bool,
     /// Role the peer declared in Hello (Viewer or AiAgent).
     pub peer_role: Role,
     /// Raw pubkey field from Hello (used for agent token extraction).
@@ -129,6 +133,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
         peer_identity_pubkey: host_identity,
         selected_video_codec: ack.selected_codec,
         selected_audio_codec: ack.selected_audio,
+        audio_available: ack.audio_available,
         peer_role: Role::Host,             // host is always the other side
         peer_pubkey_field: String::new(), // not needed on viewer side
     })
@@ -204,6 +209,10 @@ pub async fn host_handshake<C: MsgChannel>(
         encrypted_key: vec![],
         selected_codec: codec.clone(),
         selected_audio: audio_codec.clone(),
+        // Report the host's real capture capability, not just the negotiated
+        // codec, so the viewer doesn't present audio controls for a stream
+        // that will never arrive.
+        audio_available: host_features.audio,
     }))
     .await?;
 
@@ -214,6 +223,7 @@ pub async fn host_handshake<C: MsgChannel>(
         peer_identity_pubkey: viewer_identity,
         selected_video_codec: codec,
         selected_audio_codec: audio_codec,
+        audio_available: host_features.audio,
         peer_role: hello.role,
         peer_pubkey_field: hello.pubkey,
     })

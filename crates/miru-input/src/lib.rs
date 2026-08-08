@@ -4,6 +4,8 @@
 use anyhow::Result;
 use miru_common::message::InputEvent;
 
+pub mod keymap;
+
 #[cfg(target_os = "windows")]
 #[path = "platform/windows.rs"]
 mod platform;

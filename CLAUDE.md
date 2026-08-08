@@ -85,7 +85,7 @@ git tag v0.1.0 && git push origin v0.1.0
 - 対称: ChaCha20-Poly1305 (96-bit nonce, monotonic counter, replay保護)
 - identity: Ed25519 (TOFU + 16桁hex指紋表示)
 - PIN: PBKDF2-SHA256 (100k iter, salt=device_id)
-- 将来: Kyber768 ハイブリッド (post-quantum)
+- 将来: ML-KEM-768 ハイブリッド (X25519MLKEM768、旧称 Kyber768。docs/RESEARCH_NOTES.md §4)
 
 ## ポート
 | Port  | Proto | 用途                  |

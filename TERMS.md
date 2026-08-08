@@ -8,8 +8,10 @@ Miru は MIT ライセンスのオープンソースソフトウェアです。
 本規約はそのソフトウェア提供に関するもので、コードの利用条件は
 [LICENSE](LICENSE) を参照してください。
 
-公式ホスト型サービス (`signal.miru.app` 等) を利用する場合、本規約が適用されます。
-セルフホストの場合は LICENSE のみが適用され、本規約の該当条項は適用されません。
+公式ホスト型サービスを将来提供する場合、本規約が適用されます(現時点では
+公式にホストされたサービスは存在せず、`signal.miru.app` はまだ確保・稼働
+していないプレースホルダードメインです)。セルフホストの場合は LICENSE のみが
+適用され、本規約の該当条項は適用されません。
 
 ## 2. ライセンス
 
@@ -59,8 +61,9 @@ Miru は MIT ライセンスのオープンソースソフトウェアです。
 
 ## 6. セキュリティ報告
 
-脆弱性は GitHub Issue ではなく `security@miru.app` に PGP 暗号化で報告してください。
-公開鍵: `brand/security-pubkey.asc`。
+詳細は [SECURITY.md](SECURITY.md) を参照してください。現時点で機能している唯一の
+窓口は GitHub Private Vulnerability Reporting です(`security@miru.app` へのメール
+受付、および `brand/security-pubkey.asc` の PGP 鍵はまだ用意されていません)。
 
 90日の責任ある開示 (responsible disclosure) ポリシーに従います。
 
@@ -76,6 +79,6 @@ Miru は MIT ライセンスのオープンソースソフトウェアです。
 ## 9. 連絡先
 
 - 技術: GitHub Issues
-- セキュリティ: security@miru.app
-- 法務: legal@miru.app
-- プライバシー: privacy@miru.app
+- セキュリティ: [SECURITY.md](SECURITY.md) 参照(`security@miru.app` はまだ稼働していません)
+- 法務・プライバシー: 現時点で専用窓口は未設置です。GitHub Issues でご連絡ください
+  (`legal@miru.app` / `privacy@miru.app` はまだ稼働していません)
