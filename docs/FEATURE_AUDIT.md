@@ -60,7 +60,8 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 | 16 | Ctrl+Alt+Del(SAS)を送る手段が無い | `InputKind` に該当 variant が無く、Windows の `SendInput` では原理的に生成不可(設計上の制約)。ログイン画面・UAC プロンプト・ロック画面へ到達できない | **未着手**。`SendSAS` / セキュアデスクトップ対応が必要な独立課題。規模: 中 |
 | 17 | `MouseMove.display` が全OSで破棄されている | 3バックエンドとも `..` で読み捨て。macOS の `screen_point()` は `CGDisplay::main()` 固定のため、**マルチモニタのセカンダリへカーソルを移動できない** | **未着手**。規模: 小〜中 |
 | 18 | Linux の `Text` 注入がクリップボードを破壊する | `platform/linux.rs` はクリップボードへ書いて Ctrl+V を合成する実装。(a) ユーザーのクリップボード内容を毎回破壊 (b) `xclip` 依存で**X11 限定**(ファイル冒頭は "Works on both X11 and Wayland" と誤記) (c) Ctrl+V が貼り付けでない端末等では動作しない | **未着手**。`XTestFakeKeyEvent` 相当か、レイアウト解決による直接キー合成が必要。規模: 中 |
-| 19 | MCP エージェント経路は依然として旧キャストのまま | `miru-mcp/src/server.rs` の `parse_key` は VK コードを生成し `code: None` で送るため、項目13のフォールバック(生キャスト)経路に乗る。人間ビューア経路は修正済みだが**エージェント経路の Linux/macOS は未修正** | **未着手**。`parse_key` を W3C `code` 文字列に変更すれば解消。規模: 小 |
+| 19 | ~~MCP エージェント経路は依然として旧キャストのまま~~ | `miru-mcp/src/server.rs` の `parse_key` は VK コードを生成し `code: None` で送るため、項目13のフォールバック(生キャスト)経路に乗っていた | **修正済**。`parse_key_code()` を追加し W3C `code` を併送。「送出する全 code が `miru_input::keymap` で解決できること」を検証するテストを同梱(ホスト側テーブルとの不整合を機械検出) |
+| 20 | **`key_combo` の修飾キーが Linux/Windows で完全に無視されていた** | `tool_key_combo` は "Ctrl+Shift+T" を `modifiers` ビットマスクに畳んで送っていたが、このフィールドを読むのは **macOS バックエンドのみ**(`macos.rs:68,75`)。Linux(`linux.rs`)と Windows(`windows.rs`)は `..` で読み捨てるため、**`Ctrl+C` が単なる `c` として注入されていた**。エージェントのショートカット操作が2/3のOSで機能していなかった | **修正済**。ビットマスクだけでは和音を表現できないため、修飾キーを**実キーイベント**として送出する方式に変更: 修飾キー押下 → 主キー押下/解放 → 修飾キーを**逆順で**解放。`modifiers` も macOS の CGEventFlags 用に併送し続ける。和音の途中で送信が失敗した場合はホスト側の `release_all_keys()`(項目14)が回収する |
 
 
 ## 🟡 過剰 — 品質は高いがコア未完成の段階では時期尚早(追加投資を凍結)
