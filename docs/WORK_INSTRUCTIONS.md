@@ -114,6 +114,26 @@ SCStream へ。単一ファイル・単一 OS で完結し既存の `ScreenCaptu
 - `miru-codec/src/color.rs` の新モジュール参照
 - `vpx.rs` の `VP9E_SET_TUNE_CONTENT` 定数名(vpx-sys の bindgen 生成名と一致するか)
 
+### タスク G: マルチモニタ座標の一括修正 【Opus 推奨 / 要ビルド環境】
+
+FEATURE_AUDIT 項目17。**非プライマリ表示中はクリック位置が3OS全てでずれる**。
+調査済みの事実:
+
+- `DisplayInfo`(`miru-common/src/message.rs`)は `width`/`height`/`primary` のみで
+  **x/y オフセットを持たない** → プロトコル上マルチモニタ配置を表現できない
+- **Windows**: `MOUSEEVENTF_ABSOLUTE` を `MOUSEEVENTF_VIRTUALDESK` 無しで使用。
+  MS 公式 MOUSEINPUT ドキュメント曰く「マルチモニタでは座標はプライマリに
+  マップされる。`MOUSEEVENTF_VIRTUALDESK` 指定時のみ仮想デスクトップ全体」
+- **macOS**: `screen_point()` が `CGDisplay::main()` 固定。CGEvent のマウス座標は
+  グローバル表示空間なので、対象ディスプレイの origin を足せば正しくなる
+- **Linux**: ABS 0〜65535 はコンポジタが仮想デスクトップ全体へマップする
+- `MouseMove` は `display` フィールドを持つが3バックエンドとも `..` で破棄。
+  **`MouseDown`/`MouseUp` にはそもそも `display` が無い**
+
+**⚠️ 部分修正は退行を招く**: `MOUSEEVENTF_VIRTUALDESK` だけ足すと、プライマリ
+1枚を見ている通常ケースで (0.5,0.5) が仮想デスクトップ中央へずれる。
+①〜⑤(項目17参照)を一括で行い、必ず実機のマルチモニタ環境で検証すること。
+
 ### タスク F: `PairPrompt.tsx` の削除可否 【人間の判断待ち — 実装するな】
 
 `crates/miru-client/ui/src/components/PairPrompt.tsx` は import ゼロの完全な
