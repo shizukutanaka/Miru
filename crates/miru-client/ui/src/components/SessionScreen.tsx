@@ -315,18 +315,25 @@ export function SessionScreen({ onDisconnect }: Props) {
     // key_down with no matching key_up and the key stays stuck on the host —
     // on Linux the uinput device outlives the session, so it stays stuck across
     // reconnects too.
-    const held = new Set<string>();
+    // code -> the legacy keyCode we sent with the press, so the release can
+    // carry the same value for hosts that predate the `code` field.
+    const held = new Map<string, number>();
 
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
-      // Don't intercept window-management keys
+      // Don't intercept window-management keys.
       if ((e.ctrlKey || e.metaKey) && ["q", "w", "h", "m"].includes(e.key.toLowerCase())) return;
       e.preventDefault();
+      // Never release a key we never pressed. Releasing Ctrl before W in a
+      // Ctrl+W chord clears e.ctrlKey, so W's keyup slips past the filter above
+      // even though its keydown was blocked — that would send the host a key_up
+      // with no matching key_down.
+      if (!down && !held.has(e.code)) return;
       const mods =
         (e.shiftKey ? 0x01 : 0) |
         (e.ctrlKey ? 0x02 : 0) |
         (e.altKey ? 0x04 : 0) |
         (e.metaKey ? 0x08 : 0);
-      if (down) held.add(e.code);
+      if (down) held.set(e.code, e.keyCode);
       else held.delete(e.code);
       api.sendInput({
         kind: down ? "key_down" : "key_up",
@@ -340,8 +347,8 @@ export function SessionScreen({ onDisconnect }: Props) {
 
     // Release everything still held when the window loses focus or is hidden.
     const releaseAll = () => {
-      for (const code of held) {
-        api.sendInput({ kind: "key_up", code, key: 0, modifiers: 0 });
+      for (const [code, keyCode] of held) {
+        api.sendInput({ kind: "key_up", code, key: keyCode, modifiers: 0 });
       }
       held.clear();
     };
