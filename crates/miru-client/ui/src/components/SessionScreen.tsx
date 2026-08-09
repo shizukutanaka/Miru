@@ -8,6 +8,16 @@ interface Props {
   onDisconnect: () => void;
 }
 
+/// Ctrl chords the keyboard handler blocks (they would act on the viewer's own
+/// window). `key` is the legacy browser keyCode, kept so hosts predating the
+/// `code` field still resolve the key.
+const BLOCKED_CHORDS = [
+  { label: "Ctrl+W", code: "KeyW", key: 87 },
+  { label: "Ctrl+Q", code: "KeyQ", key: 81 },
+  { label: "Ctrl+H", code: "KeyH", key: 72 },
+  { label: "Ctrl+M", code: "KeyM", key: 77 },
+] as const;
+
 export function SessionScreen({ onDisconnect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -32,6 +42,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   // host can actually send audio — offering a mute for a silent stream would
   // be a false affordance.
   const [audioAvailable, setAudioAvailable] = useState(false);
+  const [selectedChord, setSelectedChord] = useState<string>(BLOCKED_CHORDS[0].label);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
@@ -409,6 +420,29 @@ export function SessionScreen({ onDisconnect }: Props) {
     try { await api.sendQosHint(next); } catch {}
   };
 
+  // Chords the keyboard handler deliberately swallows so they act on the
+  // viewer's own window rather than closing it. They are unreachable by typing,
+  // so the host can never be told to close a tab or hide a window — this menu
+  // is the way to send them explicitly.
+  // Ctrl+Alt+Del is intentionally absent: Windows blocks SendInput from
+  // generating it by design (FEATURE_AUDIT item 16), so offering it would be a
+  // control that silently does nothing on the platform that needs it most.
+  const sendCtrlChord = async () => {
+    const chord = BLOCKED_CHORDS.find((c) => c.label === selectedChord);
+    if (!chord) return;
+    const CTRL = { code: "ControlLeft", key: 17 };
+    const mods = 0x02; // Ctrl
+    try {
+      await api.sendInput({ kind: "key_down", ...CTRL, modifiers: mods });
+      await api.sendInput({ kind: "key_down", code: chord.code, key: chord.key, modifiers: mods });
+      await api.sendInput({ kind: "key_up", code: chord.code, key: chord.key, modifiers: mods });
+    } finally {
+      // Always lift Ctrl, even if a send above failed, so the host is not left
+      // with a latched modifier.
+      await api.sendInput({ kind: "key_up", ...CTRL, modifiers: mods }).catch(() => {});
+    }
+  };
+
   const handleToggleMute = async () => {
     const next = !audioMuted;
     setAudioMuted(next);
@@ -591,6 +625,26 @@ export function SessionScreen({ onDisconnect }: Props) {
           disabled={fileSending || status !== "connected"}
         >
           {fileSending ? "送信中..." : "ファイル送信"}
+        </button>
+        <label className="chord-send">
+          <span className="visually-hidden">ホストへ送る特殊キー</span>
+          <select
+            value={selectedChord}
+            onChange={(e) => setSelectedChord(e.target.value)}
+            disabled={status !== "connected"}
+            title="ビューア側で握り潰される組み合わせをホストへ送ります"
+          >
+            {BLOCKED_CHORDS.map((c) => (
+              <option key={c.label} value={c.label}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={sendCtrlChord}
+          disabled={status !== "connected"}
+          title={`${selectedChord} をホストへ送信`}
+        >
+          特殊キー送信
         </button>
         <button onClick={handleFullscreen}>フルスクリーン</button>
         <button className="danger" onClick={handleDisconnect}>切断</button>
