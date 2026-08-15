@@ -1,22 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { api, SessionStats, DisplayInfo } from "../lib/tauri";
 import { WebCodecsRenderer, webcodecsVp9Supported } from "../lib/webcodecs-renderer";
+import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
+import { MoveCoalescer } from "../lib/move-coalescer";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
 interface Props {
   onDisconnect: () => void;
 }
-
-/// Ctrl chords the keyboard handler blocks (they would act on the viewer's own
-/// window). `key` is the legacy browser keyCode, kept so hosts predating the
-/// `code` field still resolve the key.
-const BLOCKED_CHORDS = [
-  { label: "Ctrl+W", code: "KeyW", key: 87 },
-  { label: "Ctrl+Q", code: "KeyQ", key: 81 },
-  { label: "Ctrl+H", code: "KeyH", key: 72 },
-  { label: "Ctrl+M", code: "KeyM", key: 77 },
-] as const;
 
 export function SessionScreen({ onDisconnect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -230,21 +222,30 @@ export function SessionScreen({ onDisconnect }: Props) {
     const buttonName = (b: number) =>
       b === 0 ? "left" : b === 1 ? "middle" : b === 2 ? "right" : "left";
 
+    // Mice report at 125–1000 Hz; one IPC invoke per event floods the channel
+    // and can push the host's 1000 ev/s limiter into dropping keystrokes.
+    // Collapse movement to the newest position per animation frame.
+    const moves = new MoveCoalescer((m) => void api.sendInput(m));
+
     const onMove = (e: MouseEvent) => {
       const { x, y } = norm(e);
-      api.sendInput({ kind: "mouse_move", x, y });
+      moves.push(x, y);
     };
+    // Buttons and wheel flush first: they must never land at a stale position.
     const onDown = (e: MouseEvent) => {
       const { x, y } = norm(e);
+      moves.flush();
       api.sendInput({ kind: "mouse_down", x, y, button: buttonName(e.button) });
     };
     const onUp = (e: MouseEvent) => {
       const { x, y } = norm(e);
+      moves.flush();
       api.sendInput({ kind: "mouse_up", x, y, button: buttonName(e.button) });
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { x, y } = norm(e);
+      moves.flush();
       api.sendInput({ kind: "scroll", x, y, dx: -e.deltaX / 100, dy: -e.deltaY / 100 });
     };
     const onContext = (e: Event) => e.preventDefault();
@@ -265,7 +266,8 @@ export function SessionScreen({ onDisconnect }: Props) {
       if (e.touches.length === 1) {
         const { x, y } = normTouch(e.touches[0]);
         lastTouchPos = { x, y };
-        api.sendInput({ kind: "mouse_move", x, y });
+        moves.push(x, y);
+        moves.flush();
         api.sendInput({ kind: "mouse_down", x, y, button: "left" });
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -278,7 +280,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       if (e.touches.length === 1) {
         const { x, y } = normTouch(e.touches[0]);
         lastTouchPos = { x, y };
-        api.sendInput({ kind: "mouse_move", x, y });
+        moves.push(x, y);
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -287,12 +289,14 @@ export function SessionScreen({ onDisconnect }: Props) {
         lastPinchDist = dist;
         const cx = (normTouch(e.touches[0]).x + normTouch(e.touches[1]).x) / 2;
         const cy = (normTouch(e.touches[0]).y + normTouch(e.touches[1]).y) / 2;
+        moves.flush();
         api.sendInput({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta });
       }
     };
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
       if (e.changedTouches.length > 0) {
+        moves.flush();
         api.sendInput({ kind: "mouse_up", x: lastTouchPos.x, y: lastTouchPos.y, button: "left" });
       }
       lastPinchDist = 0;
@@ -316,53 +320,23 @@ export function SessionScreen({ onDisconnect }: Props) {
       canvas.removeEventListener("touchstart", onTouchStart);
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
+      // Drop any queued move so an in-flight frame can't fire after unmount.
+      moves.cancel();
     };
   }, []);
 
-  // Keyboard
+  // Keyboard — state tracking lives in KeyTracker (unit-tested); this effect
+  // only owns the DOM listeners.
   useEffect(() => {
-    // Physical keys currently held down, tracked so they can be released if we
-    // lose focus. Without this, alt-tabbing away while a modifier is held sends
-    // key_down with no matching key_up and the key stays stuck on the host —
-    // on Linux the uinput device outlives the session, so it stays stuck across
-    // reconnects too.
-    // code -> the legacy keyCode we sent with the press, so the release can
-    // carry the same value for hosts that predate the `code` field.
-    const held = new Map<string, number>();
+    const tracker = new KeyTracker((m) => void api.sendInput(m));
 
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
-      // Don't intercept window-management keys.
-      if ((e.ctrlKey || e.metaKey) && ["q", "w", "h", "m"].includes(e.key.toLowerCase())) return;
-      e.preventDefault();
-      // Never release a key we never pressed. Releasing Ctrl before W in a
-      // Ctrl+W chord clears e.ctrlKey, so W's keyup slips past the filter above
-      // even though its keydown was blocked — that would send the host a key_up
-      // with no matching key_down.
-      if (!down && !held.has(e.code)) return;
-      const mods =
-        (e.shiftKey ? 0x01 : 0) |
-        (e.ctrlKey ? 0x02 : 0) |
-        (e.altKey ? 0x04 : 0) |
-        (e.metaKey ? 0x08 : 0);
-      if (down) held.set(e.code, e.keyCode);
-      else held.delete(e.code);
-      api.sendInput({
-        kind: down ? "key_down" : "key_up",
-        // `code` is the physical key and is layout-independent; `keyCode` is
-        // sent only so older hosts keep working.
-        code: e.code,
-        key: e.keyCode,
-        modifiers: mods,
-      });
+      // A blocked chord returns false and must reach the viewer's own window.
+      if (tracker.handleKey(down, e)) e.preventDefault();
     };
 
     // Release everything still held when the window loses focus or is hidden.
-    const releaseAll = () => {
-      for (const [code, keyCode] of held) {
-        api.sendInput({ kind: "key_up", code, key: keyCode, modifiers: 0 });
-      }
-      held.clear();
-    };
+    const releaseAll = () => tracker.releaseAll();
     const onVisibility = () => {
       if (document.hidden) releaseAll();
     };
