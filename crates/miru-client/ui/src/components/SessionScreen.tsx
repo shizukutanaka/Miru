@@ -3,6 +3,7 @@ import { api, SessionStats, DisplayInfo } from "../lib/tauri";
 import { WebCodecsRenderer, webcodecsVp9Supported } from "../lib/webcodecs-renderer";
 import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
 import { MoveCoalescer } from "../lib/move-coalescer";
+import { normalizeWheel } from "../lib/wheel-normalize";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
@@ -246,7 +247,10 @@ export function SessionScreen({ onDisconnect }: Props) {
       e.preventDefault();
       const { x, y } = norm(e);
       moves.flush();
-      api.sendInput({ kind: "scroll", x, y, dx: -e.deltaX / 100, dy: -e.deltaY / 100 });
+      // Normalize by deltaMode: WebKitGTK (the Linux Tauri webview) and Firefox
+      // report line mode, where a raw `/100` collapses a notch to ~0.03.
+      const { dx, dy } = normalizeWheel(e.deltaX, e.deltaY, e.deltaMode);
+      api.sendInput({ kind: "scroll", x, y, dx: -dx, dy: -dy });
     };
     const onContext = (e: Event) => e.preventDefault();
 
