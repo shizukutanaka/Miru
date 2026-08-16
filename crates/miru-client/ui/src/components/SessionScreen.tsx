@@ -4,6 +4,7 @@ import { WebCodecsRenderer, webcodecsVp9Supported } from "../lib/webcodecs-rende
 import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
 import { MoveCoalescer } from "../lib/move-coalescer";
 import { normalizeWheel } from "../lib/wheel-normalize";
+import { makeInputSender } from "../lib/input-sender";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
@@ -38,6 +39,14 @@ export function SessionScreen({ onDisconnect }: Props) {
   const [selectedChord, setSelectedChord] = useState<string>(BLOCKED_CHORDS[0].label);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
+  // Input is only forwarded once the session is fully connected. Before that
+  // the host's session slot already exists, so events would be buffered and
+  // then replayed into the remote machine the moment the user confirms the
+  // fingerprint (see lib/input-sender.ts).
+  const inputReadyRef = useRef(false);
+  const sendInputRef = useRef(
+    makeInputSender(() => inputReadyRef.current, api.sendInput),
+  );
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
   const [hostPubAddr, setHostPubAddr] = useState<string | null>(null);
 
@@ -47,6 +56,10 @@ export function SessionScreen({ onDisconnect }: Props) {
       : stats.rtt_ms > 150 || stats.packet_loss_pct > 3
       ? "warn"
       : "good";
+
+  useEffect(() => {
+    inputReadyRef.current = status === "connected";
+  }, [status]);
 
   const lastFrameRef = useRef<number>(Date.now());
   const [stalled, setStalled] = useState(false);
@@ -226,7 +239,7 @@ export function SessionScreen({ onDisconnect }: Props) {
     // Mice report at 125–1000 Hz; one IPC invoke per event floods the channel
     // and can push the host's 1000 ev/s limiter into dropping keystrokes.
     // Collapse movement to the newest position per animation frame.
-    const moves = new MoveCoalescer((m) => void api.sendInput(m));
+    const moves = new MoveCoalescer((m) => sendInputRef.current(m));
 
     const onMove = (e: MouseEvent) => {
       const { x, y } = norm(e);
@@ -236,12 +249,12 @@ export function SessionScreen({ onDisconnect }: Props) {
     const onDown = (e: MouseEvent) => {
       const { x, y } = norm(e);
       moves.flush();
-      api.sendInput({ kind: "mouse_down", x, y, button: buttonName(e.button) });
+      sendInputRef.current({ kind: "mouse_down", x, y, button: buttonName(e.button) });
     };
     const onUp = (e: MouseEvent) => {
       const { x, y } = norm(e);
       moves.flush();
-      api.sendInput({ kind: "mouse_up", x, y, button: buttonName(e.button) });
+      sendInputRef.current({ kind: "mouse_up", x, y, button: buttonName(e.button) });
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -250,7 +263,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       // Normalize by deltaMode: WebKitGTK (the Linux Tauri webview) and Firefox
       // report line mode, where a raw `/100` collapses a notch to ~0.03.
       const { dx, dy } = normalizeWheel(e.deltaX, e.deltaY, e.deltaMode);
-      api.sendInput({ kind: "scroll", x, y, dx: -dx, dy: -dy });
+      sendInputRef.current({ kind: "scroll", x, y, dx: -dx, dy: -dy });
     };
     const onContext = (e: Event) => e.preventDefault();
 
@@ -272,7 +285,7 @@ export function SessionScreen({ onDisconnect }: Props) {
         lastTouchPos = { x, y };
         moves.push(x, y);
         moves.flush();
-        api.sendInput({ kind: "mouse_down", x, y, button: "left" });
+        sendInputRef.current({ kind: "mouse_down", x, y, button: "left" });
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -294,14 +307,14 @@ export function SessionScreen({ onDisconnect }: Props) {
         const cx = (normTouch(e.touches[0]).x + normTouch(e.touches[1]).x) / 2;
         const cy = (normTouch(e.touches[0]).y + normTouch(e.touches[1]).y) / 2;
         moves.flush();
-        api.sendInput({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta });
+        sendInputRef.current({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta });
       }
     };
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
       if (e.changedTouches.length > 0) {
         moves.flush();
-        api.sendInput({ kind: "mouse_up", x: lastTouchPos.x, y: lastTouchPos.y, button: "left" });
+        sendInputRef.current({ kind: "mouse_up", x: lastTouchPos.x, y: lastTouchPos.y, button: "left" });
       }
       lastPinchDist = 0;
     };
@@ -332,7 +345,7 @@ export function SessionScreen({ onDisconnect }: Props) {
   // Keyboard — state tracking lives in KeyTracker (unit-tested); this effect
   // only owns the DOM listeners.
   useEffect(() => {
-    const tracker = new KeyTracker((m) => void api.sendInput(m));
+    const tracker = new KeyTracker((m) => sendInputRef.current(m));
 
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
       // A blocked chord returns false and must reach the viewer's own window.
@@ -414,6 +427,10 @@ export function SessionScreen({ onDisconnect }: Props) {
       await api.sendInput({ kind: "key_down", ...CTRL, modifiers: mods });
       await api.sendInput({ kind: "key_down", code: chord.code, key: chord.key, modifiers: mods });
       await api.sendInput({ kind: "key_up", code: chord.code, key: chord.key, modifiers: mods });
+    } catch {
+      // A failed send mid-chord is not worth an error dialog; the finally below
+      // still lifts Ctrl, and an uncaught rejection here would escape the
+      // onClick handler.
     } finally {
       // Always lift Ctrl, even if a send above failed, so the host is not left
       // with a latched modifier.
