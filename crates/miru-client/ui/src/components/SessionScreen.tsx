@@ -5,6 +5,7 @@ import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
 import { MoveCoalescer } from "../lib/move-coalescer";
 import { normalizeWheel } from "../lib/wheel-normalize";
 import { makeInputSender } from "../lib/input-sender";
+import { TouchGestures, type TouchAction } from "../lib/touch-gestures";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
@@ -276,18 +277,30 @@ export function SessionScreen({ onDisconnect }: Props) {
         y: Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)),
       };
     };
-    let lastTouchPos = { x: 0.5, y: 0.5 };
     let lastPinchDist = 0;
+    // Owns the left-button state so a release is only ever sent when a press
+    // is actually outstanding (see lib/touch-gestures.ts).
+    const gestures = new TouchGestures();
+
+    const applyTouch = (actions: TouchAction[]) => {
+      for (const a of actions) {
+        moves.flush();
+        sendInputRef.current({
+          kind: a.type === "press_left" ? "mouse_down" : "mouse_up",
+          x: a.x,
+          y: a.y,
+          button: "left",
+        });
+      }
+    };
 
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
-      if (e.touches.length === 1) {
-        const { x, y } = normTouch(e.touches[0]);
-        lastTouchPos = { x, y };
-        moves.push(x, y);
-        moves.flush();
-        sendInputRef.current({ kind: "mouse_down", x, y, button: "left" });
-      } else if (e.touches.length === 2) {
+      const pos =
+        e.touches.length > 0 ? normTouch(e.touches[0]) : { x: 0.5, y: 0.5 };
+      if (e.touches.length === 1) moves.push(pos.x, pos.y);
+      applyTouch(gestures.start(e.touches.length, pos));
+      if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
         lastPinchDist = Math.hypot(dx, dy);
@@ -297,7 +310,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       e.preventDefault();
       if (e.touches.length === 1) {
         const { x, y } = normTouch(e.touches[0]);
-        lastTouchPos = { x, y };
+        gestures.move(1, { x, y });
         moves.push(x, y);
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -313,11 +326,10 @@ export function SessionScreen({ onDisconnect }: Props) {
     };
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
-      if (e.changedTouches.length > 0) {
-        moves.flush();
-        sendInputRef.current({ kind: "mouse_up", x: lastTouchPos.x, y: lastTouchPos.y, button: "left" });
-      }
-      lastPinchDist = 0;
+      // Releases only if a press is outstanding — a two-finger scroll never
+      // pressed, and touchend fires once per finger.
+      applyTouch(gestures.end());
+      if (e.touches.length < 2) lastPinchDist = 0;
     };
 
     canvas.addEventListener("mousemove", onMove);
@@ -338,6 +350,8 @@ export function SessionScreen({ onDisconnect }: Props) {
       canvas.removeEventListener("touchstart", onTouchStart);
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
+      // Don't leave the host with a touch-pressed button after unmount.
+      applyTouch(gestures.cancel());
       // Drop any queued move so an in-flight frame can't fire after unmount.
       moves.cancel();
     };
