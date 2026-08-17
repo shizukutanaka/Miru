@@ -5,7 +5,7 @@ import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
 import { MoveCoalescer } from "../lib/move-coalescer";
 import { normalizeWheel } from "../lib/wheel-normalize";
 import { makeInputSender } from "../lib/input-sender";
-import { base64ToBytes } from "../lib/base64";
+import { base64ToBytes, bytesToBase64 } from "../lib/base64";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
@@ -479,11 +479,10 @@ export function SessionScreen({ onDisconnect }: Props) {
     setFileSending(true);
     try {
       const buf = await file.arrayBuffer();
-      // Convert to base64
-      const bytes = new Uint8Array(buf);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const b64 = btoa(binary);
+      // Native encoder where available, chunked fallback otherwise. Appending
+      // one character at a time froze the window for large files — the picker
+      // allows up to 100 MB, i.e. 100 million iterations on the main thread.
+      const b64 = bytesToBase64(new Uint8Array(buf));
       await api.sendFile(file.name, b64);
     } catch (err) {
       console.error("File send failed:", err);

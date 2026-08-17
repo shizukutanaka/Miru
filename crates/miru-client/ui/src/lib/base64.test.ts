@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { base64ToBytes, decodeBase64Loop, hasNativeBase64 } from "./base64";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  decodeBase64Loop,
+  encodeBase64Loop,
+  hasNativeBase64,
+  hasNativeBase64Encode,
+} from "./base64";
 
 /** Encode bytes to base64 without depending on the decoder under test. */
 function encode(bytes: number[]): string {
@@ -61,6 +68,61 @@ describe("decodeBase64Loop (fallback)", () => {
       const bytes = Array.from({ length: len }, (_, i) => (i * 91 + trial) & 0xff);
       const b64 = encode(bytes);
       expect(Array.from(base64ToBytes(b64))).toEqual(Array.from(decodeBase64Loop(b64)));
+    }
+  });
+});
+
+describe("bytesToBase64", () => {
+  it("encodes to the canonical base64 string", () => {
+    expect(bytesToBase64(new Uint8Array([0x4d, 0x69, 0x72, 0x75]))).toBe("TWlydQ==");
+  });
+
+  it("handles empty input", () => {
+    expect(bytesToBase64(new Uint8Array(0))).toBe("");
+  });
+
+  it("round-trips every byte value through the decoder", () => {
+    const bytes = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) bytes[i] = i;
+    expect(Array.from(base64ToBytes(bytesToBase64(bytes)))).toEqual(Array.from(bytes));
+  });
+
+  it("emits the right padding for each length mod 3", () => {
+    expect(bytesToBase64(new Uint8Array([1]))).toMatch(/==$/);
+    expect(bytesToBase64(new Uint8Array([1, 2]))).toMatch(/[^=]=$/);
+    expect(bytesToBase64(new Uint8Array([1, 2, 3]))).not.toMatch(/=/);
+  });
+
+  /**
+   * Regression for the chunked fallback: encoding must not corrupt or drop
+   * data at a chunk boundary, and the chunk size is not a multiple of 3 so the
+   * base64 groups straddle it.
+   */
+  it("is correct across chunk boundaries", () => {
+    for (const len of [8191, 8192, 8193, 8192 * 2 + 5]) {
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = (i * 31) & 0xff;
+      const round = base64ToBytes(bytesToBase64(bytes));
+      expect(round.length).toBe(len);
+      expect(Array.from(round)).toEqual(Array.from(bytes));
+    }
+  });
+});
+
+describe("encodeBase64Loop (fallback)", () => {
+  it("matches the selected encoder", () => {
+    for (const len of [0, 1, 2, 3, 100, 8193]) {
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = (i * 17) & 0xff;
+      expect(encodeBase64Loop(bytes)).toBe(bytesToBase64(bytes));
+    }
+  });
+
+  it.skipIf(!hasNativeBase64Encode)("agrees with the native encoder", () => {
+    for (let len = 0; len < 300; len += 7) {
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = (i * 53) & 0xff;
+      expect(bytesToBase64(bytes)).toBe(encodeBase64Loop(bytes));
     }
   });
 });
