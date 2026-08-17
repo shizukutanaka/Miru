@@ -5,6 +5,7 @@ import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
 import { MoveCoalescer } from "../lib/move-coalescer";
 import { normalizeWheel } from "../lib/wheel-normalize";
 import { makeInputSender } from "../lib/input-sender";
+import { base64ToBytes } from "../lib/base64";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
@@ -112,7 +113,7 @@ export function SessionScreen({ onDisconnect }: Props) {
           }
           try {
             const bmp = await createImageBitmap(
-              new Blob([b64ToBytes(f.b64)], { type: "image/jpeg" }),
+              new Blob([base64ToBytes(f.b64)], { type: "image/jpeg" }),
             );
             const ctx = canvas.getContext("2d");
             ctx?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
@@ -646,15 +647,6 @@ export function SessionScreen({ onDisconnect }: Props) {
       </div>
     </div>
   );
-}
-
-/** Decode base64 → ArrayBuffer without an intermediate data-URL string. */
-function b64ToBytes(b64: string): ArrayBuffer {
-  const bin = atob(b64);
-  const buf = new ArrayBuffer(bin.length);
-  const view = new Uint8Array(buf);
-  for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
-  return buf;
 }
 
 function fmtDuration(secs: number): string {
