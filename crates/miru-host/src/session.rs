@@ -239,7 +239,11 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
         }
     };
 
-    let mut backoff_secs = 5u64;
+    // Attempt counter for jittered backoff. Plain doubling synchronised every
+    // host pointed at the same signal server: they all disconnect together on a
+    // restart and then retry in lockstep. See miru_common::backoff.
+    const SIGNAL_BACKOFF_BASE_SECS: u64 = 5;
+    let mut attempt: u32 = 0;
 
     loop {
         let mut signal = match SignalClient::connect_with_pub_addr_signed(
@@ -252,13 +256,18 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
         .await
         {
             Ok(s) => {
-                backoff_secs = 5;
+                attempt = 0;
                 s
             }
             Err(e) => {
-                warn!("Signal connect failed: {}; retrying in {}s", e, backoff_secs);
-                time::sleep(Duration::from_secs(backoff_secs)).await;
-                backoff_secs = (backoff_secs * 2).min(SIGNAL_BACKOFF_MAX_SECS);
+                let delay = miru_common::backoff::next_delay(
+                    attempt,
+                    SIGNAL_BACKOFF_BASE_SECS,
+                    SIGNAL_BACKOFF_MAX_SECS,
+                );
+                warn!("Signal connect failed: {}; retrying in {}s", e, delay.as_secs());
+                time::sleep(delay).await;
+                attempt = attempt.saturating_add(1);
                 continue;
             }
         };
@@ -288,14 +297,14 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
                     });
                 }
                 Some(SignalEvent::Disconnected) => {
-                    warn!("Signal disconnected — reconnecting in {}s", backoff_secs);
+                    warn!("Signal disconnected — reconnecting");
                     break true;
                 }
                 Some(SignalEvent::Error { code, message }) => {
                     error!("Signal error {}: {}", code, message);
                 }
                 None => {
-                    warn!("Signal stream ended — reconnecting in {}s", backoff_secs);
+                    warn!("Signal stream ended — reconnecting");
                     break true;
                 }
                 _ => {}
@@ -303,8 +312,14 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
         };
 
         if reconnect {
-            time::sleep(Duration::from_secs(backoff_secs)).await;
-            backoff_secs = (backoff_secs * 2).min(SIGNAL_BACKOFF_MAX_SECS);
+            let delay = miru_common::backoff::next_delay(
+                attempt,
+                SIGNAL_BACKOFF_BASE_SECS,
+                SIGNAL_BACKOFF_MAX_SECS,
+            );
+            warn!("Reconnecting to signal in {}s", delay.as_secs());
+            time::sleep(delay).await;
+            attempt = attempt.saturating_add(1);
         } else {
             break;
         }

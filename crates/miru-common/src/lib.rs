@@ -3,6 +3,7 @@
 //! WHY: Single source of truth for wire format and domain types.
 //!      Both host and client compile this; no duplication.
 
+pub mod backoff;
 pub mod codec;
 pub mod crypto;
 pub mod error;
