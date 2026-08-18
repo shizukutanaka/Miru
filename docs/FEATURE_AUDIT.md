@@ -2,6 +2,15 @@
 
 作成: 2026-07 / ブランチ: `claude/sweet-franklin-l5a1yw`
 
+> **2026-08 更新(ADR 0022)**: スコープの矛盾を記録。ADR 0005(AI 軸で差別化)・
+> roadmap §0(同じ6 crate を凍結)・本監査の出荷基準(パリティ)が**異なる「完成」を
+> 定義**しており、凍結スコープが Rust 全体の **32%(7,173行)** を占めたままビルド・CI・
+> 攻撃面・入力ホットパスに課金し続けている。ADR 0022 は差別化軸を捨てず feature gate で
+> デフォルト off にし、出荷基準をパリティへ一本化することを提案(実行は要ビルド環境)。
+> あわせて **`scripts/verify-offline.sh`** を追加 — crates.io 無しでも
+> 全 `.rs` の構文チェック + std 依存モジュール(keymap 11件 / backoff 9件)の
+> **実テスト実行** + フロント検証が回る。
+>
 > **2026-07 更新**: 本ブランチで項目 3(WebGL2→WebCodecs)・7・8(TOFU)・9(PIN デッド
 > コード)・10(a11y)・11(miru.app)が解消済み。残タスク(音声キャプチャ・HW エンコード・
 > Wayland・macOS・CI・cargo 検証)を **後続エージェントが追加調査なしで着手できる粒度**に
@@ -45,7 +54,7 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 | 9 | ~~`ConnectArgs.pin` フィールドが実質デッドコード~~ → **誤解を招く入力欄を削除(tsc 検証済み)** | 検証の結果、PIN は `ConnectScreen` → `api.connect` → `ConnectArgs.pin` と流れるが `session.rs`/`state.rs` のどこからも読まれない完全なデッドコードと確定。初回接続のセキュリティは実際には TOFU 指紋確認ダイアログ(項目7)であり、何も強制しない PIN 入力は「保護されている」という誤った安心感を与えるため削除。UI 入力・`api.connect` の `pin` 引数・`ConnectArgs.pin` フィールドを一括除去。PIN ペアリング自体は `CLAUDE.md`(暗号/PIN、PBKDF2-SHA256)の将来機能として維持し、ホスト側の実強制と配線する時点で入力欄を再追加する旨をコード内コメントに明記 | 完了(将来 PIN 機能実装時に再配線) |
 | 10 | ~~UI アクセシビリティ欠如~~ → **解消済み(12/12コンポーネント)** | 商用品質監査(2026-07)で確認: 12個の `.tsx` 全体で `aria-*`/`role=` 使用が実質ゼロだった。全コンポーネントに基礎対応済み: label/input 関連付け、`role="dialog"`/`"alert"`/`"status"`、`aria-live`、ナビゲーションの `aria-current`、識別可能な `aria-label`。特筆: `TimelineScrubber.tsx` のシークバーはキーボード操作が皆無だったため `role="slider"` + 矢印キーハンドラを新規実装、`ConstellationMap.tsx` の SVG可視化はキーボード到達不能な複製UIのため `aria-hidden` で隠し実アクセス手段(device-list の `<button>`)のみ露出。全て `tsc` 検証済み | 完了。今後は実スクリーンリーダー(NVDA/VoiceOver)での実機検証が望ましい |
 | 11 | ~~存在しない `miru.app` ドメインへの依存~~ → **解消済み** | `MIRU_SIGNAL` のデフォルト値が未登録の `signal.miru.app` を指していた(`main.rs`/`scripts/install.sh` 双方)。`PRIVACY.md` は実装ゼロのクラッシュレポート機能を実在するかのように詳述していた(`--enable-crash-reports` フラグはコード上皆無、`grep` で確認済み)。全て `localhost` デフォルトへの修正、または「未実装/未稼働」の正直な注記に置換 | 完了 |
-| 12 | `PairPrompt.tsx` が `PairingDialog.tsx` と同様の完全なデッドコード | `crates/miru-client/ui/src/components/PairPrompt.tsx` — ホスト側ペアリング確認 UI として完成度は高いが、`grep -rn "PairPrompt" src/` でヒットが定義行のみ(import 0件)。`miru-host` は Tauri UI を持たないヘッドレス CLI のため、このコンポーネントを呼び出す先が構造的に存在しない | 将来のホスト GUI モード構想の名残りか、削除候補か要判断。規模: 判断のみ(小) |
+| 12 | ~~`PairPrompt.tsx` が完全なデッドコード~~ → **削除済み(tsc + Vitest 検証済み)** | import 0件を再確認のうえ `PairPrompt.tsx`(102行)と、ADR 0013/0020 で WebCodecs に置換され同じく参照ゼロだった `yuv-renderer.ts`(214行)を削除。計316行。当初「プロダクト判断待ち」としていたが、**git が履歴を保持する以上、参照ゼロのコードは削除が既定**であるべきと判断を改めた(ADR 0022)。必要になれば戻せる | 完了 |
 
 ## 🔴 追加(2026-08 First Principles 再監査 — 入力経路)
 
