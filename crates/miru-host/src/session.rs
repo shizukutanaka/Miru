@@ -26,8 +26,10 @@ use tokio::time;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+#[cfg(feature = "agent")]
+use crate::agent_handler::AgentHandler;
 use crate::{
-    agent_handler::AgentHandler, backpressure::FrameController, capture_loop,
+    backpressure::FrameController, capture_loop,
     input_handler::InputHandler, metrics::SessionMetrics, qos_bbr::BbrQos,
     recording::SessionRecorder, safe_fs,
 };
@@ -366,6 +368,16 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 3b. If the peer declared AiAgent role, build an AgentHandler gate.
     //     The token must be embedded in the pubkey field as a 4th segment.
     //     All input events pass through gate_input() before being injected.
+    // Without the `agent` feature there is no capability gate compiled in, so a
+    // peer claiming AiAgent must be refused outright — falling through would
+    // hand it the ungated human path (see ADR 0022).
+    #[cfg(not(feature = "agent"))]
+    if result.peer_role == Role::AiAgent {
+        warn!("Peer requested AiAgent role, but this build has the agent feature disabled — refusing");
+        return Ok(());
+    }
+
+    #[cfg(feature = "agent")]
     let agent_handler: Option<AgentHandler> = if result.peer_role == Role::AiAgent {
         match crate::agent_handler::extract_agent_token(&result.peer_pubkey_field) {
             Ok(token_str) => {
@@ -553,6 +565,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         }
                     }
                     // AI agent without ScreenRead capability: discard frame instead of transmitting.
+                    #[cfg(feature = "agent")]
                     if agent_handler.as_ref().is_some_and(|h| !h.allow_screen_send()) {
                         continue;
                     }
@@ -581,10 +594,16 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     Some(Msg::InputEvent(evt)) if matches!(permission, Permission::Control | Permission::Full) => {
                         // If this is an AI agent session, every event must pass
                         // through the capability gate (authorize + audit log).
+                        #[cfg(feature = "agent")]
                         let allowed = match &agent_handler {
                             Some(gate) => gate.gate_input(&evt).is_ok(),
                             None => true, // human viewers: unconditional
                         };
+                        // Default build serves human viewers only; the AiAgent
+                        // role was already refused above, so there is nothing
+                        // to gate and no branch on the input hot path.
+                        #[cfg(not(feature = "agent"))]
+                        let allowed = true;
                         if allowed {
                             let _ = input_handler.handle_input(&evt);
                         }
@@ -748,6 +767,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 8. Transparency anchoring — record an immutable, signed commitment of
     //    this session's metadata. Posted to Rekor if MIRU_REKOR_URL is set.
     //    Non-fatal: anchoring failure must never break session teardown.
+    #[cfg(feature = "agent")]
     if let Ok(rekor_url) = std::env::var("MIRU_REKOR_URL") {
         let metadata = metrics.snapshot();
         // Host-only attestation: the viewer's signing key is never available

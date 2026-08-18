@@ -9,6 +9,14 @@ license.workspace = true
 name = "miru-host"
 path = "src/main.rs"
 
+[features]
+# See ADR 0022. The AI-agent governance surface is a deliberate bet (ADR 0005)
+# that is currently frozen, so it is off by default: the shipped binary carries
+# no token issuance, no audit chain, no Rekor anchoring, and the input hot path
+# has no agent gate compiled into it at all. `--features agent` restores it.
+default = []
+agent = ["dep:miru-agent", "dep:miru-transparency"]
+
 [dependencies]
 miru-common = { workspace = true }
 miru-capture = { workspace = true }
@@ -17,8 +25,8 @@ miru-input = { workspace = true }
 miru-codec = { workspace = true }
 miru-audio = { path = "../miru-audio" }
 miru-auth = { path = "../miru-auth" }
-miru-agent = { path = "../miru-agent" }
-miru-transparency = { path = "../miru-transparency" }
+miru-agent = { path = "../miru-agent", optional = true }
+miru-transparency = { path = "../miru-transparency", optional = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

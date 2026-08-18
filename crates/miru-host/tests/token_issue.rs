@@ -1,6 +1,10 @@
 //! Verifies that a token minted by `miru-host token issue` actually verifies
 //! against the host's identity — the exact check the daemon performs when an
 //! AI agent connects. Guards the end-to-end "user can mint a usable token" path.
+//!
+//! `token issue` only exists in the agent build (ADR 0022), so the whole file
+//! compiles away without the feature.
+#![cfg(feature = "agent")]
 
 use std::process::Command;
 

@@ -1,6 +1,6 @@
 # ADR 0022: 「完成」の定義が二重化している — 差別化軸を feature gate へ退避し、パリティを先に閉じる
 
-**状態**: 提案 (2026-08) — 削除/gate 化の実行はビルド環境が必要
+**状態**: 採用 (2026-08) — feature gate 実装済み。`cargo` による最終検証は未実施
 
 ## コンテキスト
 
@@ -84,18 +84,58 @@ ADR 0005 の賭けは維持する(AI エージェント基盤は実際に業界�
 
 計 316 行削除。`tsc` + Vitest 69件で無影響を確認済み。
 
-## 実行手順(ビルド環境が必要 — 本 ADR では未実行)
+## 実行結果 (2026-08 実施)
 
-1. `Cargo.toml` の `[workspace] members` から凍結5 crate を外し、
-   `[features] agent = ["miru-agent", "miru-mcp", ...]` として optional 化
-2. `miru-host`: `agent_handler` モジュールと `Role::AiAgent` 分岐を
-   `#[cfg(feature = "agent")]` で囲う。**入力ホットパスの `gate_input` は
-   feature off 時にコードごと消えること**を確認
-3. CI: `test`/`e2e` の agent 関連ステップを `--features agent` の専用ジョブへ隔離
-4. crypto-gate: agent 専用の例外 grep 4件を削除(対象コードが既定ビルドから
-   消えるため不要になる)
-5. `cargo test --workspace` と `cargo test --workspace --features agent` の
-   **両方**が緑であることを確認
+`miru-host` に `agent` feature を追加し、**既定 off** とした。
+
+```toml
+[features]
+default = []
+agent = ["dep:miru-agent", "dep:miru-transparency"]
+```
+
+gate した箇所は5つだけだった — 32% のコード量に対し**接触面は驚くほど薄い**:
+
+| 箇所 | 内容 |
+|------|------|
+| `main.rs` | `mod agent_handler` / `audit`・`token` サブコマンド / `parse_capability` |
+| `session.rs` | `AgentHandler` 構築ブロック / 画面送信ゲート / **入力ホットパスの `gate_input`** / Rekor アンカリング |
+| `metrics.rs` | `snapshot() -> SessionMetadata` |
+| `tests/token_issue.rs` | ファイル全体を `#![cfg(feature = "agent")]` |
+
+### 副次的に見つかったセキュリティ上の穴
+
+feature off 時に `Role::AiAgent` のピアが**そのまま人間用の非ゲート経路へ落ちる**
+ことに気づいた。ゲートが存在しないビルドでエージェントを受け入れるのは
+「ゲート無しで全入力を許可」と同義なので、**明示的に接続拒否**する分岐を追加した:
+
+```rust
+#[cfg(not(feature = "agent"))]
+if result.peer_role == Role::AiAgent {
+    warn!("...agent feature disabled — refusing");
+    return Ok(());
+}
+```
+
+これは gate 化しなければ発生しなかった穴であり、削除作業が設計の欠落を
+炙り出した例。
+
+### 本 ADR の当初の記述で誤っていた2点
+
+1. **miru-sandbox は凍結スコープではない。** `main.rs` の
+   `miru_sandbox::apply(&Policy::host_daemon())` はホストデーモンの権限降格で
+   あり、AI エージェントとは無関係な**コア防御**。706 行を凍結扱いにしていたのは
+   分類ミス。gate 対象から外した。
+2. **CI の `-p miru-agent` / `-p miru-mcp` ステップは隔離不要。** 各 crate は
+   workspace member のまま残るので単体でビルド・テストでき、CI は無変更で通る。
+   同様に **crypto-gate の例外 grep 4件も削除できない** — あのゲートは feature に
+   関係なくツリー内の全ソースを走査するため、対象コードがツリーに在る限り必要。
+
+### 残る検証
+
+`cargo test --workspace` と `cargo test --workspace --features agent` の**両方**が
+緑であることの確認。crates.io が遮断された環境では未実施
+(`scripts/verify-offline.sh` は構文・マニフェスト・std 依存モジュールまで検証済み)。
 
 ## 影響
 
