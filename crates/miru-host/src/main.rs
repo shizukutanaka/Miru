@@ -17,7 +17,6 @@ mod headless;
 mod input_handler;
 mod metrics;
 #[allow(dead_code)]
-mod qos;
 mod qos_bbr;
 mod recording;
 mod safe_fs;

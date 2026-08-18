@@ -197,9 +197,6 @@ run_harness input_handler crates/miru-host/src/input_handler.rs \
 run_harness qos_bbr crates/miru-host/src/qos_bbr.rs \
   crates/miru-common/src/message.rs:QosUpdate,QosHint
 
-run_harness qos crates/miru-host/src/qos.rs \
-  crates/miru-common/src/message.rs:QosUpdate
-
 run_harness codec_negotiation crates/miru-common/src/codec.rs \
   crates/miru-common/src/message.rs:VideoCodec,AudioCodec
 
