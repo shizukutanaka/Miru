@@ -142,3 +142,43 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
 作成時のサンドボックスは crates.io (`static.crates.io`) への通信がプロキシポリシーで
 403 拒否され `cargo check` が実行できませんでした。引き継いだら **まず
 `cargo test --workspace` を実行して全変更をビルド・テスト検証してください**。
+
+---
+
+## 削除候補の実測 (Musk ステップ②) — 2026-08
+
+`scripts/find-dead-code.py` により、**ワークスペース内のどこからも参照されない
+`pub` 項目が 20 件**あることを確認した。うち最大のものを記録する。
+
+### `miru-transport/src/quic.rs` (319行) — 全体が未参照
+
+| 項目 | 実測 |
+|------|------|
+| `QuicTransport` / `QuicSendStream` / `QuicRecvStream` の参照 | **0件**(ファイル外) |
+| `quic::` の参照 | **0件**(ファイル外) |
+| `quinn` を使う他のファイル | **0件** |
+| `rcgen` を使う他のファイル | **0件** |
+
+つまり `quic.rs` を削除すれば **319行 + `quinn` + `rcgen` 依存2件**が
+既定ビルドから消える。`publish = false` なので外部利用者もいない。
+
+**それでも本 PR では削除しない。** 理由:
+
+1. `docs/architecture.md` / `THREAT_MODEL.md` / `competitive-analysis.md` /
+   `RESEARCH_NOTES.md §3 (MoQ)` / CLAUDE.md のポート表が、QUIC を
+   **製品の設計方針として明示**している。削除は製品判断であって清掃ではない。
+2. `docs/DEVELOPMENT_LOG.md` に「QUIC stream 定数を `#[allow(dead_code)]` +
+   `pub const` に変更」という**意図的に残した記録**がある。記録された判断を
+   エージェントが独断で覆すべきではない。
+
+判断が必要な問いは1つ:
+**QUIC 優先パスは着手予定か、それとも WS リレー + hole-punch で確定か。**
+前者なら残す。後者なら 319行と依存2件は即座に削除できる(git が保持する)。
+
+### 本 PR で削除したもの
+
+- `miru-transport/src/tls.rs: assert_secure_mode()` — 名前は `assert_` だが
+  **ログを出すだけで何も強制せず、しかもどこからも呼ばれていない**。
+  ガードに見えて実効ゼロという最悪の形。削除しても実行時挙動は変わらない
+  (呼ばれていないため)。警告自体が必要なら `main()` から
+  `warn_if_insecure_tls_requested()` として呼ぶのが正しい形。
