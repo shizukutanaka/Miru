@@ -110,10 +110,12 @@ async fn main() -> Result<()> {
     // Print available codecs
     let codecs = miru_codec::available_codecs();
     info!("Codecs: {:?}", codecs);
+    // Detection only — printing this next to the codec list read as "these are
+    // in use". Nothing here is wired into Encoder::new yet.
     let hw = miru_codec::probe_hw();
     if !hw.is_empty() {
         for h in &hw {
-            info!("HW: {} → {:?}", h.name(), h.codecs());
+            info!("HW encoder detected (not yet used): {} → {:?}", h.name(), h.codecs());
         }
     }
 
@@ -177,7 +179,8 @@ async fn main() -> Result<()> {
                 has_microphone: false,
                 has_speakers: false,
                 has_camera: false,
-                has_hw_encode: !miru_codec::probe_hw().is_empty(),
+                // What this build can encode, not what silicon is present.
+                has_hw_encode: miru_codec::has_hw_encode(),
                 battery_pct: None,
                 form_factor: FormFactor::Desktop,
                 friendly_name: String::new(),

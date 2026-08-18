@@ -164,6 +164,9 @@ run_harness qos crates/miru-host/src/qos.rs \
 run_harness codec_negotiation crates/miru-common/src/codec.rs \
   crates/miru-common/src/message.rs:VideoCodec,AudioCodec
 
+run_harness hw_probe crates/miru-codec/src/hw.rs \
+  crates/miru-common/src/message.rs:VideoCodec
+
 # ── 4. Frontend ──────────────────────────────────────────────────────────────
 step "Frontend (tsc + vitest)"
 UI=crates/miru-client/ui

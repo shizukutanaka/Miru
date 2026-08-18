@@ -337,7 +337,10 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     let host_features = Features {
         codecs: miru_codec::available_codecs(),
         audio_codecs: vec![AudioCodec::Opus],
-        hw_encode: !miru_codec::probe_hw().is_empty(),
+        // Advertise hardware encoding only if this build can actually do it.
+        // probe_hw() reports silicon, which is true on nearly every desktop and
+        // was telling viewers we had an encoder we never compiled in.
+        hw_encode: miru_codec::has_hw_encode(),
         hw_decode: false,
         clipboard: true,
         file_transfer: true,

@@ -12,6 +12,7 @@ pub mod vpx;
 pub use decoder::Decoder;
 pub use encoder::Encoder;
 pub use hw::{probe as probe_hw, HwEncoder};
+
 pub use jpeg::{i420_to_jpeg, i420_to_rgb};
 
 use miru_common::message::VideoCodec;
@@ -48,9 +49,55 @@ pub fn available_codecs() -> Vec<VideoCodec> {
     vec![VideoCodec::Jpeg]
 }
 
+/// Whether this build can actually encode using hardware.
+///
+/// This is what gets advertised to peers as `Features::hw_encode`, so it must
+/// describe **this binary's ability**, not the machine's silicon. `probe_hw()`
+/// answers the latter and returns true on essentially every modern desktop;
+/// wiring it to the handshake told viewers a build with no hardware encoder
+/// compiled in had one. The same honesty rule is already applied to audio
+/// (see `Features::audio` in miru-host/src/session.rs).
+///
+/// Derived from `available_codecs()` so it becomes true on its own the moment
+/// the FFmpeg backend starts advertising a hardware codec — there is no second
+/// place to remember to update.
+pub fn has_hw_encode() -> bool {
+    available_codecs().iter().any(is_hardware_codec)
+}
+
+/// Codecs that in practice require a hardware encoder in this project.
+/// VP8/VP9 are software (libvpx) and JPEG is trivially software.
+fn is_hardware_codec(c: &VideoCodec) -> bool {
+    matches!(
+        c,
+        VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// hw_encode is a claim about this build, not about the machine. Until a
+    /// hardware backend is wired into `Encoder::new`, advertising it is a lie
+    /// that makes a viewer negotiate a codec whose session dies on frame one.
+    #[test]
+    fn hw_encode_claim_matches_what_the_build_can_encode() {
+        for codec in available_codecs() {
+            if is_hardware_codec(&codec) {
+                assert!(
+                    has_hw_encode(),
+                    "advertising HW codec {codec:?} while has_hw_encode() is false"
+                );
+            }
+        }
+        if has_hw_encode() {
+            assert!(
+                available_codecs().iter().any(is_hardware_codec),
+                "claiming hw_encode with no hardware codec advertised"
+            );
+        }
+    }
 
     /// Every advertised codec must be constructible by Encoder::new —
     /// otherwise codec negotiation can select a codec that fails at the

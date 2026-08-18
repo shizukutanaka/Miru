@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Hardware-accelerated encoder via FFmpeg.
 //!
 //! Backend selection (per OS):
@@ -6,15 +5,17 @@
 //!   macOS      : VideoToolbox (h264_videotoolbox, hevc_videotoolbox)
 //!   Linux      : NVENC > VAAPI (Intel/AMD) > software
 //!
-//! Currently a stub — ffmpeg-next integration deferred for v0.2.
-//! See also: miru-codec/src/vpx.rs for the working software path.
+//! **This module is diagnostics only.** It reports which encoder silicon is
+//! present; it does not encode anything. The encoding backend lives in
+//! ffmpeg_enc.rs behind the `ffmpeg` feature, and the working software path is
+//! vpx.rs. Do not derive a capability advertised to peers from `probe()` —
+//! silicon being present says nothing about this build being able to use it.
+//! Use `crate::has_hw_encode()` for that.
 
-use anyhow::{bail, Result};
 use miru_common::message::VideoCodec;
 
-use crate::{encoder::EncoderBackend, EncodedPacket};
-
-/// Probe available hardware encoders on this system.
+/// Probe hardware encoder silicon present on this system. Diagnostics only —
+/// see the module docs before using this for anything a peer can observe.
 pub fn probe() -> Vec<HwEncoder> {
     let mut encoders = Vec::new();
 
@@ -26,8 +27,13 @@ pub fn probe() -> Vec<HwEncoder> {
         if has_dll("amfrt64.dll") {
             encoders.push(HwEncoder::Amf);
         }
-        // QSV is available on most modern Intel CPUs
-        encoders.push(HwEncoder::Qsv);
+        // QSV was pushed unconditionally, so every Windows host — AMD-only
+        // machines included — reported Intel QuickSync. The runtime is what
+        // actually has to be there: libmfxhw64.dll is the classic Media SDK
+        // dispatcher, libvpl the oneVPL successor shipped with newer drivers.
+        if has_dll("libmfxhw64.dll") || has_dll("libvpl.dll") {
+            encoders.push(HwEncoder::Qsv);
+        }
     }
 
     #[cfg(target_os = "macos")]
@@ -90,49 +96,60 @@ fn has_dll(name: &str) -> bool {
     PathBuf::from(system).join("System32").join(name).exists()
 }
 
-/// Select best hardware encoder for the requested codec.
-/// Returns None if no HW backend supports it.
-pub fn select(codec: &VideoCodec) -> Option<HwEncoder> {
-    probe().into_iter().find(|hw| hw.codecs().contains(codec))
-}
 
-// ─── Stub encoder backend (real impl uses ffmpeg-next) ────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub struct HwEncoderBackend {
-    hw: HwEncoder,
-    codec: VideoCodec,
-}
-
-impl HwEncoderBackend {
-    pub fn new(
-        hw: HwEncoder,
-        codec: VideoCodec,
-        _w: u32,
-        _h: u32,
-        _fps: u8,
-        _bps: u32,
-    ) -> Result<Self> {
-        if !hw.codecs().contains(&codec) {
-            bail!("{hw:?} does not support codec {codec:?}");
+    /// `codecs()` feeds a log line and, eventually, backend selection. An empty
+    /// list would silently mean "this silicon can encode nothing".
+    #[test]
+    fn every_encoder_lists_only_hardware_codecs() {
+        let all = [
+            HwEncoder::Nvenc,
+            HwEncoder::Amf,
+            HwEncoder::Qsv,
+            HwEncoder::VideoToolbox,
+            HwEncoder::Vaapi,
+        ];
+        for hw in all {
+            let codecs = hw.codecs();
+            assert!(!codecs.is_empty(), "{hw:?} advertises no codecs");
+            for c in codecs {
+                assert!(
+                    matches!(c, VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265),
+                    "{hw:?} lists {c:?}, which is a software codec in this project"
+                );
+            }
+            assert!(!hw.name().is_empty());
         }
-        // TODO: ffmpeg-next AVCodecContext init with hw_device_ctx
-        // hwaccel name = match hw { Nvenc => "cuda", VideoToolbox => "videotoolbox", ... }
-        Ok(Self { hw, codec })
     }
-}
 
-impl EncoderBackend for HwEncoderBackend {
-    fn encode(
-        &mut self,
-        _i420: &[u8],
-        _w: u32,
-        _h: u32,
-        _ts: u64,
-        _kf: bool,
-    ) -> Result<Option<EncodedPacket>> {
-        // TODO: avcodec_send_frame → avcodec_receive_packet
-        bail!("HW encoder not yet implemented — fall back to VpxEncoder")
+    /// H.264 is the floor: every backend here predates the codecs above it, so
+    /// a list missing it means the entry was mistyped.
+    #[test]
+    fn every_encoder_supports_h264() {
+        for hw in [
+            HwEncoder::Nvenc,
+            HwEncoder::Amf,
+            HwEncoder::Qsv,
+            HwEncoder::VideoToolbox,
+            HwEncoder::Vaapi,
+        ] {
+            assert!(hw.codecs().contains(&VideoCodec::H264), "{hw:?}");
+        }
     }
-    fn request_keyframe(&mut self) {}
-    fn update_bitrate(&mut self, _kbps: u32) {}
+
+    /// Duplicates would double-log and, once selection exists, make ordering
+    /// ambiguous. Also pins that probe never panics on this platform.
+    #[test]
+    fn probe_returns_no_duplicates() {
+        let found = probe();
+        for (i, a) in found.iter().enumerate() {
+            assert!(
+                !found[i + 1..].contains(a),
+                "probe() reported {a:?} more than once"
+            );
+        }
+    }
 }
