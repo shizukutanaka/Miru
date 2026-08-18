@@ -9,6 +9,27 @@
 # up merged on eyeball review alone. That is how a missing struct field once
 # reached this branch: a compiler would have caught it in a second.
 #
+# Before assuming you are in that situation, CHECK — the failure is narrower
+# than it looks, and each part has a different fix:
+#
+#   rustc missing?          Probably just the rust-toolchain.toml pin failing to
+#                           download. `ls ~/.rustup/toolchains` and set
+#                           RUSTUP_TOOLCHAIN to one that is there. This script
+#                           already does that automatically.
+#   ffmpeg/libvpx/pipewire  Try `sudo apt-get update` FIRST. A stale package
+#   headers missing?        index 404s on every .deb and looks exactly like a
+#                           blocked network. After updating, libavcodec-dev,
+#                           libvpx-dev and libpipewire-0.3-dev install normally.
+#   cargo cannot fetch?     Check which host is refused. index.crates.io is
+#                           frequently allowed while static.crates.io — where
+#                           the .crate tarballs live — is not, and only the
+#                           second one stops the build. `cargo fetch` prints
+#                           "CONNECT tunnel failed, response 403"; the host is
+#                           named in $HTTPS_PROXY/__agentproxy/status under
+#                           recentRelayFailures. If static.crates.io is denied,
+#                           no amount of local setup will help and the checks
+#                           below are the ceiling.
+#
 # These checks do not need any dependency to be downloaded:
 #
 #   1. Parse every tracked .rs file (rustfmt parses; it resolves nothing).
