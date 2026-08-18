@@ -157,8 +157,8 @@ run_standalone backpressure crates/miru-host/src/backpressure.rs "$TMP/tracing_s
 # Modules with a small external surface can also run, via a generated harness
 # that extracts the real protocol types (so they cannot drift) and stubs only
 # the OS-touching calls. See scripts/offline_harness.py.
-run_harness() { # <label> <module> <type-source>:<Types...>
-  local label=$1 module=$2 types=$3
+run_harness() { # <label> <module> [<type-source>:<Types...>]
+  local label=$1 module=$2 types=${3:-}
   if ! python3 scripts/offline_harness.py --module "$module" --out "$TMP/$label.rs" \
         --types "$types" 2>"$TMP/$label.gen"; then
     fail "$label (harness)"; sed 's/^/       /' "$TMP/$label.gen" | head -5; return
@@ -184,6 +184,12 @@ run_harness qos crates/miru-host/src/qos.rs \
 
 run_harness codec_negotiation crates/miru-common/src/codec.rs \
   crates/miru-common/src/message.rs:VideoCodec,AudioCodec
+
+# --types omitted: these need only the anyhow/tracing stubs.
+# miru-sandbox was tried and does not qualify — it declares platform submodules
+# (`mod linux;`) that a single-file harness cannot supply.
+run_harness wol          crates/miru-common/src/wol.rs
+run_harness parent_check crates/miru-mcp/src/parent_check.rs
 
 run_harness hw_probe crates/miru-codec/src/hw.rs \
   crates/miru-common/src/message.rs:VideoCodec

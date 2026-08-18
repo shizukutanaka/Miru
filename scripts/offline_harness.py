@@ -155,16 +155,20 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument(
         "--types",
-        required=True,
-        help="<source.rs>:<TypeA>,<TypeB> — types to extract verbatim",
+        default="",
+        help="<source.rs>:<TypeA>,<TypeB> — types to extract verbatim. "
+        "Omit for a module that needs only the anyhow/tracing stubs.",
     )
     args = ap.parse_args()
 
-    type_src_path, names = args.types.split(":", 1)
-    with open(type_src_path) as f:
-        type_src = f.read()
-    wanted = [n.strip() for n in names.split(",")]
-    types = "\n\n".join(extract_item(type_src, n) for n in wanted)
+    wanted = []
+    types = ""
+    if args.types:
+        type_src_path, names = args.types.split(":", 1)
+        with open(type_src_path) as f:
+            type_src = f.read()
+        wanted = [n.strip() for n in names.split(",")]
+        types = "\n\n".join(extract_item(type_src, n) for n in wanted)
 
     harness = HARNESS_TMPL.format(
         types=types, input_stub=INPUT_STUB if "InputEvent" in wanted else ""
