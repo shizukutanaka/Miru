@@ -15,7 +15,9 @@
 #   2. Validate every Cargo.toml and the workspace graph (cargo metadata
 #      --no-deps resolves nothing, so it needs no registry).
 #   3. Compile and RUN the tests of modules that only use std, with plain
-#      rustc — no cargo, no registry.
+#      rustc — no cargo, no registry. Modules with a small external surface
+#      also run, against protocol types EXTRACTED from the real source so the
+#      stand-ins cannot drift (scripts/offline_harness.py).
 #   4. Frontend typecheck + unit tests (npm deps are usually reachable).
 #
 # THIS IS NOT A SUBSTITUTE for `cargo test --workspace`. It cannot catch a
@@ -119,6 +121,28 @@ SHIM
 
 run_standalone keymap  crates/miru-input/src/keymap.rs
 run_standalone backoff crates/miru-common/src/backoff.rs "$TMP/rand_shim.rs"
+
+# Modules with a small external surface can also run, via a generated harness
+# that extracts the real protocol types (so they cannot drift) and stubs only
+# the OS-touching calls. See scripts/offline_harness.py.
+run_harness() { # <label> <module> <type-source>:<Types...>
+  local label=$1 module=$2 types=$3
+  if ! python3 scripts/offline_harness.py --module "$module" --out "$TMP/$label.rs" \
+        --types "$types" 2>"$TMP/$label.gen"; then
+    fail "$label (harness)"; sed 's/^/       /' "$TMP/$label.gen" | head -5; return
+  fi
+  if ! rustc --edition 2021 --test "$TMP/$label.rs" -o "$TMP/$label" 2>"$TMP/$label.err"; then
+    fail "$label (compile)"; grep -E '^error' -A 4 "$TMP/$label.err" | head -20 | sed 's/^/       /'; return
+  fi
+  if "$TMP/$label" >"$TMP/$label.out" 2>&1; then
+    ok "$label — $(grep -Eo '[0-9]+ passed' "$TMP/$label.out" | head -1)"
+  else
+    fail "$label (tests)"; tail -20 "$TMP/$label.out" | sed 's/^/       /'
+  fi
+}
+
+run_harness input_handler crates/miru-host/src/input_handler.rs \
+  crates/miru-common/src/message.rs:MouseButton,InputKind,InputEvent,ClipboardFormat,ClipboardSync
 
 # ── 4. Frontend ──────────────────────────────────────────────────────────────
 step "Frontend (tsc + vitest)"
