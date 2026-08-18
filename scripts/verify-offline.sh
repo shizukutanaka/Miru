@@ -12,9 +12,11 @@
 # These checks do not need any dependency to be downloaded:
 #
 #   1. Parse every tracked .rs file (rustfmt parses; it resolves nothing).
-#   2. Compile and RUN the tests of modules that only use std, with plain
+#   2. Validate every Cargo.toml and the workspace graph (cargo metadata
+#      --no-deps resolves nothing, so it needs no registry).
+#   3. Compile and RUN the tests of modules that only use std, with plain
 #      rustc — no cargo, no registry.
-#   3. Frontend typecheck + unit tests (npm deps are usually reachable).
+#   4. Frontend typecheck + unit tests (npm deps are usually reachable).
 #
 # THIS IS NOT A SUBSTITUTE for `cargo test --workspace`. It cannot catch a
 # type error across crate boundaries, a wrong trait bound, or a bad API call
@@ -59,7 +61,18 @@ for f in $(git ls-files '*.rs'); do
 done
 [ "$FAILED" -eq 0 ] && ok "$count files parsed"
 
-# ── 2. Standalone module tests ───────────────────────────────────────────────
+# ── 2. Workspace manifests ───────────────────────────────────────────────────
+# --no-deps means cargo parses and validates every Cargo.toml and the workspace
+# graph without resolving or downloading anything. Catches a malformed manifest
+# or a dependency added to the wrong section.
+step "Workspace manifests (cargo metadata --offline)"
+if err=$(cargo metadata --offline --no-deps --format-version 1 2>&1 >/dev/null); then
+  ok "$(git ls-files '*/Cargo.toml' Cargo.toml | wc -l | tr -d ' ') manifests valid"
+else
+  fail "cargo metadata"; echo "$err" | head -10 | sed 's/^/       /'
+fi
+
+# ── 3. Standalone module tests ───────────────────────────────────────────────
 # Modules whose code and tests only touch std can be compiled and run directly.
 # Add a module here when it qualifies — it is the cheapest real verification
 # available in an offline environment.
@@ -107,7 +120,7 @@ SHIM
 run_standalone keymap  crates/miru-input/src/keymap.rs
 run_standalone backoff crates/miru-common/src/backoff.rs "$TMP/rand_shim.rs"
 
-# ── 3. Frontend ──────────────────────────────────────────────────────────────
+# ── 4. Frontend ──────────────────────────────────────────────────────────────
 step "Frontend (tsc + vitest)"
 UI=crates/miru-client/ui
 if [ -d "$UI/node_modules" ]; then
