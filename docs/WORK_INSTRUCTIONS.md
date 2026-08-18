@@ -11,16 +11,25 @@
 
 ## 0. 全タスク共通の前提(最初に読む)
 
-1. **最優先タスクは `cargo test --workspace` の初回実行**。本ブランチの Rust 変更は
-   全て「作成環境が crates.io 遮断でコンパイル不可」のまま目視レビューのみで
-   コミットされている(各コミットメッセージに明記)。ビルドできる環境に入ったら
-   何より先にこれを実行し、エラーをタスク E の手順で潰すこと。
-2. フロントエンドは検証済み: `cd crates/miru-client/ui && npm run typecheck && npm test`
-   (tsc エラーゼロ + Vitest 10件パス)。
-3. コミット規約: Conventional Commits (feat/fix/perf/refactor/test/docs/chore)。
+1. **最優先タスクは `cargo test --workspace` の初回実行**。本ブランチの Rust 変更の
+   多くは crates.io 遮断環境でコミットされている(各コミットメッセージに明記)。
+   ビルドできる環境に入ったら何より先にこれを実行し、エラーをタスク E で潰すこと。
+   **実際にこの経路で 1 件のコンパイルエラーが混入した**(`SessionEvent` にフィールドを
+   追加した際に `state.rs` の構築サイトが追随せず)ため、この警告は理論ではない。
+2. **crates.io が無くても回る検証がある**: `scripts/verify-offline.sh`。
+   全 `.rs` の構文チェック(rustfmt はパースのみで依存解決不要)+ std だけに依存する
+   モジュール(`keymap` / `backoff`)のテストを素の rustc で**実際に実行** + フロントの
+   tsc/vitest。**`cargo test` の代わりにはならない**(クレート境界の型エラーは検出不可)が、
+   「ビルドできないから何も確認していない」を防ぐ。
+   ピンされたツールチェーンが取得できない環境では `RUSTUP_TOOLCHAIN=stable` を付ける
+   (`ls ~/.rustup/toolchains` で確認)。**rustc 自体はインストール済みでも
+   `rust-toolchain.toml` のピンが取得不可だと全体が使えなくなる**点に注意。
+3. フロントエンドは検証済み: `cd crates/miru-client/ui && npm run typecheck && npm test`
+   (tsc エラーゼロ + Vitest 69件パス)。
+4. コミット規約: Conventional Commits (feat/fix/perf/refactor/test/docs/chore)。
    機能追加はテスト同 PR 必須。`unwrap()` 禁止(CI に予算ゲートあり、現在25個)。
    `unsafe` は `platform/` 配下のみ。
-4. CI はまだ `.github/workflows-proposed/` に隔離されている(リポジトリ管理者が
+5. CI はまだ `.github/workflows-proposed/` に隔離されている(リポジトリ管理者が
    `.github/workflows/` へ移動するまで動かない — 自動化エージェントには
    `workflows` 権限がなく移動不可)。
 

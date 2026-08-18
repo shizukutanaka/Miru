@@ -3347,6 +3347,7 @@ dependencies = [
  "flume",
  "libc",
  "miru-agent",
+ "miru-audio",
  "miru-auth",
  "miru-capture",
  "miru-codec",
