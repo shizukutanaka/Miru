@@ -119,8 +119,19 @@ mod rand {
 }
 SHIM
 
-run_standalone keymap  crates/miru-input/src/keymap.rs
-run_standalone backoff crates/miru-common/src/backoff.rs "$TMP/rand_shim.rs"
+# backpressure only uses std; the tracing macros are the sole outside call.
+cat > "$TMP/tracing_shim.rs" <<'SHIM'
+macro_rules! log_noop { ($($t:tt)*) => {} }
+mod tracing {
+    pub(crate) use log_noop as debug;
+    pub(crate) use log_noop as info;
+    pub(crate) use log_noop as warn;
+}
+SHIM
+
+run_standalone keymap       crates/miru-input/src/keymap.rs
+run_standalone backoff      crates/miru-common/src/backoff.rs "$TMP/rand_shim.rs"
+run_standalone backpressure crates/miru-host/src/backpressure.rs "$TMP/tracing_shim.rs"
 
 # Modules with a small external surface can also run, via a generated harness
 # that extracts the real protocol types (so they cannot drift) and stubs only
@@ -143,6 +154,15 @@ run_harness() { # <label> <module> <type-source>:<Types...>
 
 run_harness input_handler crates/miru-host/src/input_handler.rs \
   crates/miru-common/src/message.rs:MouseButton,InputKind,InputEvent,ClipboardFormat,ClipboardSync
+
+run_harness qos_bbr crates/miru-host/src/qos_bbr.rs \
+  crates/miru-common/src/message.rs:QosUpdate,QosHint
+
+run_harness qos crates/miru-host/src/qos.rs \
+  crates/miru-common/src/message.rs:QosUpdate
+
+run_harness codec_negotiation crates/miru-common/src/codec.rs \
+  crates/miru-common/src/message.rs:VideoCodec,AudioCodec
 
 # ── 4. Frontend ──────────────────────────────────────────────────────────────
 step "Frontend (tsc + vitest)"
