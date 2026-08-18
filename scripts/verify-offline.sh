@@ -34,7 +34,9 @@
 #
 #   1. Parse every tracked .rs file (rustfmt parses; it resolves nothing).
 #   2. Validate every Cargo.toml and the workspace graph (cargo metadata
-#      --no-deps resolves nothing, so it needs no registry).
+#      --no-deps resolves nothing, so it needs no registry), and check that no
+#      .rs file is orphaned — unreachable from any `mod` declaration, and so
+#      never compiled by cargo either.
 #   3. Compile and RUN the tests of modules that only use std, with plain
 #      rustc — no cargo, no registry. Modules with a small external surface
 #      also run, against protocol types EXTRACTED from the real source so the
@@ -93,6 +95,18 @@ if err=$(cargo metadata --offline --no-deps --format-version 1 2>&1 >/dev/null);
   ok "$(git ls-files '*/Cargo.toml' Cargo.toml | wc -l | tr -d ' ') manifests valid"
 else
   fail "cargo metadata"; echo "$err" | head -10 | sed 's/^/       /'
+fi
+
+# ── 2b. Module reachability ──────────────────────────────────────────────────
+# A .rs file that no `mod` declaration reaches is never compiled by anything,
+# so `cargo build` is silent about it. This check found three such files on this
+# branch, two of which were the stated implementations of unfinished features.
+step "Module reachability"
+if orphans=$(python3 scripts/check-module-reachability.py); then
+  ok "every .rs under src/ is reachable from a mod declaration"
+else
+  fail "unreachable module files (never compiled, tests never run):"
+  echo "$orphans" | sed 's/^/       /'
 fi
 
 # ── 3. Standalone module tests ───────────────────────────────────────────────
@@ -157,10 +171,14 @@ run_standalone backpressure crates/miru-host/src/backpressure.rs "$TMP/tracing_s
 # Modules with a small external surface can also run, via a generated harness
 # that extracts the real protocol types (so they cannot drift) and stubs only
 # the OS-touching calls. See scripts/offline_harness.py.
-run_harness() { # <label> <module> [<type-source>:<Types...>]
-  local label=$1 module=$2 types=${3:-}
+run_harness() { # <label> <module> [<type-source>:<Types...> | raw --types/--alias flags]
+  local label=$1 module=$2; shift 2
+  # A bare "<file>:<Types>" third argument is shorthand for a single --types.
+  local -a extra=()
+  if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then extra=(--types "$1"); shift; fi
+  extra+=("$@")
   if ! python3 scripts/offline_harness.py --module "$module" --out "$TMP/$label.rs" \
-        --types "$types" 2>"$TMP/$label.gen"; then
+        "${extra[@]}" 2>"$TMP/$label.gen"; then
     fail "$label (harness)"; sed 's/^/       /' "$TMP/$label.gen" | head -5; return
   fi
   if ! rustc --edition 2021 --test "$TMP/$label.rs" -o "$TMP/$label" 2>"$TMP/$label.err"; then
@@ -190,6 +208,16 @@ run_harness codec_negotiation crates/miru-common/src/codec.rs \
 # (`mod linux;`) that a single-file harness cannot supply.
 run_harness wol          crates/miru-common/src/wol.rs
 run_harness parent_check crates/miru-mcp/src/parent_check.rs
+
+# ffmpeg_enc is behind a feature that is off by default, so cargo would not
+# build it even once the registry is reachable. Its codec table is pure, and the
+# tests cross-check it against the real HwEncoder::codecs().
+run_harness ffmpeg_enc crates/miru-codec/src/ffmpeg_enc.rs \
+  --types crates/miru-common/src/message.rs:VideoCodec \
+  --types crates/miru-codec/src/hw.rs:HwEncoder \
+  --types crates/miru-codec/src/lib.rs:EncodedPacket \
+  --types crates/miru-codec/src/encoder.rs:EncoderBackend \
+  --alias encoder --alias hw
 
 run_harness hw_probe crates/miru-codec/src/hw.rs \
   crates/miru-common/src/message.rs:VideoCodec

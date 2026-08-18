@@ -94,3 +94,67 @@ impl EncoderBackend for FFmpegEncoder {
     fn request_keyframe(&mut self) {}
     fn update_bitrate(&mut self, _kbps: u32) {}
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HW: &[HwEncoder] = &[
+        HwEncoder::Nvenc,
+        HwEncoder::Amf,
+        HwEncoder::Qsv,
+        HwEncoder::VideoToolbox,
+        HwEncoder::Vaapi,
+    ];
+
+    /// The two tables must agree. `HwEncoder::codecs()` is what negotiation
+    /// offers to the viewer; `ffmpeg_codec_name` is what we can actually
+    /// instantiate. If the first promises a codec the second cannot name, the
+    /// session negotiates a codec and then fails to start the encoder.
+    #[test]
+    fn every_advertised_codec_has_an_ffmpeg_name() {
+        for &hw in HW {
+            for codec in hw.codecs() {
+                assert!(
+                    ffmpeg_codec_name(hw, codec).is_some(),
+                    "{hw:?} advertises {codec:?} but ffmpeg_codec_name has no entry"
+                );
+            }
+        }
+    }
+
+    /// And the reverse: naming an encoder we never advertise is dead weight at
+    /// best, and at worst means codecs() is missing a capability we have.
+    #[test]
+    fn every_ffmpeg_name_is_advertised() {
+        let all = [
+            VideoCodec::Av1,
+            VideoCodec::H265,
+            VideoCodec::H264,
+            VideoCodec::Vp9,
+            VideoCodec::Vp8,
+            VideoCodec::Jpeg,
+        ];
+        for &hw in HW {
+            for codec in &all {
+                if ffmpeg_codec_name(hw, codec).is_some() {
+                    assert!(
+                        hw.codecs().contains(codec),
+                        "ffmpeg_codec_name maps {hw:?}/{codec:?} but codecs() omits it"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Software-only codecs must never resolve to a hardware encoder — VP9/VP8
+    /// go through libvpx and JPEG through the always-available fallback.
+    #[test]
+    fn software_codecs_have_no_hardware_entry() {
+        for &hw in HW {
+            for codec in [VideoCodec::Vp9, VideoCodec::Vp8, VideoCodec::Jpeg] {
+                assert_eq!(ffmpeg_codec_name(hw, &codec), None, "{hw:?}/{codec:?}");
+            }
+        }
+    }
+}

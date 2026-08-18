@@ -9,6 +9,12 @@ pub mod jpeg;
 #[cfg(feature = "vpx")]
 pub mod vpx;
 
+// Was present as a file but never declared, so rustc did not compile it even
+// with --features ffmpeg. Declaring it does not change the default build
+// (default = []), but the code is now reachable and its tests run.
+#[cfg(feature = "ffmpeg")]
+pub mod ffmpeg_enc;
+
 pub use decoder::Decoder;
 pub use encoder::Encoder;
 pub use hw::{probe as probe_hw, HwEncoder};

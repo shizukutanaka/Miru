@@ -7,8 +7,9 @@
 //!
 //! **This module is diagnostics only.** It reports which encoder silicon is
 //! present; it does not encode anything. The encoding backend lives in
-//! ffmpeg_enc.rs behind the `ffmpeg` feature, and the working software path is
-//! vpx.rs. Do not derive a capability advertised to peers from `probe()` —
+//! ffmpeg_enc.rs behind the `ffmpeg` feature — which is a skeleton, not a
+//! backend: its encode() bails, and the `ffmpeg` feature pulls in no crate. The
+//! only working encode path is vpx.rs. Do not derive a capability advertised to peers from `probe()` —
 //! silicon being present says nothing about this build being able to use it.
 //! Use `crate::has_hw_encode()` for that.
 
