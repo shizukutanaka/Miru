@@ -182,3 +182,15 @@ Miru は「TeamViewer/AnyDesk 代替。完全セルフホスト可能、E2E 暗�
   ガードに見えて実効ゼロという最悪の形。削除しても実行時挙動は変わらない
   (呼ばれていないため)。警告自体が必要なら `main()` から
   `warn_if_insecure_tls_requested()` として呼ぶのが正しい形。
+
+### 2026-08 追補: 20件の最終処分
+
+| 群 | 件数 | 処分 |
+|----|------|------|
+| コア crate の自明なアクセサ(`try_next_frame` / `is_full_frame` / `on_audio_frame` / `skip_rate` / `rtt_min_ms` / `update_rtt`) | 6 | **削除済み**。`#[allow(dead_code)]` は「消すな」ではなく警告を黙らせた記録に過ぎず、git が履歴を保持する |
+| `quic.rs` | 9 | 保留 — 上記の製品判断待ち(本節冒頭) |
+| MCP/agent 凍結スコープ(`INVALID_REQUEST`/`TOKEN_INVALID`/`TOOL_DENIED`/`read_all`) | 4 | 保留 — roadmap §0 の凍結宣言に従い、凍結中コードは個別に削らない |
+| `safe_fs::open_for_read` | 1 | **残す** — O_NOFOLLOW 付きの安全 open。doc が file 送信ホスト側での使用予定を明記したセキュリティ API |
+
+残る判断は quic.rs の1問のみ。scan の健全性は fuzz ターゲット参照
+(`parse_stun_xor_mapped_fuzz` が正しく除外される)で確認済み。

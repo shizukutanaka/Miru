@@ -87,11 +87,6 @@ impl AudioCapturer {
         Ok(self.rx.recv()?)
     }
 
-    /// Non-blocking variant.
-    pub fn try_next_frame(&self) -> Option<AudioFrame> {
-        self.rx.try_recv().ok()
-    }
-
     fn find_loopback_device(host: &cpal::Host) -> Option<cpal::Device> {
         host.input_devices().ok()?.find(|d| {
             d.name()

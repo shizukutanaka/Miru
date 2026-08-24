@@ -52,11 +52,6 @@ impl SessionMetrics {
         self.total_bytes.fetch_add(encoded_bytes, Ordering::Relaxed);
     }
 
-    #[allow(dead_code)]
-    pub fn on_audio_frame(&self, encoded_bytes: u64) {
-        self.total_bytes.fetch_add(encoded_bytes, Ordering::Relaxed);
-    }
-
     /// Convert to a SessionMetadata for transparency commitment.
     #[cfg(feature = "agent")]
     pub fn snapshot(&self) -> SessionMetadata {

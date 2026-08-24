@@ -171,16 +171,6 @@ pub struct FrameStats {
     pub in_flight: u32,
 }
 
-impl FrameStats {
-    #[allow(dead_code)]
-    pub fn skip_rate(&self) -> f32 {
-        if self.captured == 0 {
-            return 0.0;
-        }
-        self.skipped as f32 / self.captured as f32
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -92,8 +92,4 @@ impl Connection {
     pub fn rtt_ms(&self) -> u32 {
         self.rtt.load(Ordering::Relaxed)
     }
-
-    pub fn update_rtt(&self, rtt: u32) {
-        self.rtt.store(rtt, Ordering::Relaxed);
-    }
 }

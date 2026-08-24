@@ -267,10 +267,6 @@ impl BbrQos {
     pub fn bitrate_kbps(&self) -> u32 {
         self.cur_bitrate_kbps
     }
-    #[allow(dead_code)]
-    pub fn rtt_min_ms(&self) -> Option<u32> {
-        self.rtt_min_us.map(|us| us / 1000)
-    }
 }
 
 #[cfg(test)]
