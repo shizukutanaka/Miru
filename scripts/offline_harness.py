@@ -196,6 +196,13 @@ def main() -> None:
         "Omit for a module that needs only the anyhow/tracing stubs.",
     )
     ap.add_argument(
+        "--prelude",
+        action="append",
+        default=[],
+        help="File of extra Rust spliced in before the module — for stubbing a "
+        "sibling module the harness cannot synthesise from a type list.",
+    )
+    ap.add_argument(
         "--alias",
         action="append",
         default=[],
@@ -223,6 +230,9 @@ def main() -> None:
         alias_mods="".join(ALIAS_TMPL % a for a in args.alias),
         input_stub=INPUT_STUB if "InputEvent" in wanted else "",
     )
+    for pre in args.prelude:
+        with open(pre) as f:
+            harness += "\n" + f.read()
 
     with open(args.module) as f:
         lines = f.read().split("\n")

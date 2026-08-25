@@ -9,11 +9,15 @@ pub mod jpeg;
 #[cfg(feature = "vpx")]
 pub mod vpx;
 
-// Was present as a file but never declared, so rustc did not compile it even
-// with --features ffmpeg. Declaring it does not change the default build
-// (default = []), but the code is now reachable and its tests run.
 #[cfg(feature = "ffmpeg")]
 pub mod ffmpeg_enc;
+
+/// Platform/FFI code. Per the workspace rule, all `unsafe` in this crate lives
+/// here.
+#[cfg(feature = "ffmpeg")]
+pub mod platform {
+    pub mod ffmpeg_ffi;
+}
 
 pub use decoder::Decoder;
 pub use encoder::Encoder;

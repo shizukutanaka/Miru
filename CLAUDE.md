@@ -15,7 +15,7 @@ miru/
 ├── crates/
 │   ├── miru-common/    プロトコル定義・X25519/ChaCha20暗号
 │   ├── miru-capture/   OS別キャプチャ (DXGI/CGDisplay/X11/PipeWire)
-│   ├── miru-codec/     VP9 (libvpx) + JPEG + HW probe (+ ffmpeg 骨組みのみ)
+│   ├── miru-codec/     VP9 (libvpx) + JPEG + HW probe + libavcodec FFI
 │   ├── miru-audio/     Opus エンコード/デコード/再生
 │   ├── miru-auth/      Ed25519 identity + PIN + TOFU + ACL
 │   ├── miru-transport/ QUIC + WebSocket relay + STUN/hole-punch + handshake
@@ -114,10 +114,10 @@ git tag v0.1.0 && git push origin v0.1.0
 - ✓ ADR 3件、SECURITY.md、CONTRIBUTING.md
 
 ### 残作業 (Sprint 4以降)
-- [ ] ffmpeg-next 実コード化 → AV1 HW
-      現状は**未着手**。`ffmpeg_enc.rs` はコーデック名の対応表と
-      `bail!` する `encode()` だけで、`ffmpeg` feature は依存クレートを
-      1つも引かない (`ffmpeg = []`)。まず ffmpeg-next を依存に追加する所から。
+- [x] ~~ffmpeg-next 実コード化 → AV1 HW~~ → **libavcodec 直接 FFI で実装済み**
+      `ffmpeg-next` は使わない。`csrc/miru_ffmpeg.c`(C シム)+ `build.rs`
+      + `platform/ffmpeg_ffi.rs` で **Rust 依存ゼロ**。実エンコード検証済み
+      (`verify-offline.sh`)。残は GPU 実機での nvenc/vaapi 確認のみ。
 - [ ] WebGL2 YUV パスを実通信フローで動作 (現在 JPEG プレビュー)
 - [ ] PipeWire DMA-BUF 実装 (Wayland zero-copy)
       現状は `platform/linux.rs` 内の `PipeWireCapturer` が `bail!` するのみ。

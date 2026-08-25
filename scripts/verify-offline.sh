@@ -209,7 +209,27 @@ run_harness parent_check crates/miru-mcp/src/parent_check.rs
 # ffmpeg_enc is behind a feature that is off by default, so cargo would not
 # build it even once the registry is reachable. Its codec table is pure, and the
 # tests cross-check it against the real HwEncoder::codecs().
+# The FFI is exercised for real further down; here it is stubbed so the codec
+# table's cross-check against HwEncoder::codecs() can run without libavcodec.
+cat > "$TMP/ffmpeg_ffi_stub.rs" <<'SHIM'
+#[allow(unused)]
+mod platform {
+    pub mod ffmpeg_ffi {
+        pub struct FfmpegEncoder;
+        impl FfmpegEncoder {
+            pub fn open(_n: &str, _w: u32, _h: u32, _f: u8, _b: u32) -> Option<Self> { None }
+            pub fn send(&mut self, _i: &[u8], _k: bool) -> Result<(), i32> { Ok(()) }
+            pub fn receive(&mut self) -> Result<Option<Packet>, i32> { Ok(None) }
+            pub fn set_bitrate(&mut self, _k: u32) {}
+        }
+        pub struct Packet { pub data: Vec<u8>, pub keyframe: bool }
+        pub fn encoder_compiled_in(_n: &str) -> bool { false }
+    }
+}
+SHIM
+
 run_harness ffmpeg_enc crates/miru-codec/src/ffmpeg_enc.rs \
+  --prelude "$TMP/ffmpeg_ffi_stub.rs" \
   --types crates/miru-common/src/message.rs:VideoCodec \
   --types crates/miru-codec/src/hw.rs:HwEncoder \
   --types crates/miru-codec/src/lib.rs:EncodedPacket \
@@ -218,6 +238,33 @@ run_harness ffmpeg_enc crates/miru-codec/src/ffmpeg_enc.rs \
 
 run_harness hw_probe crates/miru-codec/src/hw.rs \
   crates/miru-common/src/message.rs:VideoCodec
+
+# Native FFI: the libavcodec shim is C, so it needs a compile+link step rather
+# than a generated harness. Real encode, real library — the hardware encoders
+# take the identical path, only the codec name differs.
+step "libavcodec FFI (real encode)"
+if ! pkg-config --exists libavcodec libavutil 2>/dev/null; then
+  echo "  skip (no libavcodec-dev — apt-get install libavcodec-dev libavutil-dev)"
+elif ! command -v cc >/dev/null 2>&1; then
+  echo "  skip (no C compiler)"
+else
+  if cc -c -O2 -fPIC crates/miru-codec/csrc/miru_ffmpeg.c -o "$TMP/miru_ffmpeg.o" \
+       $(pkg-config --cflags libavcodec libavutil) 2>"$TMP/shim.err" \
+     && ar rcs "$TMP/libmiru_ffmpeg.a" "$TMP/miru_ffmpeg.o"; then
+    if rustc --edition 2021 --test crates/miru-codec/src/platform/ffmpeg_ffi.rs \
+         -L "$TMP" -l static=miru_ffmpeg -o "$TMP/ffmpeg_ffi" 2>"$TMP/ffi.err"; then
+      if "$TMP/ffmpeg_ffi" >"$TMP/ffi.out" 2>&1; then
+        ok "ffmpeg_ffi — $(grep -Eo '[0-9]+ passed' "$TMP/ffi.out" | head -1)"
+      else
+        fail "ffmpeg_ffi (tests)"; tail -20 "$TMP/ffi.out" | sed 's/^/       /'
+      fi
+    else
+      fail "ffmpeg_ffi (compile)"; grep -E '^error' -A4 "$TMP/ffi.err" | head -20 | sed 's/^/       /'
+    fi
+  else
+    fail "miru_ffmpeg.c (compile)"; head -10 "$TMP/shim.err" | sed 's/^/       /'
+  fi
+fi
 
 # ── 4. Frontend ──────────────────────────────────────────────────────────────
 step "Frontend (tsc + vitest)"

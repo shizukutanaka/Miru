@@ -17,4 +17,7 @@ image = { workspace = true }
 [features]
 default = []
 vpx = ["dep:vpx-sys"]   # VP9 encoding/decoding via libvpx
-ffmpeg = []              # Hardware encoding via ffmpeg-next (deferred to v0.3)
+# Hardware encoding via libavcodec. Intentionally pulls in NO Rust crate: the
+# binding is a C shim in csrc/ compiled by build.rs. Needs a C compiler and the
+# ffmpeg dev libraries at build time (apt: libavcodec-dev libavutil-dev).
+ffmpeg = []
