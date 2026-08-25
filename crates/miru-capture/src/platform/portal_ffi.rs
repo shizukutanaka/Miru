@@ -1,10 +1,9 @@
 //! Safe wrapper over the xdg-desktop-portal ScreenCast client
 //! (`csrc/miru_portal.c`).
 //!
-//! This is the negotiation half of Wayland capture: it performs the portal
-//! handshake and returns the PipeWire node id plus the file descriptor for the
-//! PipeWire remote. Reading frames from that node is the other half and is not
-//! implemented yet — see `docs/FEATURE_AUDIT.md` item 4.
+//! Two pieces: `ScreenCastSession` performs the portal handshake and yields a
+//! PipeWire node id plus a file descriptor for the PipeWire remote, and
+//! `PipeWireVideoStream` consumes frames from that node.
 //!
 //! All `unsafe` in this crate's ffmpeg/portal FFI lives under `platform/`, per
 //! the workspace rule. No crates.io dependency: the shim is plain C over GDBus
@@ -24,6 +23,88 @@ extern "C" {
     fn miru_portal_node_id(p: *mut c_void) -> c_uint;
     fn miru_portal_fd(p: *mut c_void) -> c_int;
     fn miru_portal_close(p: *mut c_void);
+
+    fn miru_pw_open(fd: c_int, node_id: c_uint) -> *mut c_void;
+    fn miru_pw_take(
+        s: *mut c_void,
+        out: *mut u8,
+        cap: c_int,
+        seq: *mut u64,
+        need: *mut c_int,
+    ) -> c_int;
+    fn miru_pw_errored(s: *mut c_void) -> c_int;
+    fn miru_pw_width(s: *mut c_void) -> c_int;
+    fn miru_pw_height(s: *mut c_void) -> c_int;
+    fn miru_pw_close(s: *mut c_void);
+}
+
+/// A video stream being consumed from a PipeWire node.
+///
+/// Frames are latest-wins: the newest frame replaces any the caller has not
+/// collected. A remote desktop never wants a backlog — replaying stale frames
+/// adds latency without adding information — which is the same policy the
+/// video pipeline already applies (ADR 0013).
+#[derive(Debug)]
+pub struct PipeWireVideoStream {
+    handle: *mut c_void,
+    seq: u64,
+    buf: Vec<u8>,
+}
+
+// The handle owns its own PipeWire thread loop and is not shared.
+unsafe impl Send for PipeWireVideoStream {}
+
+impl PipeWireVideoStream {
+    /// Connect to `node_id`. `fd` is the remote from a `ScreenCastSession`; use
+    /// `None` to connect to the session's default PipeWire daemon.
+    pub fn open(fd: Option<i32>, node_id: u32) -> Option<Self> {
+        let handle = unsafe { miru_pw_open(fd.unwrap_or(-1), node_id) };
+        if handle.is_null() {
+            return None;
+        }
+        Some(Self { handle, seq: 0, buf: Vec::new() })
+    }
+
+    /// Negotiated frame size, or None until the format has been agreed.
+    pub fn size(&self) -> Option<(u32, u32)> {
+        let (w, h) = unsafe { (miru_pw_width(self.handle), miru_pw_height(self.handle)) };
+        (w > 0 && h > 0).then_some((w as u32, h as u32))
+    }
+
+    /// True once the stream has entered its error state.
+    pub fn errored(&self) -> bool {
+        (unsafe { miru_pw_errored(self.handle) }) != 0
+    }
+
+    /// The newest frame, if one has arrived since the last call. Returns None
+    /// when nothing new is waiting, which is the common case between frames.
+    pub fn next_frame(&mut self) -> Option<&[u8]> {
+        let mut need: c_int = 0;
+        loop {
+            let cap = self.buf.len() as c_int;
+            let n = unsafe {
+                miru_pw_take(self.handle, self.buf.as_mut_ptr(), cap, &mut self.seq, &mut need)
+            };
+            if n > 0 {
+                return Some(&self.buf[..n as usize]);
+            }
+            if n == 0 {
+                return None;
+            }
+            // Too small: the shim reported the size it needs. Grow and retry
+            // rather than dropping the frame.
+            if need <= 0 || need as usize <= self.buf.len() {
+                return None;
+            }
+            self.buf.resize(need as usize, 0);
+        }
+    }
+}
+
+impl Drop for PipeWireVideoStream {
+    fn drop(&mut self) {
+        unsafe { miru_pw_close(self.handle) };
+    }
 }
 
 /// A negotiated ScreenCast session. Closing it revokes the grant.
@@ -125,6 +206,60 @@ mod tests {
         let err = ScreenCastSession::open(false).expect_err("no portal should fail");
         assert!(!err.stage.is_empty(), "failure must name the step that refused");
         assert!(format!("{err}").contains("ScreenCast"));
+    }
+
+    // The test-only producer, compiled by the offline gate but never by
+    // build.rs — a capture library has no business synthesising video.
+    extern "C" {
+        fn miru_testsrc_start() -> *mut c_void;
+        fn miru_testsrc_node_id(t: *mut c_void) -> c_uint;
+        fn miru_testsrc_width() -> c_int;
+        fn miru_testsrc_height() -> c_int;
+        fn miru_testsrc_stop(t: *mut c_void);
+    }
+
+    fn pipewire_present() -> bool {
+        std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|d| {
+            std::path::Path::new(&d).join("pipewire-0").exists()
+        })
+    }
+
+    /// Real frames, through a real PipeWire daemon: the test brings up its own
+    /// producer node and asserts the consumer negotiates the format and
+    /// receives whole frames. Needs no compositor and no portal.
+    #[test]
+    fn consumes_full_frames_from_a_real_pipewire_node() {
+        if !pipewire_present() {
+            return;
+        }
+        let src = unsafe { miru_testsrc_start() };
+        assert!(!src.is_null(), "could not start the test producer");
+        let node = unsafe { miru_testsrc_node_id(src) };
+        let (w, h) = unsafe { (miru_testsrc_width() as u32, miru_testsrc_height() as u32) };
+        assert!(node > 0, "producer never got a node id");
+
+        let mut got = 0;
+        {
+            let mut s = PipeWireVideoStream::open(None, node).expect("consumer open");
+            for _ in 0..200 {
+                if let Some(f) = s.next_frame() {
+                    assert_eq!(
+                        f.len(),
+                        (w * h * 4) as usize,
+                        "frame is not a whole {w}x{h} BGRx image"
+                    );
+                    got += 1;
+                    if got >= 3 {
+                        break;
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            assert_eq!(s.size(), Some((w, h)), "format negotiation disagreed");
+            assert!(!s.errored());
+        }
+        unsafe { miru_testsrc_stop(src) };
+        assert!(got >= 3, "only {got} frames arrived");
     }
 
     /// With a live portal, the handshake must reach at least `Start` — failing

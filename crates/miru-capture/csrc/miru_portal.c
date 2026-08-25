@@ -256,3 +256,178 @@ void miru_portal_close(Portal *p) {
     if (p->ctx) g_main_context_unref(p->ctx);
     g_free(p);
 }
+
+// ── PipeWire video stream consumer ───────────────────────────────────────────
+//
+// The portal hands back a node id and a file descriptor for the PipeWire
+// remote; this connects a stream to that node and delivers frames.
+//
+// Frames are latest-wins into a single slot rather than queued. A remote
+// desktop wants the newest frame, never a backlog: if the consumer falls
+// behind, replaying stale frames adds latency without adding information. This
+// mirrors the video pipeline's existing drop policy (ADR 0013).
+
+#include <spa/param/video/format-utils.h>
+#include <spa/utils/result.h>
+#include <pthread.h>
+
+typedef struct {
+    struct pw_thread_loop *loop;
+    struct pw_context *ctx;
+    struct pw_core *core;
+    struct pw_stream *stream;
+    struct spa_hook stream_listener;
+
+    struct spa_video_info_raw fmt;
+    int have_format;
+
+    pthread_mutex_t lock;
+    uint8_t *slot;        // latest frame, BGRx/RGBx as negotiated
+    size_t slot_len;
+    uint64_t seq;         // increments per delivered frame
+    int errored;
+} MiruPw;
+
+void miru_pw_close(MiruPw *s);
+
+static void on_param_changed(void *data, uint32_t id, const struct spa_pod *param) {
+    MiruPw *s = data;
+    if (!param || id != SPA_PARAM_Format) return;
+    uint32_t mt, mst;
+    if (spa_format_parse(param, &mt, &mst) < 0) return;
+    if (mt != SPA_MEDIA_TYPE_video || mst != SPA_MEDIA_SUBTYPE_raw) return;
+    if (spa_format_video_raw_parse(param, &s->fmt) < 0) return;
+    s->have_format = 1;
+}
+
+static void on_process(void *data) {
+    MiruPw *s = data;
+    struct pw_buffer *b = pw_stream_dequeue_buffer(s->stream);
+    if (!b) return;
+    struct spa_buffer *buf = b->buffer;
+    if (buf->datas[0].data && buf->datas[0].chunk->size > 0) {
+        size_t n = buf->datas[0].chunk->size;
+        pthread_mutex_lock(&s->lock);
+        if (s->slot_len != n) {
+            free(s->slot);
+            s->slot = malloc(n);
+            s->slot_len = s->slot ? n : 0;
+        }
+        if (s->slot) {
+            memcpy(s->slot, buf->datas[0].data, n);
+            s->seq++;
+        }
+        pthread_mutex_unlock(&s->lock);
+    }
+    pw_stream_queue_buffer(s->stream, b);
+}
+
+static void on_state_changed(void *data, enum pw_stream_state old,
+                             enum pw_stream_state state, const char *error) {
+    (void)old; (void)error;
+    MiruPw *s = data;
+    if (state == PW_STREAM_STATE_ERROR) s->errored = 1;
+}
+
+static const struct pw_stream_events stream_events = {
+    PW_VERSION_STREAM_EVENTS,
+    .state_changed = on_state_changed,
+    .param_changed = on_param_changed,
+    .process = on_process,
+};
+
+/// Connect to `node_id`. `fd` is the PipeWire remote from the portal, or -1 to
+/// use the session's default daemon (which is what the tests do).
+MiruPw *miru_pw_open(int fd, unsigned node_id) {
+    pw_init(NULL, NULL);
+    MiruPw *s = calloc(1, sizeof(MiruPw));
+    if (!s) return NULL;
+    pthread_mutex_init(&s->lock, NULL);
+
+    s->loop = pw_thread_loop_new("miru-capture", NULL);
+    if (!s->loop) { miru_pw_close(s); return NULL; }
+    pw_thread_loop_lock(s->loop);
+
+    s->ctx = pw_context_new(pw_thread_loop_get_loop(s->loop), NULL, 0);
+    if (!s->ctx) goto fail;
+
+    s->core = (fd >= 0) ? pw_context_connect_fd(s->ctx, fd, NULL, 0)
+                        : pw_context_connect(s->ctx, NULL, 0);
+    if (!s->core) goto fail;
+
+    s->stream = pw_stream_new(s->core, "miru-capture",
+        pw_properties_new(PW_KEY_MEDIA_TYPE, "Video",
+                          PW_KEY_MEDIA_CATEGORY, "Capture",
+                          PW_KEY_MEDIA_ROLE, "Screen", NULL));
+    if (!s->stream) goto fail;
+    pw_stream_add_listener(s->stream, &s->stream_listener, &stream_events, s);
+
+    uint8_t pod_buf[1024];
+    struct spa_pod_builder pb = SPA_POD_BUILDER_INIT(pod_buf, sizeof(pod_buf));
+    const struct spa_pod *params[1];
+    params[0] = spa_pod_builder_add_object(&pb,
+        SPA_TYPE_OBJECT_Format, SPA_PARAM_EnumFormat,
+        SPA_FORMAT_mediaType,    SPA_POD_Id(SPA_MEDIA_TYPE_video),
+        SPA_FORMAT_mediaSubtype, SPA_POD_Id(SPA_MEDIA_SUBTYPE_raw),
+        // The count is every value INCLUDING the leading default, so this is
+        // 6: BGRx as preferred, then the five acceptable alternatives.
+        SPA_FORMAT_VIDEO_format, SPA_POD_CHOICE_ENUM_Id(6,
+            SPA_VIDEO_FORMAT_BGRx,
+            SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_RGBx,
+            SPA_VIDEO_FORMAT_BGRA, SPA_VIDEO_FORMAT_RGBA,
+            SPA_VIDEO_FORMAT_RGB),
+        SPA_FORMAT_VIDEO_size,      SPA_POD_CHOICE_RANGE_Rectangle(
+            &SPA_RECTANGLE(320, 240), &SPA_RECTANGLE(1, 1), &SPA_RECTANGLE(8192, 8192)),
+        SPA_FORMAT_VIDEO_framerate, SPA_POD_CHOICE_RANGE_Fraction(
+            &SPA_FRACTION(30, 1), &SPA_FRACTION(0, 1), &SPA_FRACTION(240, 1)));
+
+    if (pw_stream_connect(s->stream, PW_DIRECTION_INPUT, node_id,
+                          PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS,
+                          params, 1) < 0) goto fail;
+
+    pw_thread_loop_unlock(s->loop);
+    if (pw_thread_loop_start(s->loop) < 0) { miru_pw_close(s); return NULL; }
+    return s;
+
+fail:
+    pw_thread_loop_unlock(s->loop);
+    miru_pw_close(s);
+    return NULL;
+}
+
+/// Copy the newest frame if it is newer than `*seq`. Returns bytes written,
+/// 0 if nothing new, -1 if `cap` is too small (needed size in `*need`).
+int miru_pw_take(MiruPw *s, uint8_t *out, int cap, uint64_t *seq, int *need) {
+    if (!s) return -1;
+    pthread_mutex_lock(&s->lock);
+    int r = 0;
+    if (s->slot && s->seq > *seq) {
+        if ((int)s->slot_len > cap) {
+            *need = (int)s->slot_len;
+            r = -1;
+        } else {
+            memcpy(out, s->slot, s->slot_len);
+            *seq = s->seq;
+            r = (int)s->slot_len;
+        }
+    }
+    pthread_mutex_unlock(&s->lock);
+    return r;
+}
+
+int      miru_pw_errored(MiruPw *s) { return s ? s->errored : 1; }
+int      miru_pw_width(MiruPw *s)   { return s && s->have_format ? (int)s->fmt.size.width : 0; }
+int      miru_pw_height(MiruPw *s)  { return s && s->have_format ? (int)s->fmt.size.height : 0; }
+unsigned miru_pw_format(MiruPw *s)  { return s && s->have_format ? (unsigned)s->fmt.format : 0; }
+
+void miru_pw_close(MiruPw *s) {
+    if (!s) return;
+    if (s->loop) pw_thread_loop_stop(s->loop);
+    if (s->stream) pw_stream_destroy(s->stream);
+    if (s->core) pw_core_disconnect(s->core);
+    if (s->ctx) pw_context_destroy(s->ctx);
+    if (s->loop) pw_thread_loop_destroy(s->loop);
+    pthread_mutex_destroy(&s->lock);
+    free(s->slot);
+    free(s);
+}

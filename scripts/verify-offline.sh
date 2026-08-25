@@ -276,9 +276,12 @@ elif ! command -v cc >/dev/null 2>&1; then
   echo "  skip (no C compiler)"
 else
   PKGS="gio-2.0 glib-2.0 gobject-2.0 libpipewire-0.3"
+  # miru_pw_testsrc.c is test scaffolding: the gate links it, build.rs never does.
   if cc -c -O2 -fPIC crates/miru-capture/csrc/miru_portal.c -o "$TMP/miru_portal.o" \
        $(pkg-config --cflags $PKGS) 2>"$TMP/portal.err" \
-     && ar rcs "$TMP/libmiru_portal.a" "$TMP/miru_portal.o"; then
+     && cc -c -O2 -fPIC crates/miru-capture/csrc/miru_pw_testsrc.c -o "$TMP/miru_testsrc.o" \
+       $(pkg-config --cflags $PKGS) 2>>"$TMP/portal.err" \
+     && ar rcs "$TMP/libmiru_portal.a" "$TMP/miru_portal.o" "$TMP/miru_testsrc.o"; then
     if rustc --edition 2021 --test crates/miru-capture/src/platform/portal_ffi.rs \
          -L "$TMP" -l static=miru_portal $(pkg-config --libs-only-L $PKGS) \
          -o "$TMP/portal_ffi" 2>"$TMP/pffi.err"; then
