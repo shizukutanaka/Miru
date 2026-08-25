@@ -31,6 +31,10 @@ pub mod platform {
 pub mod platform {
     pub mod linux;
     pub use linux::LinuxCapturer as PlatformCapturer;
+
+    /// Portal/PipeWire FFI. All `unsafe` for the Wayland path lives here.
+    #[cfg(feature = "pipewire")]
+    pub mod portal_ffi;
 }
 
 use anyhow::Result;

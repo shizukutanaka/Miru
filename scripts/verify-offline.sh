@@ -266,6 +266,35 @@ else
   fi
 fi
 
+# The portal client is C over GDBus + libpipewire. Compiling and running it
+# checks the negotiation logic and the typed error path; whether a real capture
+# can start depends on a live compositor, which the test detects and adapts to.
+step "xdg-desktop-portal ScreenCast client"
+if ! pkg-config --exists gio-2.0 libpipewire-0.3 2>/dev/null; then
+  echo "  skip (no glib/pipewire dev — apt-get install libglib2.0-dev libpipewire-0.3-dev)"
+elif ! command -v cc >/dev/null 2>&1; then
+  echo "  skip (no C compiler)"
+else
+  PKGS="gio-2.0 glib-2.0 gobject-2.0 libpipewire-0.3"
+  if cc -c -O2 -fPIC crates/miru-capture/csrc/miru_portal.c -o "$TMP/miru_portal.o" \
+       $(pkg-config --cflags $PKGS) 2>"$TMP/portal.err" \
+     && ar rcs "$TMP/libmiru_portal.a" "$TMP/miru_portal.o"; then
+    if rustc --edition 2021 --test crates/miru-capture/src/platform/portal_ffi.rs \
+         -L "$TMP" -l static=miru_portal $(pkg-config --libs-only-L $PKGS) \
+         -o "$TMP/portal_ffi" 2>"$TMP/pffi.err"; then
+      if "$TMP/portal_ffi" >"$TMP/pffi.out" 2>&1; then
+        ok "portal_ffi — $(grep -Eo '[0-9]+ passed' "$TMP/pffi.out" | head -1)"
+      else
+        fail "portal_ffi (tests)"; tail -20 "$TMP/pffi.out" | sed 's/^/       /'
+      fi
+    else
+      fail "portal_ffi (compile)"; grep -E '^error' -A4 "$TMP/pffi.err" | head -20 | sed 's/^/       /'
+    fi
+  else
+    fail "miru_portal.c (compile)"; head -10 "$TMP/portal.err" | sed 's/^/       /'
+  fi
+fi
+
 # ── 4. Frontend ──────────────────────────────────────────────────────────────
 step "Frontend (tsc + vitest)"
 UI=crates/miru-client/ui
