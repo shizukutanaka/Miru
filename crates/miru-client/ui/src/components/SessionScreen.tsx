@@ -279,17 +279,18 @@ export function SessionScreen({ onDisconnect }: Props) {
     };
     let lastPinchDist = 0;
     // Owns the left-button state so a release is only ever sent when a press
-    // is actually outstanding (see lib/touch-gestures.ts).
+    // is actually outstanding, and defers it until the gesture is known so a
+    // long press can become a right click (see lib/touch-gestures.ts).
     const gestures = new TouchGestures();
 
     const applyTouch = (actions: TouchAction[]) => {
       for (const a of actions) {
         moves.flush();
         sendInputRef.current({
-          kind: a.type === "press_left" ? "mouse_down" : "mouse_up",
+          kind: a.type.startsWith("press_") ? "mouse_down" : "mouse_up",
           x: a.x,
           y: a.y,
-          button: "left",
+          button: a.type.endsWith("_right") ? "right" : "left",
         });
       }
     };
@@ -299,7 +300,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       const pos =
         e.touches.length > 0 ? normTouch(e.touches[0]) : { x: 0.5, y: 0.5 };
       if (e.touches.length === 1) moves.push(pos.x, pos.y);
-      applyTouch(gestures.start(e.touches.length, pos));
+      applyTouch(gestures.start(e.touches.length, pos, performance.now()));
       if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -310,7 +311,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       e.preventDefault();
       if (e.touches.length === 1) {
         const { x, y } = normTouch(e.touches[0]);
-        gestures.move(1, { x, y });
+        applyTouch(gestures.move(1, { x, y }));
         moves.push(x, y);
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
@@ -328,7 +329,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       e.preventDefault();
       // Releases only if a press is outstanding — a two-finger scroll never
       // pressed, and touchend fires once per finger.
-      applyTouch(gestures.end());
+      applyTouch(gestures.end(performance.now()));
       if (e.touches.length < 2) lastPinchDist = 0;
     };
 
