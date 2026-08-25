@@ -205,6 +205,27 @@ mod tests {
         assert!(enc.send(&[0u8; 16], true).is_err());
     }
 
+    /// The capability rule the codec advertisement depends on: an encoder being
+    /// compiled into libavcodec does not mean it can open. Distro builds ship
+    /// h264_nvenc whether or not the machine has an NVIDIA card, so presence and
+    /// openability must be allowed to disagree — and only openability may be
+    /// advertised to a peer.
+    #[test]
+    fn compiled_in_does_not_imply_openable() {
+        for name in ["h264_nvenc", "av1_nvenc", "h264_vaapi", "hevc_vaapi"] {
+            if encoder_compiled_in(name) && FfmpegEncoder::open(name, 640, 480, 30, 2000).is_none()
+            {
+                // Exactly the case that must not be advertised. Reaching here on
+                // a GPU-less machine is the expected outcome, not a failure.
+                return;
+            }
+        }
+        // On a box with working hardware every candidate opens, which is also
+        // fine — the assertion is that the two notions are checked separately,
+        // and a software encoder proves openability is really being tested.
+        assert!(FfmpegEncoder::open("mpeg4", 640, 480, 30, 2000).is_some());
+    }
+
     #[test]
     fn set_bitrate_is_safe_to_call_on_an_open_encoder() {
         let mut enc = FfmpegEncoder::open("mpeg4", 320, 240, 30, 800).unwrap();

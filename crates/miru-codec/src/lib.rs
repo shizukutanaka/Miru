@@ -45,18 +45,42 @@ pub struct DecodedFrame {
 
 /// Codecs this build can actually ENCODE, in negotiation priority order.
 ///
-/// Deliberately excludes hardware codecs (H264/H265/AV1): `probe_hw()` can
-/// detect the silicon, but `HwEncoderBackend::encode` is still a stub, so
-/// advertising them would let a viewer negotiate a codec whose session dies
-/// on the first frame. Re-add them when the FFmpeg backend lands (v0.2+).
+/// The rule is that everything listed here must be constructible by
+/// `Encoder::new` right now — a viewer that negotiates a codec from this list
+/// must not get a session that dies on the first frame. Hardware codecs are
+/// therefore gated on an encoder having genuinely opened, not on the silicon
+/// being detected; see `hw_codecs_that_open()`.
 pub fn available_codecs() -> Vec<VideoCodec> {
     // JPEG fallback always available (no external codec dep).
     // vpx feature adds VP9/VP8 (royalty-free, software-encoded).
-    // HW codecs (H264/H265/AV1) excluded until the FFmpeg backend lands.
+    #[allow(unused_mut)]
+    let mut v = Vec::new();
+    // Hardware codecs first: negotiation prefers earlier entries, and they are
+    // only listed when an encoder for them genuinely opened on this machine.
+    #[cfg(feature = "ffmpeg")]
+    v.extend_from_slice(hw_codecs_that_open());
     #[cfg(feature = "vpx")]
-    return vec![VideoCodec::Vp9, VideoCodec::Vp8, VideoCodec::Jpeg];
-    #[cfg(not(feature = "vpx"))]
-    vec![VideoCodec::Jpeg]
+    v.extend_from_slice(&[VideoCodec::Vp9, VideoCodec::Vp8]);
+    v.push(VideoCodec::Jpeg);
+    v
+}
+
+/// Hardware codecs for which an encoder actually opened on this machine.
+///
+/// Probed once by really opening each candidate at a small resolution, because
+/// `h264_nvenc` being compiled into libavcodec says nothing about a GPU being
+/// present. Cached: opening an encoder is far too expensive to repeat, and the
+/// answer cannot change within a process.
+#[cfg(feature = "ffmpeg")]
+fn hw_codecs_that_open() -> &'static [VideoCodec] {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Vec<VideoCodec>> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        [VideoCodec::Av1, VideoCodec::H265, VideoCodec::H264]
+            .into_iter()
+            .filter(|c| encoder::Encoder::new(c.clone(), 640, 480, 30, 2000).is_ok())
+            .collect()
+    })
 }
 
 /// Whether this build can actually encode using hardware.
