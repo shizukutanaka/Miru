@@ -307,9 +307,30 @@ pub struct InputEvent {
 #[serde(tag = "k", rename_all = "snake_case")]
 pub enum InputKind {
     MouseMove { x: f32, y: f32, display: u8 },
-    MouseDown { button: MouseButton, x: f32, y: f32 },
-    MouseUp { button: MouseButton, x: f32, y: f32 },
-    Scroll { dx: f32, dy: f32, x: f32, y: f32 },
+    MouseDown {
+        button: MouseButton,
+        x: f32,
+        y: f32,
+        /// Defaults to 0 so viewers that predate this field still parse; that
+        /// is the primary display, which is where they meant to click anyway.
+        #[serde(default)]
+        display: u8,
+    },
+    MouseUp {
+        button: MouseButton,
+        x: f32,
+        y: f32,
+        #[serde(default)]
+        display: u8,
+    },
+    Scroll {
+        dx: f32,
+        dy: f32,
+        x: f32,
+        y: f32,
+        #[serde(default)]
+        display: u8,
+    },
     /// `key` is the legacy browser `keyCode` (kept for older viewers).
     /// `code` is the W3C UI Events physical-key identifier ("KeyA", "Enter").
     /// Hosts MUST prefer `code` when present: `keyCode` is layout-dependent and
@@ -389,6 +410,17 @@ pub enum FileTransfer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplayInfo {
     pub index: u8,
+    /// Position of this display's top-left corner on the virtual desktop, in
+    /// pixels. Negative when a monitor sits left of or above the primary one.
+    ///
+    /// Defaulted for compatibility: an older host omits these and every display
+    /// lands at the origin, which is exactly the single-monitor behaviour that
+    /// shipped before. Without them the protocol cannot express a multi-monitor
+    /// layout at all, so pointer coordinates could not be resolved.
+    #[serde(default)]
+    pub x: i32,
+    #[serde(default)]
+    pub y: i32,
     pub width: u32,
     pub height: u32,
     pub refresh_hz: u8,

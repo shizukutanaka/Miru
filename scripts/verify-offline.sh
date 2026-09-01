@@ -192,13 +192,17 @@ run_harness() { # <label> <module> [<type-source>:<Types...> | raw --types/--ali
 }
 
 run_harness input_handler crates/miru-host/src/input_handler.rs \
-  crates/miru-common/src/message.rs:MouseButton,InputKind,InputEvent,ClipboardFormat,ClipboardSync
+  --types crates/miru-common/src/message.rs:MouseButton,InputKind,InputEvent,ClipboardFormat,ClipboardSync,DisplayInfo \
+  --inline-mod display_map=crates/miru-common/src/display_map.rs
 
 run_harness qos_bbr crates/miru-host/src/qos_bbr.rs \
   crates/miru-common/src/message.rs:QosUpdate,QosHint
 
 run_harness codec_negotiation crates/miru-common/src/codec.rs \
   crates/miru-common/src/message.rs:VideoCodec,AudioCodec
+
+run_harness display_map crates/miru-common/src/display_map.rs \
+  crates/miru-common/src/message.rs:DisplayInfo
 
 # --types omitted: these need only the anyhow/tracing stubs.
 # miru-sandbox was tried and does not qualify — it declares platform submodules

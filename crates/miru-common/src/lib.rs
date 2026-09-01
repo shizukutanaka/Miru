@@ -4,6 +4,7 @@
 //!      Both host and client compile this; no duplication.
 
 pub mod backoff;
+pub mod display_map;
 pub mod codec;
 pub mod crypto;
 pub mod error;

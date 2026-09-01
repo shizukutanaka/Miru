@@ -152,7 +152,7 @@ pub mod message {{
 }}
 mod miru_common {{
     pub(crate) use super::message;
-}}
+{inline_mods}}}
 // Extracted types are also visible at the crate root, for modules that refer to
 // their own crate's items as `crate::Thing`.
 #[allow(unused_imports)]
@@ -163,6 +163,17 @@ pub use message::*;
 # to exist. Rather than model the real module tree, every alias re-exports the
 # whole extracted set — enough to resolve the path, and it cannot invent a type
 # that was not extracted from real source.
+# A module inlined from real source, so a dependency between two modules of the
+# same crate is exercised as written rather than stubbed. The body keeps its
+# `crate::message::...` paths working because `message` is emitted at the crate
+# root too.
+INLINE_TMPL = """
+#[allow(unused)]
+pub mod %s {
+%s
+}
+"""
+
 ALIAS_TMPL = """
 #[allow(unused_imports)]
 pub mod %s {
@@ -196,6 +207,14 @@ def main() -> None:
         "Omit for a module that needs only the anyhow/tracing stubs.",
     )
     ap.add_argument(
+        "--inline-mod",
+        action="append",
+        default=[],
+        metavar="NAME=PATH",
+        help="Inline a real module of the same crate (its #[cfg(test)] block is "
+        "dropped), so cross-module use is compiled against the real code.",
+    )
+    ap.add_argument(
         "--prelude",
         action="append",
         default=[],
@@ -225,8 +244,21 @@ def main() -> None:
             blocks.extend(extract_inherent_impls(type_src, n))
     types = "\n\n".join(blocks)
 
+    inline_mods = ""
+    for spec in args.inline_mod:
+        name, path = spec.split("=", 1)
+        with open(path) as f:
+            body = f.read()
+        # Tests of the inlined module are not the subject here, and they would
+        # pull in helpers this harness has no reason to provide.
+        cut = re.search(r"^#\[cfg\(test\)\]", body, re.M)
+        if cut:
+            body = body[: cut.start()]
+        inline_mods += INLINE_TMPL % (name, body)
+
     harness = HARNESS_TMPL.format(
         types=types,
+        inline_mods=inline_mods,
         alias_mods="".join(ALIAS_TMPL % a for a in args.alias),
         input_stub=INPUT_STUB if "InputEvent" in wanted else "",
     )
