@@ -451,6 +451,8 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         .unwrap_or_default()
         .into_iter()
         .map(|d| miru_common::message::DisplayInfo {
+            x: d.x,
+            y: d.y,
             index: d.index,
             width: d.width,
             height: d.height,

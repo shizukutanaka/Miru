@@ -212,6 +212,8 @@ impl X11Capturer {
                 .iter()
                 .enumerate()
                 .map(|(i, m)| DisplayInfo {
+                    x: m.x as i32,
+                    y: m.y as i32,
                     index: i as u8,
                     width: m.width as u32,
                     height: m.height as u32,
@@ -227,6 +229,8 @@ impl X11Capturer {
         // Fallback: single full-root display.
         let screen = &self.conn.setup().roots[self.screen_num];
         Ok(vec![DisplayInfo {
+            x: 0,
+            y: 0,
             index: 0,
             width: screen.width_in_pixels as u32,
             height: screen.height_in_pixels as u32,
@@ -362,6 +366,8 @@ impl PipeWireCapturer {
     fn displays(&self) -> Result<Vec<DisplayInfo>> {
         let (width, height) = self.stream.size().unwrap_or((0, 0));
         Ok(vec![DisplayInfo {
+            x: 0,
+            y: 0,
             index: 0,
             name: "PipeWire (portal)".into(),
             width,

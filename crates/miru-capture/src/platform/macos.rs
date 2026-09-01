@@ -57,8 +57,13 @@ impl MacosCapturer {
             .filter_map(|(i, &id)| {
                 let dsp = CGDisplay::new(id);
                 let mode = dsp.display_mode()?;
+                // Origin on the virtual desktop, so the host can map a
+                // display-relative pointer position onto it.
+                let bounds = dsp.bounds();
                 Some(DisplayInfo {
                     index: i as u8,
+                    x: bounds.origin.x as i32,
+                    y: bounds.origin.y as i32,
                     width: mode.width() as u32,
                     height: mode.height() as u32,
                     refresh_hz: mode.refresh_rate().max(0.0) as u8,

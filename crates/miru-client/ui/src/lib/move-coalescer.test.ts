@@ -48,7 +48,7 @@ describe("MoveCoalescer.push", () => {
     c.push(0.1, 0.1);
     c.push(0.9, 0.8);
     sched.fire();
-    expect(sent).toEqual([{ kind: "mouse_move", x: 0.9, y: 0.8 }]);
+    expect(sent).toEqual([{ kind: "mouse_move", x: 0.9, y: 0.8, display: 0 }]);
   });
 
   it("schedules a fresh frame for the next move after one fires", () => {
@@ -67,7 +67,7 @@ describe("MoveCoalescer.flush", () => {
     const { c, sent, sched } = mk();
     c.push(0.4, 0.5);
     c.flush();
-    expect(sent).toEqual([{ kind: "mouse_move", x: 0.4, y: 0.5 }]);
+    expect(sent).toEqual([{ kind: "mouse_move", x: 0.4, y: 0.5, display: 0 }]);
     expect(sched.cancelled).toBe(1);
     sched.fire(); // the cancelled frame must not duplicate the move
     expect(sent).toHaveLength(1);
@@ -91,7 +91,7 @@ describe("MoveCoalescer.flush", () => {
     sent.push({ kind: "mouse_down" });
     sched.fire();
     expect(sent).toEqual([
-      { kind: "mouse_move", x: 0.7, y: 0.7 },
+      { kind: "mouse_move", x: 0.7, y: 0.7, display: 0 },
       { kind: "mouse_down" },
     ]);
   });
@@ -138,5 +138,32 @@ describe("MoveCoalescer.cancel", () => {
       c.cancel();
       c.cancel();
     }).not.toThrow();
+  });
+});
+
+describe("MoveCoalescer display", () => {
+  it("reads the display at send time, not at construction", () => {
+    const sent: MoveMsg[] = [];
+    const sched = new FakeScheduler();
+    let display = 0;
+    const c = new MoveCoalescer((m) => sent.push(m), sched, () => display);
+
+    c.push(0.1, 0.1);
+    sched.fire();
+    // The user switches monitors between frames.
+    display = 2;
+    c.push(0.2, 0.2);
+    sched.fire();
+
+    expect(sent.map((m) => m.display)).toEqual([0, 2]);
+  });
+
+  it("defaults to the primary display when no source is given", () => {
+    const sent: MoveMsg[] = [];
+    const sched = new FakeScheduler();
+    const c = new MoveCoalescer((m) => sent.push(m), sched);
+    c.push(0.5, 0.5);
+    sched.fire();
+    expect(sent[0].display).toBe(0);
   });
 });

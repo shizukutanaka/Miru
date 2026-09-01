@@ -4,21 +4,34 @@ use anyhow::Result;
 use miru_common::message::{InputEvent, InputKind, MouseButton};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 
+/// Absolute mouse coordinates, mapped across the virtual desktop.
+///
+/// MOUSEEVENTF_ABSOLUTE alone maps to the primary monitor — Microsoft's
+/// MOUSEINPUT documentation is explicit about this — so a click meant for a
+/// secondary display landed on the primary. VIRTUALDESK maps the same 0..65535
+/// range across every monitor instead.
+///
+/// This is only correct because InputHandler now hands us coordinates already
+/// normalised to the whole virtual desktop. Setting this flag on its own would
+/// have moved the single-monitor case, which is why the two changes ship
+/// together. See miru-common/src/display_map.rs.
+const ABS_VIRTUAL: MOUSE_EVENT_FLAGS = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+
 pub fn inject(event: &InputEvent) -> Result<()> {
     match &event.kind {
         InputKind::MouseMove { x, y, .. } => mouse_event(
-            MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+            MOUSEEVENTF_MOVE | ABS_VIRTUAL,
             to_abs(*x),
             to_abs(*y),
             0,
         ),
-        InputKind::MouseDown { button, x, y } => {
+        InputKind::MouseDown { button, x, y, .. } => {
             let (flags, data) = mouse_down_flags(button);
-            mouse_event(flags, to_abs(*x), to_abs(*y), data)
+            mouse_event(flags | ABS_VIRTUAL, to_abs(*x), to_abs(*y), data)
         }
-        InputKind::MouseUp { button, x, y } => {
+        InputKind::MouseUp { button, x, y, .. } => {
             let (flags, data) = mouse_up_flags(button);
-            mouse_event(flags, to_abs(*x), to_abs(*y), data)
+            mouse_event(flags | ABS_VIRTUAL, to_abs(*x), to_abs(*y), data)
         }
         InputKind::Scroll { dx, dy, .. } => {
             if *dy != 0.0 {

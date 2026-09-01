@@ -33,7 +33,7 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             ev.post(CGEventTapLocation::HID);
         }
 
-        InputKind::MouseDown { button, x, y } => {
+        InputKind::MouseDown { button, x, y, .. } => {
             let pt = screen_point(*x, *y);
             let (ev_type, cg_btn) = mouse_down_type(button);
             let ev = CGEvent::new_mouse_event(src, ev_type, pt, cg_btn)
@@ -41,7 +41,7 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             ev.post(CGEventTapLocation::HID);
         }
 
-        InputKind::MouseUp { button, x, y } => {
+        InputKind::MouseUp { button, x, y, .. } => {
             let pt = screen_point(*x, *y);
             let (ev_type, cg_btn) = mouse_up_type(button);
             let ev = CGEvent::new_mouse_event(src, ev_type, pt, cg_btn)
@@ -101,13 +101,52 @@ fn cg_code(legacy_key: u32, code: &Option<String>) -> CGKeyCode {
         .unwrap_or(legacy_key as CGKeyCode)
 }
 
+/// Map a virtual-desktop-normalised position to global CGEvent coordinates.
+///
+/// CGEvent works in a single global space spanning every display, so the whole
+/// virtual desktop is the right denominator. This previously scaled by
+/// `CGDisplay::main().bounds()`, which put every click on the primary screen no
+/// matter which display the viewer had selected.
+///
+/// The bounds are taken from the OS rather than from the protocol's
+/// DisplayInfo: CoreGraphics already knows the layout, and reading it here
+/// keeps injection correct even if the captured layout is stale.
 fn screen_point(x: f32, y: f32) -> CGPoint {
-    // x, y are 0.0–1.0 normalized — scale to primary display resolution.
-    let bounds = CGDisplay::main().bounds();
+    let (origin, size) = virtual_desktop_bounds();
     CGPoint::new(
-        x as f64 * bounds.size.width,
-        y as f64 * bounds.size.height,
+        origin.0 + f64::from(x) * size.0,
+        origin.1 + f64::from(y) * size.1,
     )
+}
+
+/// Union of every active display's bounds, as ((x, y), (w, h)).
+///
+/// Falls back to the main display if enumeration fails — a wrong-but-usable
+/// pointer beats dropping the event.
+fn virtual_desktop_bounds() -> ((f64, f64), (f64, f64)) {
+    let main = CGDisplay::main().bounds();
+    let fallback = (
+        (main.origin.x, main.origin.y),
+        (main.size.width, main.size.height),
+    );
+    let Ok(active) = CGDisplay::active_displays() else {
+        return fallback;
+    };
+    let mut min_x = f64::MAX;
+    let mut min_y = f64::MAX;
+    let mut max_x = f64::MIN;
+    let mut max_y = f64::MIN;
+    for id in active {
+        let b = CGDisplay::new(id).bounds();
+        min_x = min_x.min(b.origin.x);
+        min_y = min_y.min(b.origin.y);
+        max_x = max_x.max(b.origin.x + b.size.width);
+        max_y = max_y.max(b.origin.y + b.size.height);
+    }
+    if !(min_x.is_finite() && min_y.is_finite()) || max_x <= min_x || max_y <= min_y {
+        return fallback;
+    }
+    ((min_x, min_y), (max_x - min_x, max_y - min_y))
 }
 
 fn modifier_flags(mods: u8) -> CGEventFlags {

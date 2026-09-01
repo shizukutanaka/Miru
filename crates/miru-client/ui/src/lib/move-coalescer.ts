@@ -22,9 +22,15 @@ export interface MoveMsg {
   kind: "mouse_move";
   x: number;
   y: number;
+  /** Display the coordinates are relative to; the host maps it to the desktop. */
+  display: number;
 }
 
 export type MoveSend = (msg: MoveMsg) => void;
+
+/** Reads the display currently being watched, at send time rather than at
+ * construction — the viewer can switch displays mid-session. */
+export type DisplaySource = () => number;
 
 /** Injectable so tests can drive frames deterministically under node. */
 export interface Scheduler {
@@ -49,6 +55,8 @@ export class MoveCoalescer {
   constructor(
     private send: MoveSend,
     private scheduler: Scheduler = rafScheduler,
+    /** Defaults to the primary display, which is the single-monitor case. */
+    private display: DisplaySource = () => 0,
   ) {}
 
   /** Record a position. Only the newest survives until the frame fires. */
@@ -65,7 +73,7 @@ export class MoveCoalescer {
     const p = this.pending;
     this.pending = null;
     if (p && !this.disposed) {
-      this.send({ kind: "mouse_move", x: p.x, y: p.y });
+      this.send({ kind: "mouse_move", x: p.x, y: p.y, display: this.display() });
     }
   }
 
@@ -88,7 +96,7 @@ export class MoveCoalescer {
     }
     const p = this.pending;
     this.pending = null;
-    this.send({ kind: "mouse_move", x: p.x, y: p.y });
+    this.send({ kind: "mouse_move", x: p.x, y: p.y, display: this.display() });
   }
 
   /**

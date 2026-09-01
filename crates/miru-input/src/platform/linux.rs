@@ -249,11 +249,11 @@ pub fn inject(event: &InputEvent) -> Result<()> {
 
     match &event.kind {
         InputKind::MouseMove { x, y, .. } => dev.mouse_move_abs(*x, *y),
-        InputKind::MouseDown { button, x, y } => {
+        InputKind::MouseDown { button, x, y, .. } => {
             dev.mouse_move_abs(*x, *y);
             dev.mouse_button(btn_code(button), true);
         }
-        InputKind::MouseUp { button, x, y } => {
+        InputKind::MouseUp { button, x, y, .. } => {
             dev.mouse_move_abs(*x, *y);
             dev.mouse_button(btn_code(button), false);
         }

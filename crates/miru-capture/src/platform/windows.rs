@@ -186,6 +186,11 @@ impl ScreenCapturer for WindowsCapturer {
                 let w = (r.right - r.left).max(0) as u32;
                 let h = (r.bottom - r.top).max(0) as u32;
                 infos.push(DisplayInfo {
+                    // DesktopCoordinates is already the virtual-desktop rect;
+                    // left/top are negative for a monitor placed left of or
+                    // above the primary.
+                    x: r.left,
+                    y: r.top,
                     index: i as u8,
                     width: w,
                     height: h,

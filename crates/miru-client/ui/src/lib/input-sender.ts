@@ -32,6 +32,8 @@ export interface InputMsg {
   code?: string;
   dx?: number;
   dy?: number;
+  /** Host display the coordinates are relative to. */
+  display?: number;
   text?: string;
 }
 

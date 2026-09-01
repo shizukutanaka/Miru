@@ -49,6 +49,9 @@ export function SessionScreen({ onDisconnect }: Props) {
   const sendInputRef = useRef(
     makeInputSender(() => inputReadyRef.current, api.sendInput),
   );
+  /// Read through a ref so the pointer handlers, registered once, still see
+  /// the display the user switched to afterwards.
+  const selectedDisplayRef = useRef(0);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
   const [hostPubAddr, setHostPubAddr] = useState<string | null>(null);
 
@@ -241,7 +244,11 @@ export function SessionScreen({ onDisconnect }: Props) {
     // Mice report at 125–1000 Hz; one IPC invoke per event floods the channel
     // and can push the host's 1000 ev/s limiter into dropping keystrokes.
     // Collapse movement to the newest position per animation frame.
-    const moves = new MoveCoalescer((m) => sendInputRef.current(m));
+    const moves = new MoveCoalescer(
+      (m) => sendInputRef.current(m),
+      undefined,
+      () => selectedDisplayRef.current,
+    );
 
     const onMove = (e: MouseEvent) => {
       const { x, y } = norm(e);
@@ -251,12 +258,12 @@ export function SessionScreen({ onDisconnect }: Props) {
     const onDown = (e: MouseEvent) => {
       const { x, y } = norm(e);
       moves.flush();
-      sendInputRef.current({ kind: "mouse_down", x, y, button: buttonName(e.button) });
+      sendInputRef.current({ kind: "mouse_down", x, y, button: buttonName(e.button), display: selectedDisplayRef.current });
     };
     const onUp = (e: MouseEvent) => {
       const { x, y } = norm(e);
       moves.flush();
-      sendInputRef.current({ kind: "mouse_up", x, y, button: buttonName(e.button) });
+      sendInputRef.current({ kind: "mouse_up", x, y, button: buttonName(e.button), display: selectedDisplayRef.current });
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -265,7 +272,7 @@ export function SessionScreen({ onDisconnect }: Props) {
       // Normalize by deltaMode: WebKitGTK (the Linux Tauri webview) and Firefox
       // report line mode, where a raw `/100` collapses a notch to ~0.03.
       const { dx, dy } = normalizeWheel(e.deltaX, e.deltaY, e.deltaMode);
-      sendInputRef.current({ kind: "scroll", x, y, dx: -dx, dy: -dy });
+      sendInputRef.current({ kind: "scroll", x, y, dx: -dx, dy: -dy, display: selectedDisplayRef.current });
     };
     const onContext = (e: Event) => e.preventDefault();
 
@@ -322,7 +329,7 @@ export function SessionScreen({ onDisconnect }: Props) {
         const cx = (normTouch(e.touches[0]).x + normTouch(e.touches[1]).x) / 2;
         const cy = (normTouch(e.touches[0]).y + normTouch(e.touches[1]).y) / 2;
         moves.flush();
-        sendInputRef.current({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta });
+        sendInputRef.current({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta, display: selectedDisplayRef.current });
       }
     };
     const onTouchEnd = (e: TouchEvent) => {
@@ -397,6 +404,9 @@ export function SessionScreen({ onDisconnect }: Props) {
 
   const handleSelectDisplay = async (index: number) => {
     setSelectedDisplay(index);
+    // Keep the ref in step so pointer events sent before the next render
+    // already carry the new display.
+    selectedDisplayRef.current = index;
     try { await api.selectDisplay(index); } catch {}
   };
 

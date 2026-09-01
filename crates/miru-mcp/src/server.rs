@@ -253,11 +253,11 @@ impl McpServer {
         let times = if double { 2 } else { 1 };
         for _ in 0..times {
             let down = InputEvent {
-                kind: InputKind::MouseDown { button, x, y },
+                kind: InputKind::MouseDown { button, x, y, display: 0 },
                 timestamp_ms: now_ms(),
             };
             let up = InputEvent {
-                kind: InputKind::MouseUp { button, x, y },
+                kind: InputKind::MouseUp { button, x, y, display: 0 },
                 timestamp_ms: now_ms(),
             };
             self.bridge.send_input(down).await?;
@@ -293,7 +293,7 @@ impl McpServer {
         )?;
 
         let evt = InputEvent {
-            kind: InputKind::Scroll { dx, dy, x, y },
+            kind: InputKind::Scroll { dx, dy, x, y, display: 0 },
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(evt).await?;
