@@ -1,9 +1,15 @@
 //! macOS screen capture.
 //!
-//! Strategy:
-//!   macOS 14+ : ScreenCaptureKit (SCStream) — IOSurface, GPU-resident
-//!   macOS 12.3–13 : ScreenCaptureKit (older API surface)
-//!   macOS 10.15–12.2 : CGDisplayStream (deprecated but works)
+//! Current implementation: polling `CGDisplayCreateImage` once per frame. It
+//! works on every supported macOS and needs no Objective-C bridging, but it
+//! copies the whole framebuffer through the CPU each time and tops out around
+//! 20fps at 1080p.
+//!
+//! Reaching 60fps means ScreenCaptureKit (SCStream), which delivers
+//! GPU-resident IOSurfaces via a callback. That is not implemented: it needs
+//! Objective-C interop that can only be written and verified on macOS, and
+//! replacing a working path with an unverifiable one would be a regression
+//! risk for the users who have this today. See docs/FEATURE_AUDIT.md item 5.
 //!
 //! Permission: requires Screen Recording entitlement
 //!   System Settings → Privacy & Security → Screen Recording → Miru ✓
@@ -15,9 +21,8 @@ use anyhow::{bail, Result};
 use bytes::Bytes;
 use core_graphics::display::{CGDisplay, CGMainDisplayID};
 use miru_common::message::DisplayInfo;
-use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::{
     frame::{PixelFormat, RawFrame},
@@ -27,16 +32,6 @@ use crate::{
 pub struct MacosCapturer {
     current_display: u8,
     displays_cache: Vec<DisplayInfo>,
-    /// SCStream handle stored as opaque pointer (managed via objc2 in real impl).
-    /// For now: CGDisplayStream fallback path below.
-    stream_state: Arc<Mutex<StreamState>>,
-}
-
-#[derive(Default)]
-struct StreamState {
-    latest_frame: Option<RawFrame>,
-    width: u32,
-    height: u32,
 }
 
 impl MacosCapturer {
@@ -47,23 +42,7 @@ impl MacosCapturer {
         }
         info!("macOS capture: {} display(s)", displays.len());
 
-        let (w, h) = (displays[0].width, displays[0].height);
-        let stream_state = Arc::new(Mutex::new(StreamState {
-            latest_frame: None,
-            width: w,
-            height: h,
-        }));
-
-        let cap = Self {
-            current_display: 0,
-            displays_cache: displays,
-            stream_state: Arc::clone(&stream_state),
-        };
-
-        // Start CGDisplayStream as a working fallback
-        cap.start_cg_stream()?;
-
-        Ok(cap)
+        Ok(Self { current_display: 0, displays_cache: displays })
     }
 
     fn enumerate_displays() -> Result<Vec<DisplayInfo>> {
@@ -92,19 +71,8 @@ impl MacosCapturer {
         Ok(infos)
     }
 
-    /// Start a CGDisplayStream — provides BGRA frames via callback.
-    /// This is a deprecated API but works on macOS 10.15+ without entitlement issues.
-    /// Real impl would use SCStream from ScreenCaptureKit on macOS 12.3+.
-    fn start_cg_stream(&self) -> Result<()> {
-        // CGDisplayStreamCreate with kCGDisplayStreamSourceRectKeepLocked
-        // Callback writes BGRA into shared `latest_frame`
-        // TODO: implement via core-foundation + Objective-C runtime
-        warn!("macOS capture: stream init pending — using polling fallback");
-        Ok(())
-    }
-
-    /// Polling fallback — uses CGDisplayCreateImage every frame.
-    /// Slow (~20fps max @ 1080p) but works without ScreenCaptureKit binding.
+    /// Capture one frame with CGDisplayCreateImage. ~20fps at 1080p; see the
+    /// module header for why this is still the only path.
     fn capture_via_cg_image(&self) -> Result<Option<RawFrame>> {
         use core_graphics::{
             display::CGDisplay,
@@ -169,33 +137,8 @@ impl ScreenCapturer for MacosCapturer {
     }
 
     fn next_frame(&mut self) -> Result<Option<RawFrame>> {
-        // Try ScreenCaptureKit-delivered frame first (when implemented)
-        if let Ok(state) = self.stream_state.lock() {
-            if let Some(frame) = state.latest_frame.as_ref() {
-                return Ok(Some(frame.clone_shallow()));
-            }
-        }
-        // Fallback: polling capture
         self.capture_via_cg_image()
     }
 
-    fn close(self) {
-        // TODO: stop SCStream
-    }
-}
-
-impl RawFrame {
-    /// Cheap clone — `data` is Arc-counted Bytes.
-    fn clone_shallow(&self) -> Self {
-        Self {
-            display_idx: self.display_idx,
-            width: self.width,
-            height: self.height,
-            stride: self.stride,
-            format: self.format,
-            data: self.data.clone(),
-            timestamp_ms: self.timestamp_ms,
-            dirty_rects: self.dirty_rects.clone(),
-        }
-    }
+    fn close(self) {}
 }
