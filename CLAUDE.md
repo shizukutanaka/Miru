@@ -109,7 +109,7 @@ git tag v0.1.0 && git push origin v0.1.0
 - ✓ 全OS抽象 (Win DXGI / macOS CGDisplay / Linux X11)
 - ✓ 13個の統合テスト + ベンチ + ファズ
 - ✓ オフライン検証ゲート `scripts/verify-offline.sh`(レジストリ遮断環境で
-  Rust 52 + frontend 69 テストを実行。rustfmt 全解析 / manifest 検証 /
+  Rust 79 + frontend 75 テストを実行。rustfmt 全解析 / manifest 検証 /
   モジュール到達性 / 死コード計測 `find-dead-code.py` 付き)
 - ✓ ADR 3件、SECURITY.md、CONTRIBUTING.md
 
