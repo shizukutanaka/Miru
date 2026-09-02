@@ -363,7 +363,11 @@ mod tests {
             friendly_name: None,
         });
         acl.touch("dev1", 9999);
-        let peer = acl.list().into_iter().find(|p| p.device_id == "dev1").unwrap();
+        let peer = acl
+            .list()
+            .into_iter()
+            .find(|p| p.device_id == "dev1")
+            .unwrap();
         assert_eq!(peer.last_seen, 9999, "touch must update last_seen");
         assert_eq!(peer.first_seen, 1000, "touch must not change first_seen");
         // touching unknown device is a no-op

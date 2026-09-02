@@ -256,9 +256,22 @@ impl ScreenCapturer for WindowsCapturer {
                     .iter()
                     .filter_map(|r| {
                         // Malformed RECTs with inverted coords produce huge u32 after cast.
-                        let w = r.right.checked_sub(r.left).filter(|&v| v >= 0).map(|v| v as u32)?;
-                        let h = r.bottom.checked_sub(r.top).filter(|&v| v >= 0).map(|v| v as u32)?;
-                        Some(DirtyRect { x: r.left as u32, y: r.top as u32, w, h })
+                        let w = r
+                            .right
+                            .checked_sub(r.left)
+                            .filter(|&v| v >= 0)
+                            .map(|v| v as u32)?;
+                        let h = r
+                            .bottom
+                            .checked_sub(r.top)
+                            .filter(|&v| v >= 0)
+                            .map(|v| v as u32)?;
+                        Some(DirtyRect {
+                            x: r.left as u32,
+                            y: r.top as u32,
+                            w,
+                            h,
+                        })
                     })
                     .collect()
             } else {
@@ -290,7 +303,9 @@ impl ScreenCapturer for WindowsCapturer {
             // Use checked arithmetic: stride × height can overflow u32 before cast.
             let size = (stride as usize)
                 .checked_mul(self.height as usize)
-                .ok_or_else(|| anyhow::anyhow!("DXGI stride overflow: {}×{}", stride, self.height))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!("DXGI stride overflow: {}×{}", stride, self.height)
+                })?;
             let slice = std::slice::from_raw_parts(mapped.pData as *const u8, size);
             let data = Bytes::copy_from_slice(slice);
 

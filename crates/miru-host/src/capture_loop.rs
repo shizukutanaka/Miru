@@ -111,7 +111,13 @@ pub fn start(
                 // Lazy encoder init (need frame dimensions from first frame).
                 if encoder.is_none() {
                     info!("Encoder init: {}×{} {:?}", frame.width, frame.height, codec);
-                    match Encoder::new(codec.clone(), frame.width, frame.height, cur_fps, cur_bitrate) {
+                    match Encoder::new(
+                        codec.clone(),
+                        frame.width,
+                        frame.height,
+                        cur_fps,
+                        cur_bitrate,
+                    ) {
                         Ok(enc) => {
                             encoder = Some(enc);
                         }
@@ -131,9 +137,18 @@ pub fn start(
                 let i420_owned: Vec<u8>;
                 let i420: &[u8] = match frame.format {
                     PixelFormat::I420 => &frame.data,
-                    PixelFormat::Bgra32 => { i420_owned = bgra_to_i420(&frame); &i420_owned }
-                    PixelFormat::Nv12 => { i420_owned = nv12_to_i420(&frame); &i420_owned }
-                    PixelFormat::Rgba32 => { i420_owned = rgba_to_i420(&frame); &i420_owned }
+                    PixelFormat::Bgra32 => {
+                        i420_owned = bgra_to_i420(&frame);
+                        &i420_owned
+                    }
+                    PixelFormat::Nv12 => {
+                        i420_owned = nv12_to_i420(&frame);
+                        &i420_owned
+                    }
+                    PixelFormat::Rgba32 => {
+                        i420_owned = rgba_to_i420(&frame);
+                        &i420_owned
+                    }
                 };
 
                 // Encode
@@ -319,7 +334,10 @@ mod tests {
         let uv_size = 1; // 1×1 each
         assert_eq!(yuv.len(), y_size + uv_size * 2);
         // BT.601 limited: white = Y=235, U=128, V=128
-        assert!(yuv[..y_size].iter().all(|&y| y == 235), "Y plane: all white = 235");
+        assert!(
+            yuv[..y_size].iter().all(|&y| y == 235),
+            "Y plane: all white = 235"
+        );
         assert_eq!(yuv[y_size], 128, "U for white = 128");
         assert_eq!(yuv[y_size + uv_size], 128, "V for white = 128");
     }
@@ -332,7 +350,10 @@ mod tests {
         let y_size = 4;
         let uv_size = 1;
         // BT.601 limited: black = Y=16, U=128, V=128
-        assert!(yuv[..y_size].iter().all(|&y| y == 16), "Y plane: all black = 16");
+        assert!(
+            yuv[..y_size].iter().all(|&y| y == 16),
+            "Y plane: all black = 16"
+        );
         assert_eq!(yuv[y_size], 128, "U for black = 128");
         assert_eq!(yuv[y_size + uv_size], 128, "V for black = 128");
     }
@@ -371,7 +392,10 @@ mod tests {
         };
         let yuv = bgra_to_i420(&frame);
         // Despite padding, Y values must be 235 (white), not corrupted by padding zeros
-        assert!(yuv[..4].iter().all(|&y| y == 235), "stride padding must not corrupt Y");
+        assert!(
+            yuv[..4].iter().all(|&y| y == 235),
+            "stride padding must not corrupt Y"
+        );
     }
 
     #[test]

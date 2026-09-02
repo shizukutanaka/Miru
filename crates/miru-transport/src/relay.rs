@@ -151,7 +151,8 @@ impl RelayTransport {
                 if frame.len() > MAX_FRAME_BYTES {
                     return Err(anyhow::anyhow!(
                         "relay: received oversized frame ({} bytes > {} limit)",
-                        frame.len(), MAX_FRAME_BYTES
+                        frame.len(),
+                        MAX_FRAME_BYTES
                     ));
                 }
                 let payload = &frame[4..];

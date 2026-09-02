@@ -47,7 +47,10 @@ pub struct HandshakeResult {
 /// The two roles MUST pass different `is_host` values, so each side's
 /// `tx` corresponds to the other side's `rx`. This eliminates nonce-reuse
 /// risk: each direction has its own key + counter.
-fn split_directional(session_key: [u8; 32], is_host: bool) -> Result<(SessionCipher, SessionCipher)> {
+fn split_directional(
+    session_key: [u8; 32],
+    is_host: bool,
+) -> Result<(SessionCipher, SessionCipher)> {
     let base = SessionCipher::new(session_key);
     let host_to_viewer = base.derive_subkey(b"miru-h2v-v1")?;
     let viewer_to_host = base.derive_subkey(b"miru-v2h-v1")?;
@@ -134,7 +137,7 @@ pub async fn viewer_handshake<C: MsgChannel>(
         selected_video_codec: ack.selected_codec,
         selected_audio_codec: ack.selected_audio,
         audio_available: ack.audio_available,
-        peer_role: Role::Host,             // host is always the other side
+        peer_role: Role::Host,            // host is always the other side
         peer_pubkey_field: String::new(), // not needed on viewer side
     })
 }
@@ -275,7 +278,8 @@ fn hkdf_expand(shared: &[u8; 32], salt: &[u8]) -> Result<[u8; 32]> {
         .expand(&[HKDF_INFO], hkdf::HKDF_SHA256)
         .map_err(|_| anyhow::anyhow!("hkdf expand failed"))?;
     let mut out = [0u8; 32];
-    okm.fill(&mut out).map_err(|_| anyhow::anyhow!("hkdf fill failed"))?;
+    okm.fill(&mut out)
+        .map_err(|_| anyhow::anyhow!("hkdf fill failed"))?;
     Ok(out)
 }
 

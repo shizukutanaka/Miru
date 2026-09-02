@@ -64,7 +64,10 @@ fn apply_landlock(policy: &Policy, outcome: &mut Outcome) {
                 "landlock v4 (fs+net) unavailable: {e}, retrying fs-only (v3)"
             ));
             net_handled = false;
-            match Ruleset::default().handle_access(fs_access).and_then(|rs| rs.create()) {
+            match Ruleset::default()
+                .handle_access(fs_access)
+                .and_then(|rs| rs.create())
+            {
                 Ok(r) => Some(r),
                 Err(e2) => {
                     outcome.notes.push(format!("landlock unavailable: {e2}"));

@@ -33,22 +33,29 @@ fn start_signal(relay_port: u16, rdv_port: u16) -> ServerGuard {
 }
 
 /// Send a Msg as JSON text over a WebSocket.
-async fn send_msg(ws: &mut tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
->, msg: &Msg) {
+async fn send_msg(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    msg: &Msg,
+) {
     let json = serde_json::to_string(msg).unwrap();
     ws.send(Message::Text(json)).await.unwrap();
 }
 
 /// Receive the next JSON Msg from a WebSocket.
-async fn recv_msg(ws: &mut tokio_tungstenite::WebSocketStream<
-    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>
->) -> Msg {
+async fn recv_msg(
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+) -> Msg {
     loop {
         let frame = ws.next().await.unwrap().unwrap();
         match frame {
             Message::Text(t) => return serde_json::from_str(&t).unwrap(),
-            Message::Ping(d) => { ws.send(Message::Pong(d)).await.unwrap(); }
+            Message::Ping(d) => {
+                ws.send(Message::Pong(d)).await.unwrap();
+            }
             _ => {}
         }
     }
@@ -71,25 +78,34 @@ async fn relay_forwards_bytes_between_peers() {
             return;
         }
     };
-    send_msg(&mut host_rdv, &Msg::Register(Register {
-        device_id: host_device_id.clone(),
-        pubkey: String::new(),
-        pub_addr: None,
-        pub_port: None,
-        signature: None,
-        signed_at_sec: None,
-    })).await;
+    send_msg(
+        &mut host_rdv,
+        &Msg::Register(Register {
+            device_id: host_device_id.clone(),
+            pubkey: String::new(),
+            pub_addr: None,
+            pub_port: None,
+            signature: None,
+            signed_at_sec: None,
+        }),
+    )
+    .await;
     // Consume RegisterAck
     recv_msg(&mut host_rdv).await;
 
     // 2. Viewer requests connection to host
     let (mut viewer_rdv, _) = tokio_tungstenite::connect_async(&rdv_url)
-        .await.expect("viewer rdv connect");
-    send_msg(&mut viewer_rdv, &Msg::Connect(ConnectRequest {
-        target_id: host_device_id.clone(),
-        viewer_addr: "127.0.0.1".into(),
-        viewer_port: 0,
-    })).await;
+        .await
+        .expect("viewer rdv connect");
+    send_msg(
+        &mut viewer_rdv,
+        &Msg::Connect(ConnectRequest {
+            target_id: host_device_id.clone(),
+            viewer_addr: "127.0.0.1".into(),
+            viewer_port: 0,
+        }),
+    )
+    .await;
 
     // 3. Viewer receives ConnectAck then RelayOffer
     let mut relay_token_viewer = String::new();
@@ -110,7 +126,10 @@ async fn relay_forwards_bytes_between_peers() {
         }
     }
 
-    assert!(!relay_token_viewer.is_empty(), "viewer did not receive relay token");
+    assert!(
+        !relay_token_viewer.is_empty(),
+        "viewer did not receive relay token"
+    );
     assert_eq!(relay_token_viewer, relay_token_host, "tokens must match");
 
     let token = relay_token_viewer;
@@ -120,18 +139,24 @@ async fn relay_forwards_bytes_between_peers() {
     let viewer_relay_url = format!("ws://127.0.0.1:{relay_port}/relay?token={token}&role=viewer");
 
     let (mut host_ws, _) = tokio_tungstenite::connect_async(&host_relay_url)
-        .await.expect("host relay connect");
+        .await
+        .expect("host relay connect");
     let (mut viewer_ws, _) = tokio_tungstenite::connect_async(&viewer_relay_url)
-        .await.expect("viewer relay connect");
+        .await
+        .expect("viewer relay connect");
 
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Host → Viewer
     let payload = b"hello-from-host".to_vec();
-    host_ws.send(Message::Binary(payload.clone())).await.expect("host send");
+    host_ws
+        .send(Message::Binary(payload.clone()))
+        .await
+        .expect("host send");
 
     let received = tokio::time::timeout(Duration::from_secs(3), viewer_ws.next())
-        .await.expect("viewer recv timeout")
+        .await
+        .expect("viewer recv timeout")
         .expect("viewer stream ended")
         .expect("viewer recv error");
     match received {
@@ -141,10 +166,14 @@ async fn relay_forwards_bytes_between_peers() {
 
     // Viewer → Host (reverse direction)
     let reply = b"ack-from-viewer".to_vec();
-    viewer_ws.send(Message::Binary(reply.clone())).await.expect("viewer send");
+    viewer_ws
+        .send(Message::Binary(reply.clone()))
+        .await
+        .expect("viewer send");
 
     let got = tokio::time::timeout(Duration::from_secs(3), host_ws.next())
-        .await.expect("host recv timeout")
+        .await
+        .expect("host recv timeout")
         .expect("host stream ended")
         .expect("host recv error");
     match got {
@@ -203,22 +232,30 @@ async fn oversized_relay_message_drops_connection() {
             return;
         }
     };
-    send_msg(&mut host_rdv, &Msg::Register(Register {
-        device_id: host_device_id.clone(),
-        pubkey: String::new(),
-        pub_addr: None,
-        pub_port: None,
-        signature: None,
-        signed_at_sec: None,
-    })).await;
+    send_msg(
+        &mut host_rdv,
+        &Msg::Register(Register {
+            device_id: host_device_id.clone(),
+            pubkey: String::new(),
+            pub_addr: None,
+            pub_port: None,
+            signature: None,
+            signed_at_sec: None,
+        }),
+    )
+    .await;
     recv_msg(&mut host_rdv).await; // RegisterAck
 
     let (mut viewer_rdv, _) = tokio_tungstenite::connect_async(&rdv_url).await.unwrap();
-    send_msg(&mut viewer_rdv, &Msg::Connect(ConnectRequest {
-        target_id: host_device_id,
-        viewer_addr: "127.0.0.1".into(),
-        viewer_port: 0,
-    })).await;
+    send_msg(
+        &mut viewer_rdv,
+        &Msg::Connect(ConnectRequest {
+            target_id: host_device_id,
+            viewer_addr: "127.0.0.1".into(),
+            viewer_port: 0,
+        }),
+    )
+    .await;
 
     let mut token = String::new();
     for _ in 0..3 {
@@ -228,7 +265,9 @@ async fn oversized_relay_message_drops_connection() {
         }
     }
     for _ in 0..3 {
-        if let Msg::Relay(_) = recv_msg(&mut host_rdv).await { break; }
+        if let Msg::Relay(_) = recv_msg(&mut host_rdv).await {
+            break;
+        }
     }
     assert!(!token.is_empty(), "no relay token received");
 
@@ -236,9 +275,11 @@ async fn oversized_relay_message_drops_connection() {
     let viewer_url = format!("ws://127.0.0.1:{relay_port}/relay?token={token}&role=viewer");
 
     let (mut host_ws, _) = tokio_tungstenite::connect_async(&host_url)
-        .await.expect("host relay connect");
+        .await
+        .expect("host relay connect");
     let (mut viewer_ws, _) = tokio_tungstenite::connect_async(&viewer_url)
-        .await.expect("viewer relay connect");
+        .await
+        .expect("viewer relay connect");
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Send a 5 MiB frame — exceeds the 4 MiB MAX_RELAY_MSG_BYTES limit.
@@ -247,7 +288,10 @@ async fn oversized_relay_message_drops_connection() {
 
     // The relay should close the connection within a short window.
     let closed = tokio::time::timeout(Duration::from_secs(3), host_ws.next()).await;
-    assert!(closed.is_ok(), "relay did not close oversized-frame connection in time");
+    assert!(
+        closed.is_ok(),
+        "relay did not close oversized-frame connection in time"
+    );
 
     let _ = tokio::time::timeout(Duration::from_secs(2), viewer_ws.next()).await;
 }

@@ -93,7 +93,12 @@ fn capture_frame(disp: u8) -> Result<Vec<u8>> {
     }
 }
 
-fn encode_png(data: &[u8], w: u32, h: u32, format: miru_capture::frame::PixelFormat) -> Result<Vec<u8>> {
+fn encode_png(
+    data: &[u8],
+    w: u32,
+    h: u32,
+    format: miru_capture::frame::PixelFormat,
+) -> Result<Vec<u8>> {
     use miru_capture::frame::PixelFormat;
     use std::io::Cursor;
 

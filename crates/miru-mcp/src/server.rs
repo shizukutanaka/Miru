@@ -148,14 +148,16 @@ impl McpServer {
             let ry = region.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             let rw = region.get("width").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
             let rh = region.get("height").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32;
-            if !(0.0..=1.0).contains(&rx) || !(0.0..=1.0).contains(&ry)
-                || rw <= 0.0 || rh <= 0.0
-                || rx + rw > 1.0 + f32::EPSILON || ry + rh > 1.0 + f32::EPSILON
+            if !(0.0..=1.0).contains(&rx)
+                || !(0.0..=1.0).contains(&ry)
+                || rw <= 0.0
+                || rh <= 0.0
+                || rx + rw > 1.0 + f32::EPSILON
+                || ry + rh > 1.0 + f32::EPSILON
             {
                 bail!("capture_screen: region coordinates out of [0,1] bounds");
             }
-            crop_png_region(&png, rx, ry, rw, rh)
-                .unwrap_or(png) // on failure, fall back to full capture
+            crop_png_region(&png, rx, ry, rw, rh).unwrap_or(png) // on failure, fall back to full capture
         } else {
             png
         };
@@ -253,11 +255,21 @@ impl McpServer {
         let times = if double { 2 } else { 1 };
         for _ in 0..times {
             let down = InputEvent {
-                kind: InputKind::MouseDown { button, x, y, display: 0 },
+                kind: InputKind::MouseDown {
+                    button,
+                    x,
+                    y,
+                    display: 0,
+                },
                 timestamp_ms: now_ms(),
             };
             let up = InputEvent {
-                kind: InputKind::MouseUp { button, x, y, display: 0 },
+                kind: InputKind::MouseUp {
+                    button,
+                    x,
+                    y,
+                    display: 0,
+                },
                 timestamp_ms: now_ms(),
             };
             self.bridge.send_input(down).await?;
@@ -276,8 +288,8 @@ impl McpServer {
     }
 
     async fn tool_scroll(&self, args: &Value) -> Result<Vec<Content>> {
-        let dx = (args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32)
-            .clamp(-100.0, 100.0);
+        let dx =
+            (args.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32).clamp(-100.0, 100.0);
         let dy = (args
             .get("dy")
             .and_then(|v| v.as_f64())
@@ -293,7 +305,13 @@ impl McpServer {
         )?;
 
         let evt = InputEvent {
-            kind: InputKind::Scroll { dx, dy, x, y, display: 0 },
+            kind: InputKind::Scroll {
+                dx,
+                dy,
+                x,
+                y,
+                display: 0,
+            },
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(evt).await?;
@@ -384,11 +402,19 @@ impl McpServer {
             events.push(modifier_event(code, true, modifiers));
         }
         events.push(InputEvent {
-            kind: InputKind::KeyDown { key, modifiers, code: key_code.clone() },
+            kind: InputKind::KeyDown {
+                key,
+                modifiers,
+                code: key_code.clone(),
+            },
             timestamp_ms: now_ms(),
         });
         events.push(InputEvent {
-            kind: InputKind::KeyUp { key, modifiers, code: key_code },
+            kind: InputKind::KeyUp {
+                key,
+                modifiers,
+                code: key_code,
+            },
             timestamp_ms: now_ms(),
         });
         for code in mod_codes.iter().rev() {
@@ -488,13 +514,23 @@ fn now_ms() -> u64 {
 /// Build a KeyDown/KeyUp for a physical modifier key (e.g. "ControlLeft").
 fn modifier_event(code: &str, down: bool, modifiers: u8) -> InputEvent {
     // Legacy `key` is the VK for hosts that predate the `code` field.
-    let key = miru_input::keymap::code_to_vk(code).map(u32::from).unwrap_or(0);
+    let key = miru_input::keymap::code_to_vk(code)
+        .map(u32::from)
+        .unwrap_or(0);
     let code = Some(code.to_string());
     InputEvent {
         kind: if down {
-            InputKind::KeyDown { key, modifiers, code }
+            InputKind::KeyDown {
+                key,
+                modifiers,
+                code,
+            }
         } else {
-            InputKind::KeyUp { key, modifiers, code }
+            InputKind::KeyUp {
+                key,
+                modifiers,
+                code,
+            }
         },
         timestamp_ms: now_ms(),
     }
@@ -657,9 +693,29 @@ mod tests {
     #[test]
     fn emitted_codes_resolve_in_host_keymap() {
         for name in [
-            "a", "z", "0", "9", "Enter", "Return", "Tab", "Escape", "Esc", "Backspace", "Delete",
-            "Del", "Space", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown",
-            "F1", "F12",
+            "a",
+            "z",
+            "0",
+            "9",
+            "Enter",
+            "Return",
+            "Tab",
+            "Escape",
+            "Esc",
+            "Backspace",
+            "Delete",
+            "Del",
+            "Space",
+            "Up",
+            "Down",
+            "Left",
+            "Right",
+            "Home",
+            "End",
+            "PageUp",
+            "PageDown",
+            "F1",
+            "F12",
         ] {
             let code = parse_key_code(name).unwrap_or_else(|| panic!("{name} unmapped"));
             assert!(

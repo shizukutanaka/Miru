@@ -86,7 +86,10 @@ impl InputHandler {
         if self.held_keys.is_empty() {
             return;
         }
-        debug!("Releasing {} held key(s) at session end", self.held_keys.len());
+        debug!(
+            "Releasing {} held key(s) at session end",
+            self.held_keys.len()
+        );
         for (key, code) in self.held_keys.drain() {
             let evt = InputEvent {
                 kind: InputKind::KeyUp {
@@ -122,7 +125,10 @@ impl InputHandler {
         // Guard against a large Text event blocking the async event loop.
         if let InputKind::Text { text } = &event.kind {
             if text.chars().count() > MAX_TEXT_CHARS {
-                warn!("Text event too long ({} chars > {MAX_TEXT_CHARS}), dropped", text.chars().count());
+                warn!(
+                    "Text event too long ({} chars > {MAX_TEXT_CHARS}), dropped",
+                    text.chars().count()
+                );
                 return Ok(());
             }
         }
@@ -147,12 +153,21 @@ impl InputHandler {
             InputKind::MouseMove { x, y, display } => {
                 let (x, y) = self.to_virtual(*x, *y, *display);
                 remapped = InputEvent {
-                    kind: InputKind::MouseMove { x, y, display: *display },
+                    kind: InputKind::MouseMove {
+                        x,
+                        y,
+                        display: *display,
+                    },
                     timestamp_ms: event.timestamp_ms,
                 };
                 &remapped
             }
-            InputKind::MouseDown { button, x, y, display } => {
+            InputKind::MouseDown {
+                button,
+                x,
+                y,
+                display,
+            } => {
                 let (x, y) = self.to_virtual(*x, *y, *display);
                 remapped = InputEvent {
                     kind: InputKind::MouseDown {
@@ -165,7 +180,12 @@ impl InputHandler {
                 };
                 &remapped
             }
-            InputKind::MouseUp { button, x, y, display } => {
+            InputKind::MouseUp {
+                button,
+                x,
+                y,
+                display,
+            } => {
                 let (x, y) = self.to_virtual(*x, *y, *display);
                 remapped = InputEvent {
                     kind: InputKind::MouseUp {
@@ -178,7 +198,13 @@ impl InputHandler {
                 };
                 &remapped
             }
-            InputKind::Scroll { dx, dy, x, y, display } => {
+            InputKind::Scroll {
+                dx,
+                dy,
+                x,
+                y,
+                display,
+            } => {
                 let (x, y) = self.to_virtual(*x, *y, *display);
                 remapped = InputEvent {
                     kind: InputKind::Scroll {
@@ -224,11 +250,22 @@ mod tests {
 
     fn key_evt(down: bool, code: &str) -> InputEvent {
         let kind = if down {
-            InputKind::KeyDown { key: 0, modifiers: 0, code: Some(code.into()) }
+            InputKind::KeyDown {
+                key: 0,
+                modifiers: 0,
+                code: Some(code.into()),
+            }
         } else {
-            InputKind::KeyUp { key: 0, modifiers: 0, code: Some(code.into()) }
+            InputKind::KeyUp {
+                key: 0,
+                modifiers: 0,
+                code: Some(code.into()),
+            }
         };
-        InputEvent { kind, timestamp_ms: 0 }
+        InputEvent {
+            kind,
+            timestamp_ms: 0,
+        }
     }
 
     /// Injection itself needs a real OS device, so these assert the bookkeeping
@@ -311,7 +348,10 @@ mod tests {
     #[test]
     fn second_display_maps_into_its_own_half_of_the_desktop() {
         let mut h = InputHandler::new();
-        h.set_displays(vec![display(0, 0, 1920, true), display(1, 1920, 1920, false)]);
+        h.set_displays(vec![
+            display(0, 0, 1920, true),
+            display(1, 1920, 1920, false),
+        ]);
         let (x, _) = h.to_virtual(0.5, 0.5, 1);
         assert!((x - 0.75).abs() < 1e-6, "expected 0.75, got {x}");
         let (x, _) = h.to_virtual(0.5, 0.5, 0);
@@ -323,7 +363,10 @@ mod tests {
     #[test]
     fn handle_input_remaps_the_event_it_injects() {
         let mut h = InputHandler::new();
-        h.set_displays(vec![display(0, 0, 1920, true), display(1, 1920, 1920, false)]);
+        h.set_displays(vec![
+            display(0, 0, 1920, true),
+            display(1, 1920, 1920, false),
+        ]);
         // Injection is stubbed in this harness, so assert on the transform the
         // same way handle_input applies it.
         let ev = move_to(0.5, 1);
@@ -338,7 +381,10 @@ mod tests {
     #[test]
     fn clicks_and_scrolls_carry_a_display() {
         let mut h = InputHandler::new();
-        h.set_displays(vec![display(0, 0, 1920, true), display(1, 1920, 1920, false)]);
+        h.set_displays(vec![
+            display(0, 0, 1920, true),
+            display(1, 1920, 1920, false),
+        ]);
         let down = InputEvent {
             kind: InputKind::MouseDown {
                 button: MouseButton::Left,
@@ -350,7 +396,13 @@ mod tests {
         };
         assert!(h.handle_input(&down).is_ok());
         let scroll = InputEvent {
-            kind: InputKind::Scroll { dx: 0.0, dy: 1.0, x: 0.5, y: 0.5, display: 1 },
+            kind: InputKind::Scroll {
+                dx: 0.0,
+                dy: 1.0,
+                x: 0.5,
+                y: 0.5,
+                display: 1,
+            },
             timestamp_ms: 0,
         };
         assert!(h.handle_input(&scroll).is_ok());

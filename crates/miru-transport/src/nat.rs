@@ -146,7 +146,10 @@ pub async fn punch_to_peer(
 
         // Send punch
         if let Err(e) = socket.send_to(punch_packet, peer).await {
-            warn!("hole punch send failed to {}: {} (check local firewall/UDP outbound)", peer, e);
+            warn!(
+                "hole punch send failed to {}: {} (check local firewall/UDP outbound)",
+                peer, e
+            );
         }
 
         // Receive (short timeout — keep punching)
@@ -239,7 +242,7 @@ mod tests {
 
     fn stun_header(attr_type: u16, attr_len: u16, value: &[u8]) -> Vec<u8> {
         let mut buf = vec![0u8; 20]; // STUN header
-        // Binding Response (0x0101)
+                                     // Binding Response (0x0101)
         buf[0] = 0x01;
         buf[1] = 0x01;
         // Message length = 4 (attr header) + value.len()
@@ -298,6 +301,9 @@ mod tests {
         // 0x0001 is a different attribute type — must be skipped.
         let buf = stun_header(0x0001, 4, &[0x00; 4]);
         let result = parse_stun_xor_mapped(&buf);
-        assert!(result.is_err(), "non-XOR-MAPPED-ADDRESS must return not-found");
+        assert!(
+            result.is_err(),
+            "non-XOR-MAPPED-ADDRESS must return not-found"
+        );
     }
 }

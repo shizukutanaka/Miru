@@ -156,10 +156,7 @@ impl RevocationList {
         // Fail closed: if the lock is poisoned (panic in a write guard),
         // we cannot reliably determine revocation status. Returning true
         // blocks the action rather than silently allowing a revoked token.
-        self.revoked
-            .read()
-            .map(|s| s.contains(jti))
-            .unwrap_or(true)
+        self.revoked.read().map(|s| s.contains(jti)).unwrap_or(true)
     }
 
     pub fn len(&self) -> usize {

@@ -28,15 +28,15 @@ use crate::{encoder::EncoderBackend, hw::HwEncoder, EncodedPacket};
 /// FFmpeg encoder name lookup table.
 fn ffmpeg_codec_name(hw: HwEncoder, codec: &VideoCodec) -> Option<&'static str> {
     match (hw, codec) {
-        (HwEncoder::Nvenc, VideoCodec::Av1)  => Some("av1_nvenc"),
+        (HwEncoder::Nvenc, VideoCodec::Av1) => Some("av1_nvenc"),
         (HwEncoder::Nvenc, VideoCodec::H265) => Some("hevc_nvenc"),
         (HwEncoder::Nvenc, VideoCodec::H264) => Some("h264_nvenc"),
-        (HwEncoder::Qsv,   VideoCodec::Av1)  => Some("av1_qsv"),
-        (HwEncoder::Qsv,   VideoCodec::H265) => Some("hevc_qsv"),
-        (HwEncoder::Qsv,   VideoCodec::H264) => Some("h264_qsv"),
-        (HwEncoder::Amf,   VideoCodec::Av1)  => Some("av1_amf"),
-        (HwEncoder::Amf,   VideoCodec::H265) => Some("hevc_amf"),
-        (HwEncoder::Amf,   VideoCodec::H264) => Some("h264_amf"),
+        (HwEncoder::Qsv, VideoCodec::Av1) => Some("av1_qsv"),
+        (HwEncoder::Qsv, VideoCodec::H265) => Some("hevc_qsv"),
+        (HwEncoder::Qsv, VideoCodec::H264) => Some("h264_qsv"),
+        (HwEncoder::Amf, VideoCodec::Av1) => Some("av1_amf"),
+        (HwEncoder::Amf, VideoCodec::H265) => Some("hevc_amf"),
+        (HwEncoder::Amf, VideoCodec::H264) => Some("h264_amf"),
         (HwEncoder::VideoToolbox, VideoCodec::H265) => Some("hevc_videotoolbox"),
         (HwEncoder::VideoToolbox, VideoCodec::H264) => Some("h264_videotoolbox"),
         (HwEncoder::Vaapi, VideoCodec::H265) => Some("hevc_vaapi"),
@@ -81,7 +81,12 @@ impl FFmpegEncoder {
         })?;
 
         tracing::info!("FFmpeg encoder open: {name} ({hw:?}) {width}x{height}@{fps}");
-        Ok(Self { raw, hw, codec, force_keyframe: false })
+        Ok(Self {
+            raw,
+            hw,
+            codec,
+            force_keyframe: false,
+        })
     }
 
     /// Which hardware this encoder is running on.

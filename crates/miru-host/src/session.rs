@@ -29,9 +29,8 @@ use uuid::Uuid;
 #[cfg(feature = "agent")]
 use crate::agent_handler::AgentHandler;
 use crate::{
-    backpressure::FrameController, capture_loop,
-    input_handler::InputHandler, metrics::SessionMetrics, qos_bbr::BbrQos,
-    recording::SessionRecorder, safe_fs,
+    backpressure::FrameController, capture_loop, input_handler::InputHandler,
+    metrics::SessionMetrics, qos_bbr::BbrQos, recording::SessionRecorder, safe_fs,
 };
 
 /// In-progress file receive state.
@@ -62,7 +61,12 @@ fn handle_file_transfer(
     ft_cfg: &safe_fs::FileTransferConfig,
 ) {
     match ft {
-        FileTransfer::Start { id, name, size, hash } => {
+        FileTransfer::Start {
+            id,
+            name,
+            size,
+            hash,
+        } => {
             // Cap concurrent in-flight transfers to bound open file descriptor usage.
             const MAX_CONCURRENT_TRANSFERS: usize = 8;
             if transfers.len() >= MAX_CONCURRENT_TRANSFERS {
@@ -110,7 +114,16 @@ fn handle_file_transfer(
             match temp_file_result {
                 Ok(f) => {
                     info!("FileTransfer {id}: starting '{safe_name}' ({size} bytes)");
-                    transfers.insert(id, FileReceive { temp_path, file: f, expected_size: size, expected_hash: hash, name: safe_name });
+                    transfers.insert(
+                        id,
+                        FileReceive {
+                            temp_path,
+                            file: f,
+                            expected_size: size,
+                            expected_hash: hash,
+                            name: safe_name,
+                        },
+                    );
                 }
                 Err(e) => warn!("FileTransfer {id}: cannot create temp file: {e}"),
             }
@@ -128,7 +141,9 @@ fn handle_file_transfer(
                     transfers.remove(&id);
                     return;
                 }
-                if let Err(e) = rx.file.seek(SeekFrom::Start(offset))
+                if let Err(e) = rx
+                    .file
+                    .seek(SeekFrom::Start(offset))
                     .and_then(|_| rx.file.write_all(&data))
                 {
                     warn!("FileTransfer {id}: write error at offset {offset}: {e}");
@@ -142,8 +157,8 @@ fn handle_file_transfer(
         FileTransfer::Done { id } => {
             if let Some(rx) = transfers.remove(&id) {
                 drop(rx.file); // flush + close
-                // Stream SHA-256 rather than loading the entire file into memory —
-                // std::fs::read() on a 100 MB file would double peak RSS.
+                               // Stream SHA-256 rather than loading the entire file into memory —
+                               // std::fs::read() on a 100 MB file would double peak RSS.
                 match hash_file_streaming(&rx.temp_path) {
                     Ok(actual_hash) => {
                         if actual_hash != rx.expected_hash {
@@ -267,14 +282,21 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
                     SIGNAL_BACKOFF_BASE_SECS,
                     SIGNAL_BACKOFF_MAX_SECS,
                 );
-                warn!("Signal connect failed: {}; retrying in {}s", e, delay.as_secs());
+                warn!(
+                    "Signal connect failed: {}; retrying in {}s",
+                    e,
+                    delay.as_secs()
+                );
                 time::sleep(delay).await;
                 attempt = attempt.saturating_add(1);
                 continue;
             }
         };
         info!("Signal: registered as {}", device_id);
-        info!("Identity fingerprint: {}", config.identity.pubkey_fingerprint());
+        info!(
+            "Identity fingerprint: {}",
+            config.identity.pubkey_fingerprint()
+        );
 
         let reconnect = loop {
             match signal.next_event().await {
@@ -376,7 +398,9 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // hand it the ungated human path (see ADR 0022).
     #[cfg(not(feature = "agent"))]
     if result.peer_role == Role::AiAgent {
-        warn!("Peer requested AiAgent role, but this build has the agent feature disabled — refusing");
+        warn!(
+            "Peer requested AiAgent role, but this build has the agent feature disabled — refusing"
+        );
         return Ok(());
     }
 
@@ -425,7 +449,10 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         // Audit log is mandatory for AI agent sessions: proceed
                         // without it would make the None => true fallback grant
                         // all inputs unconditionally, bypassing capability gating.
-                        warn!("Cannot open audit log for AI agent session — rejecting connection: {}", e);
+                        warn!(
+                            "Cannot open audit log for AI agent session — rejecting connection: {}",
+                            e
+                        );
                         return Err(anyhow::anyhow!("audit log unavailable: {e}"));
                     }
                 }
@@ -751,7 +778,10 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
 
     // Clean up any file transfers that never completed (peer disconnected mid-transfer).
     for (id, rx) in file_transfers.drain() {
-        warn!("FileTransfer {}: session ended without completion — removing temp file", id);
+        warn!(
+            "FileTransfer {}: session ended without completion — removing temp file",
+            id
+        );
         let _ = std::fs::remove_file(&rx.temp_path);
     }
 
@@ -777,10 +807,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         let metadata = metrics.snapshot();
         // Host-only attestation: the viewer's signing key is never available
         // server-side. Co-signing requires a 2-round protocol (planned v1.0).
-        match miru_transparency::HostOnlyAttestation::new(
-            &metadata,
-            &config.identity.signing_key,
-        ) {
+        match miru_transparency::HostOnlyAttestation::new(&metadata, &config.identity.signing_key) {
             Err(e) => warn!("Attestation creation failed (non-fatal): {e}"),
             Ok(attestation) => {
                 match miru_transparency::rekor::submit_host_to_rekor(
@@ -865,7 +892,10 @@ async fn check_or_pair(
             Ok(Permission::Control)
         }
         TrustDecision::PubkeyMismatch => {
-            error!("⚠️  Pubkey mismatch for {} — rejecting (possible MITM or impersonation)", device_str);
+            error!(
+                "⚠️  Pubkey mismatch for {} — rejecting (possible MITM or impersonation)",
+                device_str
+            );
             Err(anyhow::anyhow!(
                 "pubkey mismatch for {device_str} — possible MITM or device re-keyed"
             ))
@@ -888,7 +918,11 @@ fn clip_truncate(text: String) -> String {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    tracing::warn!("clipboard content truncated to {} bytes (was {})", end, text.len());
+    tracing::warn!(
+        "clipboard content truncated to {} bytes (was {})",
+        end,
+        text.len()
+    );
     text[..end].to_string()
 }
 

@@ -123,7 +123,9 @@ impl BbrQos {
         let mode_log: String = hint.mode.chars().take(32).collect();
         tracing::info!(
             "QoS hint applied: mode={} max_fps={} min_quality={}",
-            mode_log, hint.max_fps, hint.min_quality
+            mode_log,
+            hint.max_fps,
+            hint.min_quality
         );
     }
 
@@ -180,18 +182,30 @@ impl BbrQos {
         // Smooth mode: viewer prefers FPS over bitrate — cap bitrate at 70% of BW.
         target = match self.hint_mode {
             HintMode::Quality => target.clamp(500, 50_000),
-            HintMode::Smooth => target.clamp(500, (self.bw_max_kbps as f32 * 0.7) as u32).max(500),
+            HintMode::Smooth => target
+                .clamp(500, (self.bw_max_kbps as f32 * 0.7) as u32)
+                .max(500),
             HintMode::Balanced => target.clamp(500, 50_000),
         };
 
         // FPS adjusts gently — drop FPS first (drops bitrate need too) on high RTT.
         // Skip adjustment until we have real RTT data (rtt_min_us == u32::MAX means no samples).
-        let fps_ceil = if self.hint_max_fps > 0 { self.hint_max_fps } else { 60 };
-        let fps_floor = if self.hint_mode == HintMode::Smooth { 30u8 } else { 15u8 };
+        let fps_ceil = if self.hint_max_fps > 0 {
+            self.hint_max_fps
+        } else {
+            60
+        };
+        let fps_floor = if self.hint_mode == HintMode::Smooth {
+            30u8
+        } else {
+            15u8
+        };
         let target_fps = match self.rtt_min_us {
             None => self.cur_fps.min(fps_ceil),
             Some(rtt) if rtt > 100_000 => self.cur_fps.saturating_sub(5).max(fps_floor),
-            Some(rtt) if rtt < 30_000 && self.cur_fps < fps_ceil => (self.cur_fps + 5).min(fps_ceil),
+            Some(rtt) if rtt < 30_000 && self.cur_fps < fps_ceil => {
+                (self.cur_fps + 5).min(fps_ceil)
+            }
             _ => self.cur_fps.min(fps_ceil),
         };
 
@@ -230,7 +244,8 @@ impl BbrQos {
                 // Use a wall-clock timer: enter ProbeRTT every PROBE_RTT_INTERVAL.
                 // (The old check compared sample span to RTT_WINDOW, which was always
                 // false because on_rtt() already evicts samples older than RTT_WINDOW.)
-                let needs_probe = Instant::now().duration_since(self.last_probe_rtt) > PROBE_RTT_INTERVAL;
+                let needs_probe =
+                    Instant::now().duration_since(self.last_probe_rtt) > PROBE_RTT_INTERVAL;
                 if needs_probe || self.rtt_samples.is_empty() {
                     self.phase = Phase::ProbeRtt;
                 } else {
@@ -310,7 +325,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(210));
             bbr.tick();
         }
-        assert_eq!(bbr.fps(), 60, "FPS must not drop when no RTT data has arrived");
+        assert_eq!(
+            bbr.fps(),
+            60,
+            "FPS must not drop when no RTT data has arrived"
+        );
     }
 
     /// Regression: the old window_stale check compared the span between the

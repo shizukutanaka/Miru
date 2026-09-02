@@ -7,9 +7,7 @@ use anyhow::{bail, Context, Result};
 use miru_auth::DeviceIdentity;
 use miru_codec::{i420_to_jpeg, Decoder};
 use miru_common::{
-    message::{
-        AudioCodec, ClipboardFormat, ClipboardSync, Features, InputEvent, Msg, VideoCodec,
-    },
+    message::{AudioCodec, ClipboardFormat, ClipboardSync, Features, InputEvent, Msg, VideoCodec},
     session::DeviceId,
 };
 use miru_transport::{
@@ -61,7 +59,11 @@ impl RemoteBridge {
         // Wait for relay offer via ConnectAck then IncomingConnection
         let (relay_addr, relay_port, token) = loop {
             match signal.next_event().await {
-                Some(SignalEvent::IncomingConnection { token, relay_addr, relay_port }) => {
+                Some(SignalEvent::IncomingConnection {
+                    token,
+                    relay_addr,
+                    relay_port,
+                }) => {
                     break (relay_addr, relay_port, token);
                 }
                 Some(_) => continue,
@@ -70,12 +72,9 @@ impl RemoteBridge {
         };
         info!("RemoteBridge: relay offer {}:{}", relay_addr, relay_port);
 
-        let mut relay = RelayTransport::connect(
-            &format!("ws://{relay_addr}:{relay_port}"),
-            &token,
-            "viewer",
-        )
-        .await?;
+        let mut relay =
+            RelayTransport::connect(&format!("ws://{relay_addr}:{relay_port}"), &token, "viewer")
+                .await?;
 
         let viewer_features = Features {
             codecs: vec![VideoCodec::Vp9, VideoCodec::Vp8, VideoCodec::Jpeg],
@@ -97,7 +96,10 @@ impl RemoteBridge {
 
         relay.install_ciphers(result.tx, result.rx).await;
         let video_codec = result.selected_video_codec.clone();
-        info!("RemoteBridge: session established (codec={:?})", video_codec);
+        info!(
+            "RemoteBridge: session established (codec={:?})",
+            video_codec
+        );
 
         let relay = Arc::new(relay);
         let latest_png: Arc<Mutex<Option<Vec<u8>>>> = Arc::new(Mutex::new(None));
@@ -139,7 +141,10 @@ async fn recv_loop(
                             *latest_clipboard.lock() = Some(text);
                         }
                     } else {
-                        warn!("RemoteBridge: clipboard sync too large ({} bytes), ignored", cs.data.len());
+                        warn!(
+                            "RemoteBridge: clipboard sync too large ({} bytes), ignored",
+                            cs.data.len()
+                        );
                     }
                 }
             }
@@ -149,11 +154,19 @@ async fn recv_loop(
                 } else {
                     if decoder.is_none() {
                         match Decoder::new(codec.clone()) {
-                            Ok(d) => { decoder = Some(d); }
-                            Err(e) => { warn!("RemoteBridge: decoder init: {e}"); continue; }
+                            Ok(d) => {
+                                decoder = Some(d);
+                            }
+                            Err(e) => {
+                                warn!("RemoteBridge: decoder init: {e}");
+                                continue;
+                            }
                         }
                     }
-                    match decoder.as_mut().and_then(|d| d.decode(&vf.data, vf.timestamp_ms).ok().flatten()) {
+                    match decoder
+                        .as_mut()
+                        .and_then(|d| d.decode(&vf.data, vf.timestamp_ms).ok().flatten())
+                    {
                         Some(frame) => i420_to_jpeg(&frame, 85).ok(),
                         None => None,
                     }
@@ -217,7 +230,10 @@ impl HostBridge for RemoteBridge {
         *self.latest_clipboard.lock() = None;
 
         // Ask the host to push its current clipboard; wait up to 2s for the response.
-        self.relay.send_msg(&Msg::RequestClipboard).await.context("send RequestClipboard")?;
+        self.relay
+            .send_msg(&Msg::RequestClipboard)
+            .await
+            .context("send RequestClipboard")?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
         loop {
             {

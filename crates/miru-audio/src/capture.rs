@@ -39,9 +39,8 @@ impl SystemAudioCapture {
     /// duration of capture; dropping it stops the stream.
     pub fn start(sink: impl Fn(&[f32]) + Send + 'static) -> Result<Self> {
         let host = cpal::default_host();
-        let device = find_loopback_device(&host).context(
-            "no loopback/monitor audio device found — system-audio capture unavailable",
-        )?;
+        let device = find_loopback_device(&host)
+            .context("no loopback/monitor audio device found — system-audio capture unavailable")?;
         info!(
             "System audio capture device: {}",
             device.name().unwrap_or_default()

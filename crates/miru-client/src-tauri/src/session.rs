@@ -18,7 +18,10 @@ use parking_lot::Mutex;
 use serde::Serialize;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use tokio::{sync::{mpsc, oneshot}, time};
+use tokio::{
+    sync::{mpsc, oneshot},
+    time,
+};
 use tracing::{info, warn};
 
 use crate::state::{RecordingState, SessionStats};
@@ -118,7 +121,12 @@ pub async fn run(
     let mut host_pub_addr: Option<String> = None;
     let (relay_addr, relay_port, token) = loop {
         match signal.next_event().await {
-            Some(SignalEvent::ConnectAck { host_addr, host_port, relay, .. }) => {
+            Some(SignalEvent::ConnectAck {
+                host_addr,
+                host_port,
+                relay,
+                ..
+            }) => {
                 // Compose addr:port for a directly usable socket address string.
                 host_pub_addr = match (host_addr, host_port) {
                     (Some(a), Some(p)) => Some(format!("{a}:{p}")),
@@ -129,7 +137,11 @@ pub async fn run(
                     info!(
                         "Host public addr: {} ({})",
                         a,
-                        if relay { "relay required" } else { "direct path may be possible — not yet wired" }
+                        if relay {
+                            "relay required"
+                        } else {
+                            "direct path may be possible — not yet wired"
+                        }
                     );
                 }
             }
@@ -216,7 +228,14 @@ pub async fn run(
         TrustDecision::Unknown => {
             let (tx, rx) = oneshot::channel::<bool>();
             *pending_pairing.lock() = Some(tx);
-            emit_status_full(&app, "pairing_required", None, Some(host_fpr.clone()), host_pub_addr.clone(), None);
+            emit_status_full(
+                &app,
+                "pairing_required",
+                None,
+                Some(host_fpr.clone()),
+                host_pub_addr.clone(),
+                None,
+            );
 
             // 120s to give the user time to compare fingerprints out-of-band.
             // Also races cancel_rx: without this, a session superseded by a new
@@ -273,8 +292,7 @@ pub async fn run(
     // with no loopback device, which would leave the audio thread parked
     // forever on a channel nothing ever sends to — and would show the user
     // audio controls for a stream that never arrives.
-    let audio_enabled =
-        result.selected_audio_codec == AudioCodec::Opus && result.audio_available;
+    let audio_enabled = result.selected_audio_codec == AudioCodec::Opus && result.audio_available;
 
     emit_status_full(
         &app,
@@ -299,7 +317,10 @@ pub async fn run(
                     let channels = af.channels;
                     if audio_decoder.is_none() {
                         if let Ok(layout) = Layout::from_channels(channels) {
-                            match (AudioDecoder::new(layout), AudioPlayer::new(channels, 48_000)) {
+                            match (
+                                AudioDecoder::new(layout),
+                                AudioPlayer::new(channels, 48_000),
+                            ) {
                                 (Ok(d), Ok(p)) => {
                                     audio_decoder = Some(d);
                                     audio_player = Some(p);
@@ -310,7 +331,9 @@ pub async fn run(
                             }
                         }
                     }
-                    if let (Some(dec), Some(player)) = (audio_decoder.as_mut(), audio_player.as_ref()) {
+                    if let (Some(dec), Some(player)) =
+                        (audio_decoder.as_mut(), audio_player.as_ref())
+                    {
                         match dec.decode(&af) {
                             Ok(samples) => player.push(samples),
                             Err(e) => warn!("audio decode: {e}"),
@@ -596,11 +619,7 @@ fn write_recording_frame(recording: &Arc<Mutex<Option<RecordingState>>>, jpeg: &
     let Some(ref mut rec) = *guard else { return };
 
     // Compute byte offset where this frame starts.
-    let offset: u64 = rec
-        .frames_file
-        .metadata()
-        .map(|m| m.len())
-        .unwrap_or(0);
+    let offset: u64 = rec.frames_file.metadata().map(|m| m.len()).unwrap_or(0);
     let size = jpeg.len() as u32;
 
     // Write frame data first — if we crash here no index entry points to the

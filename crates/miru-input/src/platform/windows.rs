@@ -19,12 +19,9 @@ const ABS_VIRTUAL: MOUSE_EVENT_FLAGS = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUA
 
 pub fn inject(event: &InputEvent) -> Result<()> {
     match &event.kind {
-        InputKind::MouseMove { x, y, .. } => mouse_event(
-            MOUSEEVENTF_MOVE | ABS_VIRTUAL,
-            to_abs(*x),
-            to_abs(*y),
-            0,
-        ),
+        InputKind::MouseMove { x, y, .. } => {
+            mouse_event(MOUSEEVENTF_MOVE | ABS_VIRTUAL, to_abs(*x), to_abs(*y), 0)
+        }
         InputKind::MouseDown { button, x, y, .. } => {
             let (flags, data) = mouse_down_flags(button);
             mouse_event(flags | ABS_VIRTUAL, to_abs(*x), to_abs(*y), data)
@@ -176,7 +173,10 @@ pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
         let text = String::from_utf8_lossy(data);
         set_clipboard(&text)
     } else {
-        tracing::warn!("Clipboard format '{}' not supported on Windows (text only)", mime_type);
+        tracing::warn!(
+            "Clipboard format '{}' not supported on Windows (text only)",
+            mime_type
+        );
         Ok(())
     }
 }

@@ -63,7 +63,9 @@ impl FrameController {
     /// the capture thread picks these up on the next frame iteration.
     pub fn apply_qos(&self, fps: u8, bitrate_kbps: u32) {
         let old_fps = self.target_fps.swap(fps, Ordering::Relaxed);
-        let old_br = self.target_bitrate_kbps.swap(bitrate_kbps, Ordering::Relaxed);
+        let old_br = self
+            .target_bitrate_kbps
+            .swap(bitrate_kbps, Ordering::Relaxed);
         if old_fps != fps || old_br != bitrate_kbps {
             info!(
                 "QoS applied to capture: {}fps {}kbps → {}fps {}kbps",
@@ -221,7 +223,10 @@ mod tests {
             "on_ack(u32::MAX) must not increase in_flight (got {after})"
         );
         // should_capture must return true (backpressure released)
-        assert!(c.should_capture(), "capture must not be blocked after huge on_ack");
+        assert!(
+            c.should_capture(),
+            "capture must not be blocked after huge on_ack"
+        );
     }
 
     #[test]

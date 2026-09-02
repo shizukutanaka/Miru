@@ -102,10 +102,7 @@ pub fn has_hw_encode() -> bool {
 /// Codecs that in practice require a hardware encoder in this project.
 /// VP8/VP9 are software (libvpx) and JPEG is trivially software.
 fn is_hardware_codec(c: &VideoCodec) -> bool {
-    matches!(
-        c,
-        VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265
-    )
+    matches!(c, VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265)
 }
 
 #[cfg(test)]
@@ -157,8 +154,7 @@ mod tests {
         let u = vec![128u8; uv_size];
         let v = vec![128u8; uv_size];
 
-        let jpeg =
-            crate::jpeg::i420_to_jpeg_raw(&y, &u, &v, w, h, 80).expect("JPEG encode");
+        let jpeg = crate::jpeg::i420_to_jpeg_raw(&y, &u, &v, w, h, 80).expect("JPEG encode");
         assert!(
             jpeg.len() > 4 && jpeg[0] == 0xFF && jpeg[1] == 0xD8 && jpeg[2] == 0xFF,
             "output does not start with JPEG SOI marker"
@@ -177,10 +173,7 @@ mod tests {
             .expect("encode")
             .expect("packet");
         assert!(packet.keyframe, "first JPEG frame must be keyframe");
-        assert!(
-            !packet.data.is_empty(),
-            "encoded packet must be non-empty"
-        );
+        assert!(!packet.data.is_empty(), "encoded packet must be non-empty");
         assert_eq!(packet.data[0], 0xFF, "packet must start with JPEG SOI");
     }
 }

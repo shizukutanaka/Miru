@@ -12,11 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **Formatting drift in six files introduced by earlier work on this branch**
-  (`cargo fmt --all --check` is a required check and was failing). Scoped to the
-  files that were clean at the merge base and dirty afterwards, so the fix is 61
-  lines rather than a 2289-line workspace-wide reformat that would bury the
-  actual change.
+- **`cargo fmt --all --check` now passes repo-wide** (it was a required check in
+  both `CLAUDE.md` and the PR template, and had been failing on 42 files). Done in
+  two commits so the mechanical change never hides a real one: first the 6 files
+  this branch itself made dirty, then the remaining 42 as an isolated
+  formatting-only commit. Verified mechanical — for 33 of the 42 the token stream
+  is byte-identical ignoring whitespace and commas, and the other 9 are `use`/`mod`
+  reordering and expression-block reflow with no logic change.
 
 - **BBR QoS adaptation was inert** (Socratic: the QoS loop computed new fps/bitrate
   every second but only sent `QosUpdate` to the viewer for display — the host's

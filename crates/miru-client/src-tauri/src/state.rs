@@ -5,7 +5,6 @@ use miru_auth::{AclStore, DeviceIdentity, TrustedPeer};
 use miru_common::message::{
     ClipboardFormat, ClipboardSync, FileTransfer, InputEvent, Msg, SelectDisplay,
 };
-use uuid::Uuid;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -14,6 +13,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tracing::info;
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SessionStats {
@@ -86,7 +86,10 @@ impl AppState {
                 DeviceIdentity::generate()
             });
         let acl = AclStore::load(&config_dir.join("acl.json")).unwrap_or_else(|e| {
-            tracing::warn!("ACL load failed: {}; starting with empty trusted-peer list", e);
+            tracing::warn!(
+                "ACL load failed: {}; starting with empty trusted-peer list",
+                e
+            );
             AclStore::default()
         });
 
@@ -184,22 +187,27 @@ impl AppState {
                         }
                         // Jittered so simultaneous viewers don't retry in lockstep
                         // (miru_common::backoff). attempt is 1-based here.
-                        let delay = miru_common::backoff::next_delay(
-                            attempt.saturating_sub(1),
-                            2,
-                            16,
-                        );
+                        let delay =
+                            miru_common::backoff::next_delay(attempt.saturating_sub(1), 2, 16);
                         tracing::warn!(
                             "Session error (attempt {}/{}): {}; retrying in {}s",
-                            attempt, MAX_RECONNECT_ATTEMPTS, e, delay.as_secs()
+                            attempt,
+                            MAX_RECONNECT_ATTEMPTS,
+                            e,
+                            delay.as_secs()
                         );
-                        let _ = app_clone.emit("session-event", crate::session::SessionEvent {
-                            kind: "reconnecting".to_string(),
-                            message: Some(format!("再接続 ({attempt}/{MAX_RECONNECT_ATTEMPTS})...")),
-                            fingerprint: None,
-                            host_pub_addr: None,
-                            audio_available: None,
-                        });
+                        let _ = app_clone.emit(
+                            "session-event",
+                            crate::session::SessionEvent {
+                                kind: "reconnecting".to_string(),
+                                message: Some(format!(
+                                    "再接続 ({attempt}/{MAX_RECONNECT_ATTEMPTS})..."
+                                )),
+                                fingerprint: None,
+                                host_pub_addr: None,
+                                audio_available: None,
+                            },
+                        );
                         tokio::time::sleep(delay).await;
                         // Re-create cmd channel (and pending_pairing slot) for the new attempt.
                         let (new_cmd_tx, new_cmd_rx) = mpsc::channel::<Msg>(64);
@@ -230,7 +238,9 @@ impl AppState {
     pub async fn send_msg(&self, msg: Msg) -> Result<()> {
         let tx = self.session.lock().as_ref().map(|s| s.tx.clone());
         if let Some(tx) = tx {
-            tx.send(msg).await.map_err(|_| anyhow::anyhow!("session closed"))?;
+            tx.send(msg)
+                .await
+                .map_err(|_| anyhow::anyhow!("session closed"))?;
         }
         Ok(())
     }
@@ -459,7 +469,9 @@ impl AppState {
 
     pub fn discover_lan_peers(&self) -> Vec<crate::commands::LanPeer> {
         let guard = self.discovery.lock();
-        let Some(ref disc) = *guard else { return vec![] };
+        let Some(ref disc) = *guard else {
+            return vec![];
+        };
         // Prune peers not seen in 60 s before returning snapshot.
         disc.prune_stale(std::time::Duration::from_secs(60));
         disc.snapshot(None)
@@ -535,7 +547,10 @@ impl AppState {
         });
         std::fs::write(rec.dir.join("meta.json"), meta.to_string())
             .map_err(|e| anyhow::anyhow!("failed to write recording metadata: {e}"))?;
-        info!("Recording stopped: {} ({} frames)", rec.session_id, frame_count);
+        info!(
+            "Recording stopped: {} ({} frames)",
+            rec.session_id, frame_count
+        );
 
         Ok(crate::commands::RecordingSummary {
             path: rec.dir.to_string_lossy().to_string(),
@@ -677,7 +692,9 @@ fn now_unix() -> u64 {
 }
 
 fn dir_size(path: &std::path::Path) -> u64 {
-    let Ok(rd) = std::fs::read_dir(path) else { return 0 };
+    let Ok(rd) = std::fs::read_dir(path) else {
+        return 0;
+    };
     let mut total = 0u64;
     for entry in rd.flatten() {
         let p = entry.path();

@@ -42,7 +42,10 @@ impl MacosCapturer {
         }
         info!("macOS capture: {} display(s)", displays.len());
 
-        Ok(Self { current_display: 0, displays_cache: displays })
+        Ok(Self {
+            current_display: 0,
+            displays_cache: displays,
+        })
     }
 
     fn enumerate_displays() -> Result<Vec<DisplayInfo>> {
@@ -93,7 +96,9 @@ impl MacosCapturer {
         let display_id = active
             .get(self.current_display as usize)
             .copied()
-            .ok_or_else(|| anyhow::anyhow!("display index {} out of range", self.current_display))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("display index {} out of range", self.current_display)
+            })?;
         let dsp = CGDisplay::new(display_id);
         let img = dsp.image();
         let img = match img {

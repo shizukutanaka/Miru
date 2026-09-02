@@ -40,7 +40,10 @@ impl AudioPlayer {
                         match rx.try_recv() {
                             Ok(samples) => leftover = samples,
                             Err(_) => {
-                                trace!("audio underrun — filling silence ({} samples)", out.len() - filled);
+                                trace!(
+                                    "audio underrun — filling silence ({} samples)",
+                                    out.len() - filled
+                                );
                                 for s in &mut out[filled..] {
                                     *s = 0.0;
                                 }

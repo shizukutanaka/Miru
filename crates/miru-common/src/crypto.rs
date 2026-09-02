@@ -86,7 +86,8 @@ impl SessionCipher {
             .expand(&info_slices, hkdf::HKDF_SHA256)
             .map_err(|_| anyhow::anyhow!("hkdf expand failed"))?;
         let mut sub = [0u8; 32];
-        okm.fill(&mut sub).map_err(|_| anyhow::anyhow!("hkdf fill failed"))?;
+        okm.fill(&mut sub)
+            .map_err(|_| anyhow::anyhow!("hkdf fill failed"))?;
         Ok(Self::new(sub))
     }
 

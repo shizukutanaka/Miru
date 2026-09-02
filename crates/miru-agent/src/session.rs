@@ -9,7 +9,13 @@
 
 use anyhow::{bail, Result};
 use parking_lot::Mutex;
-use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 use tracing::{info, warn};
 
 use crate::{

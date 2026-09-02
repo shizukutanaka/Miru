@@ -132,7 +132,10 @@ impl Discovery {
                             }
                             let mut map = peers_clone.write();
                             if map.len() >= MAX_PEERS && !map.contains_key(&peer.device_id) {
-                                warn!("Discovery: peer limit {MAX_PEERS} reached, ignoring {}", peer.device_id);
+                                warn!(
+                                    "Discovery: peer limit {MAX_PEERS} reached, ignoring {}",
+                                    peer.device_id
+                                );
                             } else {
                                 debug!(
                                     "Discovery: found {} ({})",
@@ -198,7 +201,10 @@ fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
     // drop one of the two values with no diagnostic trail.
     let mut txt: HashMap<String, String> = HashMap::new();
     for p in info.get_properties().iter() {
-        if txt.insert(p.key().to_string(), p.val_str().to_string()).is_some() {
+        if txt
+            .insert(p.key().to_string(), p.val_str().to_string())
+            .is_some()
+        {
             warn!(
                 "Discovery: duplicate TXT key '{}' from {}",
                 p.key(),
@@ -212,13 +218,15 @@ fn parse_peer(info: &ServiceInfo) -> Option<DiscoveredPeer> {
     if device_id.is_empty() || device_id.len() > 32 {
         return None;
     }
-    let constellation_pubkey = txt.get("constellation")
+    let constellation_pubkey = txt
+        .get("constellation")
         .cloned()
         .unwrap_or_default()
         .chars()
         .take(128)
         .collect();
-    let friendly_name: String = txt.get("name")
+    let friendly_name: String = txt
+        .get("name")
         .cloned()
         .unwrap_or_default()
         .chars()

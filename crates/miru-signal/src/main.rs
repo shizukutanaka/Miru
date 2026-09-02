@@ -17,11 +17,15 @@ use axum::{
 };
 use dashmap::DashMap;
 use miru_common::message::{ConnectAck, Msg, RegisterAck, RelayOffer};
+use rand::Rng;
 use serde::Deserialize;
-use std::{net::{IpAddr, SocketAddr}, sync::Arc, time::{Duration, Instant}};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::mpsc;
 use tracing::{info, warn};
-use rand::Rng;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -103,8 +107,8 @@ impl AppState {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MAX_RELAY_SESSIONS);
-        let public_host = std::env::var("MIRU_PUBLIC_HOST")
-            .unwrap_or_else(|_| "localhost".to_string());
+        let public_host =
+            std::env::var("MIRU_PUBLIC_HOST").unwrap_or_else(|_| "localhost".to_string());
         let require_signed_register = std::env::var("MIRU_REQUIRE_SIGNED_REGISTER").is_ok();
         if require_signed_register {
             info!("MIRU_REQUIRE_SIGNED_REGISTER set — unsigned Register messages will be rejected");
@@ -131,10 +135,13 @@ impl AppState {
         self.connect_rate
             .retain(|_, b| now.duration_since(b.window_start) < CONNECT_RATE_WINDOW * 2);
 
-        let mut entry = self.connect_rate.entry(ip).or_insert_with(|| ConnectBucket {
-            count: 0,
-            window_start: now,
-        });
+        let mut entry = self
+            .connect_rate
+            .entry(ip)
+            .or_insert_with(|| ConnectBucket {
+                count: 0,
+                window_start: now,
+            });
         if now.duration_since(entry.window_start) >= CONNECT_RATE_WINDOW {
             entry.count = 0;
             entry.window_start = now;
@@ -198,9 +205,12 @@ async fn run_server(app: Router, addr: SocketAddr) -> Result<()> {
 
 async fn run_server_with_connect_info(app: Router, addr: SocketAddr) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .map_err(Into::into)
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .map_err(Into::into)
 }
 
 // ─── Rendezvous ───────────────────────────────────────────────────────────────
@@ -301,7 +311,10 @@ async fn process_rdv_msg(
             // Reject absurdly long device IDs before they reach the DashMap.
             // A UUID hex + optional prefix is always < 128 bytes; 256 is generous.
             if reg.device_id.len() > 256 {
-                warn!("Register rejected: device_id too long ({} bytes)", reg.device_id.len());
+                warn!(
+                    "Register rejected: device_id too long ({} bytes)",
+                    reg.device_id.len()
+                );
                 let _ = tx
                     .send(Msg::Error(miru_common::message::ErrorMsg {
                         code: 400,
@@ -314,7 +327,10 @@ async fn process_rdv_msg(
             // allow 64 for forward-compat (e.g., post-quantum hybrid). Anything larger
             // would trigger a large allocation inside verify_register_signature().
             if reg.pubkey.len() > 64 {
-                warn!("Register rejected: pubkey too long ({} bytes)", reg.pubkey.len());
+                warn!(
+                    "Register rejected: pubkey too long ({} bytes)",
+                    reg.pubkey.len()
+                );
                 let _ = tx
                     .send(Msg::Error(miru_common::message::ErrorMsg {
                         code: 400,
@@ -381,7 +397,10 @@ async fn process_rdv_msg(
                     );
                 }
                 Err(e) => {
-                    warn!("Register rejected: invalid ownership proof for {}: {}", reg.device_id, e);
+                    warn!(
+                        "Register rejected: invalid ownership proof for {}: {}",
+                        reg.device_id, e
+                    );
                     let _ = tx
                         .send(Msg::Error(miru_common::message::ErrorMsg {
                             code: 403,
@@ -411,7 +430,8 @@ async fn process_rdv_msg(
                         let _ = tx
                             .send(Msg::Error(miru_common::message::ErrorMsg {
                                 code: 403,
-                                message: "device_id is identity-locked; ownership proof required".to_string(),
+                                message: "device_id is identity-locked; ownership proof required"
+                                    .to_string(),
                             }))
                             .await;
                         return;
@@ -465,7 +485,10 @@ async fn process_rdv_msg(
         Msg::Connect(req) => {
             let target = req.target_id.clone();
             if target.len() > 256 {
-                warn!("Connect rejected: target_id too long ({} bytes)", target.len());
+                warn!(
+                    "Connect rejected: target_id too long ({} bytes)",
+                    target.len()
+                );
                 let _ = tx
                     .send(Msg::Error(miru_common::message::ErrorMsg {
                         code: 400,
@@ -475,7 +498,10 @@ async fn process_rdv_msg(
                 return;
             }
             if !state.check_connect_rate(peer_ip) {
-                warn!("Rate limit exceeded for {} — dropping Connect to {}", peer_ip, target);
+                warn!(
+                    "Rate limit exceeded for {} — dropping Connect to {}",
+                    peer_ip, target
+                );
                 let _ = tx
                     .send(Msg::Error(miru_common::message::ErrorMsg {
                         code: 429,
@@ -598,7 +624,11 @@ async fn relay_session(sock: WebSocket, token: String, role: Option<String>, sta
     // A valid token is exactly a 32-char UUID simple hex string.
     // Reject malformed tokens immediately to avoid unnecessary DashMap lookups.
     if token.len() != 32 || !token.chars().all(|c| c.is_ascii_hexdigit()) {
-        warn!("Relay: rejecting malformed token (len={}, valid_hex={})", token.len(), token.chars().all(|c| c.is_ascii_hexdigit()));
+        warn!(
+            "Relay: rejecting malformed token (len={}, valid_hex={})",
+            token.len(),
+            token.chars().all(|c| c.is_ascii_hexdigit())
+        );
         return;
     }
 

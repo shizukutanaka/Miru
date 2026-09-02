@@ -68,7 +68,10 @@ async fn main() -> Result<()> {
     // ACL (TOFU peer database)
     let acl = Arc::new(Mutex::new(
         AclStore::load(&config_dir.join("acl.json")).unwrap_or_else(|e| {
-            tracing::warn!("ACL load failed: {}; starting with empty trusted-peer list", e);
+            tracing::warn!(
+                "ACL load failed: {}; starting with empty trusted-peer list",
+                e
+            );
             AclStore::default()
         }),
     ));
@@ -114,7 +117,11 @@ async fn main() -> Result<()> {
     let hw = miru_codec::probe_hw();
     if !hw.is_empty() {
         for h in &hw {
-            info!("HW encoder detected (not yet used): {} → {:?}", h.name(), h.codecs());
+            info!(
+                "HW encoder detected (not yet used): {} → {:?}",
+                h.name(),
+                h.codecs()
+            );
         }
     }
 

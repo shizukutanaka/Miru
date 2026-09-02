@@ -5,8 +5,8 @@ use anyhow::{bail, Result};
 use miru_common::message::VideoCodec;
 use vpx_sys::*;
 
-use crate::{DecodedFrame, EncodedPacket, EncoderBackend};
 use crate::decoder::DecoderBackend;
+use crate::{DecodedFrame, EncodedPacket, EncoderBackend};
 
 pub struct VpxEncoder {
     ctx: vpx_codec_ctx_t,
@@ -66,12 +66,12 @@ impl VpxEncoder {
                 set_ctrl(&mut ctx, VP9E_SET_TILE_COLUMNS, 4)?;
                 set_ctrl(&mut ctx, VP9E_SET_FRAME_PARALLEL_DECODING, 1)?;
                 set_ctrl(&mut ctx, VP9E_SET_AQ_MODE, 3)?; // cyclic refresh
-                // Tune for screen content (VPX_CONTENT_SCREEN = 1 in the
-                // vpx_tune_content enum). Miru is a screen-sharing tool, so
-                // frames are dominated by text, sharp edges, and large flat
-                // regions — exactly what libvpx's screen-content mode targets
-                // (it biases toward palette/intra-block-copy-style decisions).
-                // See docs/RESEARCH_NOTES.md §1.
+                                                          // Tune for screen content (VPX_CONTENT_SCREEN = 1 in the
+                                                          // vpx_tune_content enum). Miru is a screen-sharing tool, so
+                                                          // frames are dominated by text, sharp edges, and large flat
+                                                          // regions — exactly what libvpx's screen-content mode targets
+                                                          // (it biases toward palette/intra-block-copy-style decisions).
+                                                          // See docs/RESEARCH_NOTES.md §1.
                 set_ctrl(&mut ctx, VP9E_SET_TUNE_CONTENT, 1)?;
             }
 
@@ -114,7 +114,12 @@ impl EncoderBackend for VpxEncoder {
             // unreasonable allocations before any unsafe pointer work.
             const MAX_FRAME_DIM: u32 = 32768;
             if width > MAX_FRAME_DIM || height > MAX_FRAME_DIM {
-                bail!("VpxEncoder: frame dimensions {}×{} exceed limit {}", width, height, MAX_FRAME_DIM);
+                bail!(
+                    "VpxEncoder: frame dimensions {}×{} exceed limit {}",
+                    width,
+                    height,
+                    MAX_FRAME_DIM
+                );
             }
             let y_size = (width as usize) * (height as usize);
             let uv_size = (width as usize / 2) * (height as usize / 2);
@@ -196,7 +201,9 @@ impl EncoderBackend for VpxEncoder {
             self.cfg.rc_target_bitrate = kbps;
             let rc = vpx_codec_enc_config_set(&mut self.ctx, &self.cfg);
             if rc != vpx_codec_err_t::VPX_CODEC_OK {
-                tracing::warn!("vpx_codec_enc_config_set failed when updating bitrate to {kbps} kbps: {rc:?}");
+                tracing::warn!(
+                    "vpx_codec_enc_config_set failed when updating bitrate to {kbps} kbps: {rc:?}"
+                );
             }
         }
     }

@@ -306,7 +306,11 @@ pub struct InputEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "k", rename_all = "snake_case")]
 pub enum InputKind {
-    MouseMove { x: f32, y: f32, display: u8 },
+    MouseMove {
+        x: f32,
+        y: f32,
+        display: u8,
+    },
     MouseDown {
         button: MouseButton,
         x: f32,
@@ -349,7 +353,9 @@ pub enum InputKind {
         #[serde(default)]
         code: Option<String>,
     },
-    Text { text: String },
+    Text {
+        text: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -539,7 +545,10 @@ mod tests {
             "msgpack ({msgpack_size}B) should be <40% of JSON ({json_size}B), got ratio={ratio:.2}"
         );
         // sanity: msgpack must still contain roughly the payload bytes
-        assert!(msgpack_size > payload_size, "msgpack must not magically shrink the data");
+        assert!(
+            msgpack_size > payload_size,
+            "msgpack must not magically shrink the data"
+        );
     }
 
     #[test]
@@ -561,7 +570,9 @@ mod tests {
         let msg = Msg::VideoFrame(original.clone());
         let encoded = rmp_serde::to_vec_named(&msg).unwrap();
         let decoded: Msg = rmp_serde::from_slice(&encoded).unwrap();
-        let Msg::VideoFrame(rt) = decoded else { panic!("wrong variant") };
+        let Msg::VideoFrame(rt) = decoded else {
+            panic!("wrong variant")
+        };
         assert_eq!(rt.seq, original.seq);
         assert_eq!(rt.data, original.data);
         assert_eq!(rt.width, original.width);

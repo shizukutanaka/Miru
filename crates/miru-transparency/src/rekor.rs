@@ -140,7 +140,11 @@ pub async fn submit_host_to_rekor(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("Rekor returned {}: {}", status, &text[..text.len().min(200)]);
+        anyhow::bail!(
+            "Rekor returned {}: {}",
+            status,
+            &text[..text.len().min(200)]
+        );
     }
 
     let map: serde_json::Map<String, serde_json::Value> = resp

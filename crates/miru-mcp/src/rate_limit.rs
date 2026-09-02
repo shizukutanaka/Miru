@@ -241,7 +241,10 @@ mod tests {
 
         // Wait 60ms more. With the fix, the 50ms carried + 60ms new = 110ms ≥ 100ms → +1 token.
         sleep(Duration::from_millis(70));
-        assert!(bucket.try_consume().is_ok(), "sub-token remainder must carry forward");
+        assert!(
+            bucket.try_consume().is_ok(),
+            "sub-token remainder must carry forward"
+        );
     }
 
     #[test]

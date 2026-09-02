@@ -162,12 +162,12 @@ pub fn lookup(code: &str) -> Option<KeyCodes> {
         // Without these a JIS keyboard cannot type ¥ or ろ, and cannot switch
         // IME state at all (変換 / 無変換 / かな). macOS has no keycode for
         // the three IME keys, so they resolve to None there.
-        "IntlYen" => (124, 93, 0xDC),          // ¥      VK_OEM_5
-        "IntlRo" => (89, 94, 0xE2),            // ろ/_   VK_OEM_102
-        "IntlBackslash" => (86, 10, 0xE2),     // ISO <> VK_OEM_102
-        "Convert" => (92, NO_CODE, 0x1C),      // 変換   VK_CONVERT
-        "NonConvert" => (94, NO_CODE, 0x1D),   // 無変換 VK_NONCONVERT
-        "KanaMode" => (93, NO_CODE, 0x15),     // かな   VK_KANA
+        "IntlYen" => (124, 93, 0xDC),        // ¥      VK_OEM_5
+        "IntlRo" => (89, 94, 0xE2),          // ろ/_   VK_OEM_102
+        "IntlBackslash" => (86, 10, 0xE2),   // ISO <> VK_OEM_102
+        "Convert" => (92, NO_CODE, 0x1C),    // 変換   VK_CONVERT
+        "NonConvert" => (94, NO_CODE, 0x1D), // 無変換 VK_NONCONVERT
+        "KanaMode" => (93, NO_CODE, 0x15),   // かな   VK_KANA
         // Lang1/Lang2 are Hangul/Hanja on Korean layouts and share Windows VKs
         // with Kana/Kanji — that collision is Windows' own numbering, not a
         // transcription error.
@@ -245,7 +245,10 @@ mod tests {
         assert_eq!(a.evdev, 30, "evdev KEY_A");
         assert_eq!(a.mac, 0, "kVK_ANSI_A");
         assert_eq!(a.vk, 0x41, "VK 'A' — matches legacy keyCode by coincidence");
-        assert_ne!(a.evdev, 65, "must not pass browser keyCode through (KEY_F7)");
+        assert_ne!(
+            a.evdev, 65,
+            "must not pass browser keyCode through (KEY_F7)"
+        );
         assert_ne!(a.mac, 65, "must not pass browser keyCode through");
     }
 
@@ -300,8 +303,19 @@ mod tests {
     /// than injecting the 0xFFFF sentinel as a real key.
     #[test]
     fn keys_absent_on_macos_resolve_to_none() {
-        for code in ["Convert", "NonConvert", "KanaMode", "PrintScreen", "ScrollLock", "Pause"] {
-            assert_eq!(code_to_cgkeycode(code), None, "{code} should be absent on macOS");
+        for code in [
+            "Convert",
+            "NonConvert",
+            "KanaMode",
+            "PrintScreen",
+            "ScrollLock",
+            "Pause",
+        ] {
+            assert_eq!(
+                code_to_cgkeycode(code),
+                None,
+                "{code} should be absent on macOS"
+            );
             // ...but they still exist on Linux and Windows.
             assert!(code_to_evdev(code).is_some(), "{code} evdev");
             assert!(code_to_vk(code).is_some(), "{code} vk");

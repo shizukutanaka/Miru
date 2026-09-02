@@ -98,7 +98,11 @@ impl UinputDevice {
             libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_WHEEL as libc::c_int);
             // Without REL_HWHEEL the device cannot emit horizontal scroll at
             // all, so dx was structurally impossible before this.
-            libc::ioctl(fd, UI_SET_RELBIT as libc::c_ulong, REL_HWHEEL as libc::c_int);
+            libc::ioctl(
+                fd,
+                UI_SET_RELBIT as libc::c_ulong,
+                REL_HWHEEL as libc::c_int,
+            );
 
             // Enable absolute axes (for absolute mouse positioning)
             libc::ioctl(fd, UI_SET_ABSBIT as libc::c_ulong, ABS_X as libc::c_int);

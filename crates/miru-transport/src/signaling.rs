@@ -59,7 +59,8 @@ impl SignalClient {
         identity_pubkey: Option<&[u8; 32]>,
         pub_addr: Option<(String, u16)>,
     ) -> Result<Self> {
-        Self::connect_with_pub_addr_signed(signal_url, device_id, identity_pubkey, None, pub_addr).await
+        Self::connect_with_pub_addr_signed(signal_url, device_id, identity_pubkey, None, pub_addr)
+            .await
     }
 
     /// Like `connect_with_pub_addr` but also signs the Register message with
@@ -72,7 +73,8 @@ impl SignalClient {
         signing_key: Option<&SigningKey>,
         pub_addr: Option<(String, u16)>,
     ) -> Result<Self> {
-        let client = Self::connect_signed(signal_url, device_id, identity_pubkey, signing_key).await?;
+        let client =
+            Self::connect_signed(signal_url, device_id, identity_pubkey, signing_key).await?;
         if let Some((addr, port)) = pub_addr {
             client
                 .register_with_pub_addr(device_id, Some(addr), Some(port))
@@ -293,8 +295,8 @@ pub fn verify_register_signature(reg: &miru_common::message::Register) -> Result
     let pk_arr: [u8; 32] = pk_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("pubkey must be 32 bytes"))?;
-    let vk = VerifyingKey::from_bytes(&pk_arr)
-        .map_err(|e| anyhow::anyhow!("invalid pubkey: {e}"))?;
+    let vk =
+        VerifyingKey::from_bytes(&pk_arr).map_err(|e| anyhow::anyhow!("invalid pubkey: {e}"))?;
 
     // Decode the signature.
     let sig_bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD

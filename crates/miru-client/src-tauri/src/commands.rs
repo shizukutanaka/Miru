@@ -181,7 +181,10 @@ pub async fn send_file(
 /// Ask the host to send its current clipboard content immediately.
 #[tauri::command]
 pub async fn request_clipboard(state: State<'_, AppState>) -> Result<(), String> {
-    state.send_msg(miru_common::message::Msg::RequestClipboard).await.map_err(|e| e.to_string())
+    state
+        .send_msg(miru_common::message::Msg::RequestClipboard)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Send a viewer QoS preference hint to the host.
@@ -197,7 +200,11 @@ pub async fn send_qos_hint(
 ) -> Result<(), String> {
     use miru_common::message::{Msg, QosHint};
     state
-        .send_msg(Msg::QosHint(QosHint { mode, max_fps, min_quality }))
+        .send_msg(Msg::QosHint(QosHint {
+            mode,
+            max_fps,
+            min_quality,
+        }))
         .await
         .map_err(|e| e.to_string())
 }

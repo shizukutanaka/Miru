@@ -62,14 +62,22 @@ pub fn inject(event: &InputEvent) -> Result<()> {
             ev.post(CGEventTapLocation::HID);
         }
 
-        InputKind::KeyDown { key, modifiers, code } => {
+        InputKind::KeyDown {
+            key,
+            modifiers,
+            code,
+        } => {
             let ev = CGEvent::new_keyboard_event(src, cg_code(*key, code), true)
                 .map_err(|_| anyhow::anyhow!("keydown event"))?;
             ev.set_flags(modifier_flags(*modifiers));
             ev.post(CGEventTapLocation::HID);
         }
 
-        InputKind::KeyUp { key, modifiers, code } => {
+        InputKind::KeyUp {
+            key,
+            modifiers,
+            code,
+        } => {
             let ev = CGEvent::new_keyboard_event(src, cg_code(*key, code), false)
                 .map_err(|_| anyhow::anyhow!("keyup event"))?;
             ev.set_flags(modifier_flags(*modifiers));
@@ -204,7 +212,10 @@ pub fn set_clipboard_raw(data: &[u8], mime_type: &str) -> Result<()> {
         let text = String::from_utf8_lossy(data);
         set_clipboard(&text)
     } else {
-        tracing::warn!("Clipboard format '{}' not supported on macOS (text only)", mime_type);
+        tracing::warn!(
+            "Clipboard format '{}' not supported on macOS (text only)",
+            mime_type
+        );
         Ok(())
     }
 }

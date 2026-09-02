@@ -70,7 +70,11 @@ impl SessionRecorder {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MAX_RECORDING_BYTES);
 
-        info!("Recording started: {} (limit {:.1} GiB)", path.display(), max_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
+        info!(
+            "Recording started: {} (limit {:.1} GiB)",
+            path.display(),
+            max_bytes as f64 / 1024.0 / 1024.0 / 1024.0
+        );
 
         let mut writer = BufWriter::with_capacity(1024 * 1024, file);
         // Write a simple header so we know it's a Miru recording
