@@ -109,14 +109,15 @@ else
   echo "$orphans" | sed 's/^/       /'
 fi
 
-# ── 2c. Cross-crate struct literals ──────────────────────────────────────────
-# A struct literal that disagrees with its definition in another crate is one of
-# the two mistakes this branch actually shipped, and neither the gate nor review
-# caught it. Verified against the commit where it happened: the checker flags
-# 8539eb0^ and is clean here.
-step "Cross-crate struct literals"
+# ── 2c. Cross-crate definition/use consistency ───────────────────────────────
+# Both compile errors this branch actually shipped were a definition changing
+# without its use in another crate following — a struct literal missing a field,
+# and a call passing one argument too many. Neither the gate nor review caught
+# them at the time. Verified against the commits where they happened: the
+# checker flags 8539eb0^ and 8c7822a^, and is clean here.
+step "Cross-crate definition/use consistency"
 if mismatches=$(python3 scripts/check-cross-crate.py); then
-  ok "every checked struct literal matches its definition"
+  ok "struct literals and path-qualified calls match their definitions"
 else
   fail "struct literal(s) disagreeing with the definition:"
   echo "$mismatches" | sed 's/^/       /'

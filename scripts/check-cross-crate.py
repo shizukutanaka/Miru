@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Find struct literals that disagree with their definition, across crates.
+"""Find definitions and uses that disagree across the workspace.
 
 WHY THIS EXISTS
 
@@ -11,26 +11,30 @@ it:
     8539eb0  SessionEvent gained a field; the literal in state.rs did not
     8c7822a  session::run lost a parameter; the call site still passed it
 
-Only the first is checked here. An argument-count check was written for the
-second and then deleted: `run` is defined in half a dozen crates, so the
-ambiguity rule that keeps false positives down also dropped the very call it
-existed to catch — while still producing noise elsewhere. A check that misses
-its own motivating case and cries wolf is worse than no check, so it is gone
-rather than carried as something that looks like coverage.
+Both are checked, and both are verified against the commit where they happened:
+running this on 8539eb0^ and 8c7822a^ reports the real defect in each, and it is
+clean on current HEAD. That is the bar for the checks being worth having.
+
+The argument-count check took two attempts. Matching a call to a definition by
+bare name does not work — `run` is defined in several crates, so the rule that
+resolves the ambiguity discards the very call worth checking. Resolving a
+*path-qualified* call within the calling file's own crate does work:
+`crate::session::run(..)` names one module in one crate, so the comparison is
+sound and needs no guessing.
 
 WHAT IT DOES NOT DO
 
-Everything else. Argument counts, trait bounds, generic arguments, wrong API
-calls into a dependency, lifetimes — all still invisible. This closes one
-specific hole; it does not make `cargo test --workspace` optional.
+Trait bounds, generic arguments, wrong API calls into a dependency, lifetimes,
+and any call that is not path-qualified — all still invisible. This closes two
+specific holes; it does not make `cargo test --workspace` optional.
 
 BIAS
 
 Deliberately under-reports. A false positive costs a person an investigation and
 teaches them to distrust the check; a miss leaves them exactly where they were.
 So anything ambiguous — a literal with `..base`, a defaulted or non_exhaustive
-struct, a method call, a name defined more than once — is skipped rather than
-guessed at.
+struct, a method call, a bare-name call, a closure in the argument list, a name
+defined more than once in the same crate — is skipped rather than guessed at.
 
 Usage:
   check-cross-crate.py [--root DIR] [-v]
@@ -236,6 +240,80 @@ def check_struct_literals(files, root, structs):
     return problems
 
 
+# ── Path-qualified calls vs their definitions ────────────────────────────────
+#
+# Matching a call to a definition by bare name does not work: `run` is defined
+# in several crates, so either the check is ambiguous or the rule that resolves
+# the ambiguity throws away the case worth checking. A path-qualified call names
+# the module it is calling into — `crate::session::run(..)` — and that resolves
+# to exactly one file, so the arity comparison is sound.
+
+
+def crate_of(rel):
+    """The crate a source file belongs to, as the path above its `src/`.
+
+    Two crates each define `run` in a `session.rs`, so the module stem alone is
+    ambiguous — and `crate::session::run` means *this* crate, which makes the
+    caller's own crate the correct scope to resolve in.
+    """
+    return rel.split("/src/")[0] if "/src/" in rel else os.path.dirname(rel)
+
+
+def module_functions(files, root):
+    """(crate, module stem, fn name) -> (arity, rel path), for free functions.
+
+    Keyed by the file stem because `foo::bar()` resolves to `bar` defined in
+    `foo.rs` or `foo/mod.rs`. Methods and duplicate definitions are dropped.
+    """
+    found = defaultdict(list)
+    for rel in files:
+        stem = os.path.basename(rel)[:-3]
+        if stem == "mod":
+            stem = os.path.basename(os.path.dirname(rel))
+        src = strip_noise(open(os.path.join(root, rel), encoding="utf-8").read())
+        for m in re.finditer(r"\bfn\s+(\w+)\s*(?:<[^>]*>)?\s*\(", src):
+            paren = src.index("(", m.end() - 1)
+            end = match_delim(src, paren, "(", ")")
+            if end < 0:
+                continue
+            params = split_top(src[paren + 1 : end - 1])
+            if params and params[0].lstrip("&").lstrip().startswith(("self", "mut self")):
+                continue  # a method; the call site would be `.name(..)`
+            found[(crate_of(rel), stem, m.group(1))].append((len(params), rel))
+    return {k: v[0] for k, v in found.items() if len(v) == 1}
+
+
+def check_qualified_calls(files, root, fns):
+    problems = []
+    for rel in files:
+        src = strip_noise(open(os.path.join(root, rel), encoding="utf-8").read())
+        for m in re.finditer(r"(?<![.\w])(?:crate::|self::|super::)?(\w+)::(\w+)\s*\(", src):
+            mod_name, fn_name = m.group(1), m.group(2)
+            # An uppercase first segment is a type, so this is an associated
+            # function, not a module path.
+            if mod_name[:1].isupper():
+                continue
+            hit = fns.get((crate_of(rel), mod_name, fn_name))
+            if hit is None:
+                continue
+            arity, def_rel = hit
+            paren = src.index("(", m.end() - 1)
+            end = match_delim(src, paren, "(", ")")
+            if end < 0:
+                continue
+            raw = src[paren + 1 : end - 1]
+            # A closure's parameter list has commas that no bracket encloses,
+            # so the split below would miscount. Skip rather than guess.
+            if "|" in raw:
+                continue
+            args = split_top(raw)
+            if len(args) != arity:
+                problems.append(
+                    (rel, line_of(src, m.start()), f"{mod_name}::{fn_name}", arity, len(args), def_rel)
+                )
+    return problems
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
@@ -246,6 +324,8 @@ def main():
     files = rust_files(root)
     structs = collect_structs(files, root)
     lit = check_struct_literals(files, root, structs)
+    fns = module_functions(files, root)
+    calls = check_qualified_calls(files, root, fns)
 
     for rel, line, name, missing, extra in lit:
         detail = []
@@ -254,12 +334,15 @@ def main():
         if extra:
             detail.append("unknown " + ", ".join(extra))
         print(f"{rel}:{line}: {name} literal — {'; '.join(detail)}")
+    for rel, line, name, want, got, def_rel in calls:
+        print(f"{rel}:{line}: {name}() takes {want} argument(s), {got} passed ({def_rel})")
     if args.verbose:
         print(
-            f"\nchecked {len(structs)} struct(s) across {len(files)} file(s)",
+            f"\nchecked {len(structs)} struct(s) and {len(fns)} module function(s) "
+            f"across {len(files)} file(s)",
             file=sys.stderr,
         )
-    total = len(lit)
+    total = len(lit) + len(calls)
     if total:
         print(f"\n{total} definition/use mismatch(es).")
     sys.exit(1 if total else 0)
