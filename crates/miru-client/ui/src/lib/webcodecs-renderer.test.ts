@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   codecStringFor,
   shouldDecode,
-  b64ToBytes,
   MAX_QUEUE_BEFORE_DROP,
 } from "./webcodecs-renderer";
 
@@ -35,20 +34,5 @@ describe("shouldDecode", () => {
 
   it("drops delta frames when the decode queue is backing up", () => {
     expect(shouldDecode(false, true, MAX_QUEUE_BEFORE_DROP + 1)).toBe(false);
-  });
-});
-
-describe("b64ToBytes", () => {
-  it("decodes base64 to the original bytes", () => {
-    // "Miru" → TWlydQ==
-    expect(Array.from(b64ToBytes("TWlydQ=="))).toEqual([0x4d, 0x69, 0x72, 0x75]);
-  });
-  it("handles empty input", () => {
-    expect(b64ToBytes("").length).toBe(0);
-  });
-  it("round-trips arbitrary bytes", () => {
-    const bytes = new Uint8Array([0, 1, 127, 128, 255]);
-    const b64 = btoa(String.fromCharCode(...bytes));
-    expect(Array.from(b64ToBytes(b64))).toEqual(Array.from(bytes));
   });
 });

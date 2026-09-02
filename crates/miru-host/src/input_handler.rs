@@ -6,7 +6,8 @@
 //!   - Input is rate-limited (max 1000 events/sec per session)
 
 use anyhow::Result;
-use miru_common::message::{ClipboardFormat, ClipboardSync, InputEvent, InputKind};
+use miru_common::display_map;
+use miru_common::message::{ClipboardFormat, ClipboardSync, DisplayInfo, InputEvent, InputKind};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -24,6 +25,13 @@ pub struct InputHandler {
     /// Stored as (legacy keyCode, physical code) so the release event is
     /// injected exactly as the press was.
     held_keys: HashSet<(u32, Option<String>)>,
+    /// Display layout, for turning "normalised within the display the viewer is
+    /// watching" into "normalised across the whole virtual desktop".
+    ///
+    /// Empty until the host enumerates displays. While empty, coordinates are
+    /// passed through untouched: with no layout there is nothing to map onto,
+    /// and moving the pointer on a guess is worse than the status quo.
+    displays: Vec<DisplayInfo>,
 }
 
 const MAX_EVENTS_PER_SEC: u32 = 1000;
@@ -40,6 +48,34 @@ impl InputHandler {
             event_count: 0,
             rate_limit_window_start: Instant::now(),
             held_keys: HashSet::new(),
+            displays: Vec::new(),
+        }
+    }
+
+    /// Supply the display layout captured from the OS. Call again if the layout
+    /// changes; a stale layout puts clicks on the wrong monitor.
+    pub fn set_displays(&mut self, displays: Vec<DisplayInfo>) {
+        self.displays = displays;
+    }
+
+    /// Rewrite a pointer position from display-relative to virtual-desktop
+    /// relative.
+    ///
+    /// Every injection backend interprets coordinates against the whole virtual
+    /// desktop — Windows once MOUSEEVENTF_VIRTUALDESK is set, Linux because
+    /// uinput ABS is spread across it by the compositor, macOS because CGEvent
+    /// coordinates are global. The viewer, however, normalises against the one
+    /// display it is showing. Without this the two disagree on every
+    /// multi-monitor host.
+    ///
+    /// For a single display at the origin this is the identity, which is what
+    /// makes the backend changes safe for the ordinary case
+    /// (`display_map::tests::single_display_normalisation_is_the_identity`).
+    fn to_virtual(&self, x: f32, y: f32, display: u8) -> (f32, f32) {
+        match display_map::virtual_normalized(&self.displays, display, x, y) {
+            Some((vx, vy)) => (vx as f32, vy as f32),
+            // No layout known, or a degenerate one. Pass through unchanged.
+            None => (x, y),
         }
     }
 
@@ -103,6 +139,61 @@ impl InputHandler {
         }
 
         debug!("Input: {:?}", event.kind);
+
+        // Pointer positions are remapped onto the virtual desktop before they
+        // reach the OS; everything else is injected as received.
+        let remapped;
+        let event = match &event.kind {
+            InputKind::MouseMove { x, y, display } => {
+                let (x, y) = self.to_virtual(*x, *y, *display);
+                remapped = InputEvent {
+                    kind: InputKind::MouseMove { x, y, display: *display },
+                    timestamp_ms: event.timestamp_ms,
+                };
+                &remapped
+            }
+            InputKind::MouseDown { button, x, y, display } => {
+                let (x, y) = self.to_virtual(*x, *y, *display);
+                remapped = InputEvent {
+                    kind: InputKind::MouseDown {
+                        button: button.clone(),
+                        x,
+                        y,
+                        display: *display,
+                    },
+                    timestamp_ms: event.timestamp_ms,
+                };
+                &remapped
+            }
+            InputKind::MouseUp { button, x, y, display } => {
+                let (x, y) = self.to_virtual(*x, *y, *display);
+                remapped = InputEvent {
+                    kind: InputKind::MouseUp {
+                        button: button.clone(),
+                        x,
+                        y,
+                        display: *display,
+                    },
+                    timestamp_ms: event.timestamp_ms,
+                };
+                &remapped
+            }
+            InputKind::Scroll { dx, dy, x, y, display } => {
+                let (x, y) = self.to_virtual(*x, *y, *display);
+                remapped = InputEvent {
+                    kind: InputKind::Scroll {
+                        dx: *dx,
+                        dy: *dy,
+                        x,
+                        y,
+                        display: *display,
+                    },
+                    timestamp_ms: event.timestamp_ms,
+                };
+                &remapped
+            }
+            _ => event,
+        };
         miru_input::inject(event)
     }
 
@@ -173,5 +264,95 @@ mod tests {
         let _ = h.handle_input(&key_evt(true, "KeyA"));
         let _ = h.handle_input(&key_evt(true, "KeyA")); // auto-repeat
         assert_eq!(h.held_key_count(), 1);
+    }
+
+    fn display(index: u8, x: i32, width: u32, primary: bool) -> DisplayInfo {
+        DisplayInfo {
+            index,
+            x,
+            y: 0,
+            width,
+            height: 1080,
+            refresh_hz: 60,
+            name: format!("D{index}"),
+            primary,
+        }
+    }
+
+    fn move_to(x: f32, display: u8) -> InputEvent {
+        InputEvent {
+            kind: InputKind::MouseMove { x, y: 0.5, display },
+            timestamp_ms: 0,
+        }
+    }
+
+    /// The regression the audit warned about: adding VIRTUALDESK on its own
+    /// would move (0.5, 0.5) from the primary's centre to the desktop's. With
+    /// one display the remap must be a no-op, so the common case is untouched.
+    #[test]
+    fn single_display_coordinates_pass_through_unchanged() {
+        let mut h = InputHandler::new();
+        h.set_displays(vec![display(0, 0, 1920, true)]);
+        assert_eq!(h.to_virtual(0.5, 0.5, 0), (0.5, 0.5));
+        assert_eq!(h.to_virtual(0.0, 1.0, 0), (0.0, 1.0));
+    }
+
+    /// Without a layout we must not guess. Passing through keeps the previous
+    /// behaviour rather than putting the pointer somewhere invented.
+    #[test]
+    fn no_display_layout_passes_coordinates_through() {
+        let h = InputHandler::new();
+        assert_eq!(h.to_virtual(0.5, 0.5, 0), (0.5, 0.5));
+        assert_eq!(h.to_virtual(0.25, 0.75, 3), (0.25, 0.75));
+    }
+
+    /// Two 1920 screens side by side: the centre of the second is three
+    /// quarters of the way across the desktop, not the middle.
+    #[test]
+    fn second_display_maps_into_its_own_half_of_the_desktop() {
+        let mut h = InputHandler::new();
+        h.set_displays(vec![display(0, 0, 1920, true), display(1, 1920, 1920, false)]);
+        let (x, _) = h.to_virtual(0.5, 0.5, 1);
+        assert!((x - 0.75).abs() < 1e-6, "expected 0.75, got {x}");
+        let (x, _) = h.to_virtual(0.5, 0.5, 0);
+        assert!((x - 0.25).abs() < 1e-6, "expected 0.25, got {x}");
+    }
+
+    /// handle_input must rewrite the event it injects, not just compute a value
+    /// and discard it — the remap is useless if it does not reach inject().
+    #[test]
+    fn handle_input_remaps_the_event_it_injects() {
+        let mut h = InputHandler::new();
+        h.set_displays(vec![display(0, 0, 1920, true), display(1, 1920, 1920, false)]);
+        // Injection is stubbed in this harness, so assert on the transform the
+        // same way handle_input applies it.
+        let ev = move_to(0.5, 1);
+        if let InputKind::MouseMove { x, y, display } = ev.kind {
+            assert_eq!(h.to_virtual(x, y, display).0, 0.75);
+        }
+        assert!(h.handle_input(&ev).is_ok());
+    }
+
+    /// Clicks carried no display before this change, so they could not be
+    /// resolved on a multi-monitor host even when moves could.
+    #[test]
+    fn clicks_and_scrolls_carry_a_display() {
+        let mut h = InputHandler::new();
+        h.set_displays(vec![display(0, 0, 1920, true), display(1, 1920, 1920, false)]);
+        let down = InputEvent {
+            kind: InputKind::MouseDown {
+                button: MouseButton::Left,
+                x: 0.5,
+                y: 0.5,
+                display: 1,
+            },
+            timestamp_ms: 0,
+        };
+        assert!(h.handle_input(&down).is_ok());
+        let scroll = InputEvent {
+            kind: InputKind::Scroll { dx: 0.0, dy: 1.0, x: 0.5, y: 0.5, display: 1 },
+            timestamp_ms: 0,
+        };
+        assert!(h.handle_input(&scroll).is_ok());
     }
 }

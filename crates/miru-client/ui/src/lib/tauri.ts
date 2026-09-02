@@ -87,6 +87,12 @@ export const api = {
     /** W3C physical-key id ("KeyA") — layout-independent; hosts prefer this. */
     code?: string;
     dx?: number; dy?: number;
+    /**
+     * Which host display the x/y are normalised against. The host maps this
+     * onto the virtual desktop; without it every click resolves to the primary
+     * monitor no matter which display the viewer is watching.
+     */
+    display?: number;
     text?: string;
   }) => invoke<void>("send_input", { args: input }),
 

@@ -8,6 +8,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use tracing::info;
 
+#[cfg(feature = "agent")]
 mod agent_handler;
 mod audio_loop;
 mod backpressure;
@@ -16,7 +17,6 @@ mod headless;
 mod input_handler;
 mod metrics;
 #[allow(dead_code)]
-mod qos;
 mod qos_bbr;
 mod recording;
 mod safe_fs;
@@ -31,9 +31,13 @@ async fn main() -> Result<()> {
     // `miru-host audit verify|show [path]` inspects the agent audit log without
     // starting the daemon. Default (no args) runs the host daemon.
     let args: Vec<String> = std::env::args().collect();
+    // Both subcommands operate on the agent token/audit machinery, which is
+    // not compiled into the default build (ADR 0022).
+    #[cfg(feature = "agent")]
     if args.get(1).map(|s| s.as_str()) == Some("audit") {
         return run_audit_command(&args[2..]);
     }
+    #[cfg(feature = "agent")]
     if args.get(1).map(|s| s.as_str()) == Some("token") {
         return run_token_command(&args[2..]);
     }
@@ -105,10 +109,12 @@ async fn main() -> Result<()> {
     // Print available codecs
     let codecs = miru_codec::available_codecs();
     info!("Codecs: {:?}", codecs);
+    // Detection only — printing this next to the codec list read as "these are
+    // in use". Nothing here is wired into Encoder::new yet.
     let hw = miru_codec::probe_hw();
     if !hw.is_empty() {
         for h in &hw {
-            info!("HW: {} → {:?}", h.name(), h.codecs());
+            info!("HW encoder detected (not yet used): {} → {:?}", h.name(), h.codecs());
         }
     }
 
@@ -172,7 +178,8 @@ async fn main() -> Result<()> {
                 has_microphone: false,
                 has_speakers: false,
                 has_camera: false,
-                has_hw_encode: !miru_codec::probe_hw().is_empty(),
+                // What this build can encode, not what silicon is present.
+                has_hw_encode: miru_codec::has_hw_encode(),
                 battery_pct: None,
                 form_factor: FormFactor::Desktop,
                 friendly_name: String::new(),
@@ -220,6 +227,7 @@ fn load_or_create_device_id(dir: &std::path::Path) -> Result<DeviceId> {
 /// `miru-host audit <verify|show> [path]` — inspect the agent audit log.
 /// Zero-dep CLI: no clap, just positional args. Defaults the log path to the
 /// standard config dir if not given.
+#[cfg(feature = "agent")]
 fn run_audit_command(args: &[String]) -> Result<()> {
     let sub = args.first().map(|s| s.as_str()).unwrap_or("help");
     let default_path = dirs::config_dir()
@@ -303,6 +311,7 @@ fn run_audit_command(args: &[String]) -> Result<()> {
 /// Mints an agent capability token signed by this host's identity, for use in
 /// an MCP client config (`MIRU_AGENT_TOKEN`). Without `--cap`, issues the safe
 /// assistant default (screen read + pointer + typing; no shell/file write).
+#[cfg(feature = "agent")]
 fn run_token_command(args: &[String]) -> Result<()> {
     use miru_agent::{AgentToken, Capability};
     use std::collections::HashSet;
@@ -448,6 +457,7 @@ fn run_service_command(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+#[cfg(feature = "agent")]
 fn parse_capability(s: &str) -> Option<miru_agent::Capability> {
     use miru_agent::Capability::*;
     Some(match s {

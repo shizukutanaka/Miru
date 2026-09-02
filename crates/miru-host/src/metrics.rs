@@ -4,11 +4,14 @@
 //! the session progresses. At session end, both peers exchange and sign
 //! the resulting `SessionMetadata`.
 
+#[cfg(feature = "agent")]
 use miru_transparency::SessionMetadata;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::SystemTime;
 use uuid::Uuid;
 
+// Several fields exist only to be read by snapshot(), which is agent-gated.
+#[cfg_attr(not(feature = "agent"), allow(dead_code))]
 pub struct SessionMetrics {
     started_at: u64,
     session_id: Uuid,
@@ -49,12 +52,8 @@ impl SessionMetrics {
         self.total_bytes.fetch_add(encoded_bytes, Ordering::Relaxed);
     }
 
-    #[allow(dead_code)]
-    pub fn on_audio_frame(&self, encoded_bytes: u64) {
-        self.total_bytes.fetch_add(encoded_bytes, Ordering::Relaxed);
-    }
-
     /// Convert to a SessionMetadata for transparency commitment.
+    #[cfg(feature = "agent")]
     pub fn snapshot(&self) -> SessionMetadata {
         let ended_at = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)

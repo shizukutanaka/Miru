@@ -212,6 +212,8 @@ impl X11Capturer {
                 .iter()
                 .enumerate()
                 .map(|(i, m)| DisplayInfo {
+                    x: m.x as i32,
+                    y: m.y as i32,
                     index: i as u8,
                     width: m.width as u32,
                     height: m.height as u32,
@@ -227,6 +229,8 @@ impl X11Capturer {
         // Fallback: single full-root display.
         let screen = &self.conn.setup().roots[self.screen_num];
         Ok(vec![DisplayInfo {
+            x: 0,
+            y: 0,
             index: 0,
             width: screen.width_in_pixels as u32,
             height: screen.height_in_pixels as u32,
@@ -317,26 +321,107 @@ impl Drop for X11Capturer {
     }
 }
 
-// ─── PipeWire stub ────────────────────────────────────────────────────────────
+// ─── PipeWire / xdg-desktop-portal capturer ──────────────────────────────────
 
+/// Wayland capture: negotiate a ScreenCast grant through xdg-desktop-portal,
+/// then consume frames from the PipeWire node it returns.
+///
+/// Both halves live in `platform/portal_ffi.rs` over a C shim; see that module
+/// for why there is no Rust dependency behind this.
 #[cfg(feature = "pipewire")]
-struct PipeWireCapturer;
+struct PipeWireCapturer {
+    /// Held for the lifetime of the capture: dropping it revokes the grant.
+    _session: crate::platform::portal_ffi::ScreenCastSession,
+    stream: crate::platform::portal_ffi::PipeWireVideoStream,
+    current_display: u8,
+}
 
 #[cfg(feature = "pipewire")]
 impl PipeWireCapturer {
     fn new() -> Result<Self> {
-        // TODO: implement xdg-desktop-portal ScreenCast D-Bus session
-        // then PipeWire stream capture via pipewire-rs crate
-        anyhow::bail!("PipeWire capture not yet implemented")
+        use crate::platform::portal_ffi::{PipeWireVideoStream, ScreenCastSession};
+
+        // The portal may show a picker, so this can block on the user. It runs
+        // once at capture start, never per frame.
+        let session = ScreenCastSession::open(false)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .context("xdg-desktop-portal would not grant screen capture")?;
+
+        let stream = PipeWireVideoStream::open(Some(session.pipewire_fd()), session.node_id())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "portal granted node {} but the PipeWire stream would not open",
+                    session.node_id()
+                )
+            })?;
+
+        info!("Linux capture: PipeWire node {}", session.node_id());
+        Ok(Self { _session: session, stream, current_display: 0 })
     }
 
+    /// The portal grants one source, chosen by the user in its own picker, so
+    /// there is nothing for the host to enumerate or switch between. Reporting
+    /// a single display is honest; reporting several would offer the viewer a
+    /// choice that `select_display` cannot act on.
     fn displays(&self) -> Result<Vec<DisplayInfo>> {
-        Ok(vec![])
+        let (width, height) = self.stream.size().unwrap_or((0, 0));
+        Ok(vec![DisplayInfo {
+            x: 0,
+            y: 0,
+            index: 0,
+            name: "PipeWire (portal)".into(),
+            width,
+            height,
+            refresh_hz: 0,
+            primary: true,
+        }])
     }
-    fn select_display(&mut self, _i: u8) -> Result<()> {
+
+    fn select_display(&mut self, index: u8) -> Result<()> {
+        if index != 0 {
+            anyhow::bail!(
+                "the portal grants a single source; pick a different screen in \
+                 the system dialog and reconnect"
+            );
+        }
+        self.current_display = 0;
         Ok(())
     }
+
     fn next_frame(&mut self) -> Result<Option<RawFrame>> {
-        Ok(None)
+        if self.stream.errored() {
+            anyhow::bail!("PipeWire stream entered its error state");
+        }
+        let Some((width, height)) = self.stream.size() else {
+            // Format not agreed yet; the caller polls again.
+            return Ok(None);
+        };
+        let Some(pixels) = self.stream.next_frame() else {
+            return Ok(None);
+        };
+        let expected = (width as usize) * (height as usize) * 4;
+        if pixels.len() < expected {
+            // A short buffer would be read past by the encoder.
+            anyhow::bail!(
+                "PipeWire delivered {} bytes for a {width}x{height} frame, expected {expected}",
+                pixels.len()
+            );
+        }
+        let data = Bytes::copy_from_slice(&pixels[..expected]);
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        Ok(Some(RawFrame {
+            display_idx: self.current_display,
+            width,
+            height,
+            stride: width * 4,
+            format: PixelFormat::Bgra32,
+            data,
+            timestamp_ms,
+            // The portal reports no damage regions, so every frame is full.
+            dirty_rects: RawFrame::full_dirty(width, height),
+        }))
     }
 }

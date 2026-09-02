@@ -182,18 +182,25 @@ impl AppState {
                             tracing::warn!("Session failed after {} attempts: {}", attempt, e);
                             break;
                         }
-                        let delay_secs = 1u64 << attempt; // 2, 4, 8
+                        // Jittered so simultaneous viewers don't retry in lockstep
+                        // (miru_common::backoff). attempt is 1-based here.
+                        let delay = miru_common::backoff::next_delay(
+                            attempt.saturating_sub(1),
+                            2,
+                            16,
+                        );
                         tracing::warn!(
                             "Session error (attempt {}/{}): {}; retrying in {}s",
-                            attempt, MAX_RECONNECT_ATTEMPTS, e, delay_secs
+                            attempt, MAX_RECONNECT_ATTEMPTS, e, delay.as_secs()
                         );
                         let _ = app_clone.emit("session-event", crate::session::SessionEvent {
                             kind: "reconnecting".to_string(),
                             message: Some(format!("再接続 ({attempt}/{MAX_RECONNECT_ATTEMPTS})...")),
                             fingerprint: None,
                             host_pub_addr: None,
+                            audio_available: None,
                         });
-                        tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+                        tokio::time::sleep(delay).await;
                         // Re-create cmd channel (and pending_pairing slot) for the new attempt.
                         let (new_cmd_tx, new_cmd_rx) = mpsc::channel::<Msg>(64);
                         let (new_cancel_tx, new_cancel_rx) = tokio::sync::oneshot::channel();

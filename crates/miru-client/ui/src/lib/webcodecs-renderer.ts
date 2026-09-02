@@ -13,6 +13,8 @@
  * JPEG path is deliberately NOT removed — it covers WebViews without VP9
  * WebCodecs support (notably some Linux WebKitGTK builds) and recording.
  */
+import { base64ToBytes } from "./base64";
+
 export interface DecodePacket {
   codec: string;
   keyframe: boolean;
@@ -58,14 +60,6 @@ export function shouldDecode(
   return queueSize <= MAX_QUEUE_BEFORE_DROP;
 }
 
-/** Decode base64 → Uint8Array (BufferSource for EncodedVideoChunk). */
-export function b64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
 export class WebCodecsRenderer {
   private decoder: VideoDecoder | null = null;
   private configuredCodec: string | null = null;
@@ -86,7 +80,7 @@ export class WebCodecsRenderer {
       if (!shouldDecode(pkt.keyframe, this.gotKey, decoder.decodeQueueSize)) return;
       if (pkt.keyframe) this.gotKey = true;
 
-      const data = b64ToBytes(pkt.data_b64);
+      const data = base64ToBytes(pkt.data_b64);
       const chunk = new EncodedVideoChunk({
         type: pkt.keyframe ? "key" : "delta",
         timestamp: pkt.timestamp_ms * 1000, // WebCodecs timestamps are µs

@@ -38,6 +38,13 @@
 //! Unmapped keys return `None`; callers fall back to the legacy raw cast so
 //! older viewers that send only `keyCode` keep working.
 
+/// Sentinel for "this platform has no code for this key", matching the
+/// `0xffff` convention in Chromium's table. Some keys genuinely do not exist
+/// on a platform — macOS has no Convert/NonConvert/KanaMode/PrintScreen/
+/// ScrollLock/Pause keycode, for instance. The accessors return `None` for
+/// these so the caller falls back rather than injecting key 65535.
+const NO_CODE: u16 = 0xFFFF;
+
 /// Per-OS codes for one physical key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeyCodes {
@@ -151,24 +158,78 @@ pub fn lookup(code: &str) -> Option<KeyCodes> {
         "MetaLeft" => (125, 55, 0x5B),    // VK_LWIN
         "MetaRight" => (126, 54, 0x5C),   // VK_RWIN
 
+        // ── Japanese (JIS) / international keys ──────────────────────────
+        // Without these a JIS keyboard cannot type ¥ or ろ, and cannot switch
+        // IME state at all (変換 / 無変換 / かな). macOS has no keycode for
+        // the three IME keys, so they resolve to None there.
+        "IntlYen" => (124, 93, 0xDC),          // ¥      VK_OEM_5
+        "IntlRo" => (89, 94, 0xE2),            // ろ/_   VK_OEM_102
+        "IntlBackslash" => (86, 10, 0xE2),     // ISO <> VK_OEM_102
+        "Convert" => (92, NO_CODE, 0x1C),      // 変換   VK_CONVERT
+        "NonConvert" => (94, NO_CODE, 0x1D),   // 無変換 VK_NONCONVERT
+        "KanaMode" => (93, NO_CODE, 0x15),     // かな   VK_KANA
+        // Lang1/Lang2 are Hangul/Hanja on Korean layouts and share Windows VKs
+        // with Kana/Kanji — that collision is Windows' own numbering, not a
+        // transcription error.
+        "Lang1" => (122, 104, 0x15),
+        "Lang2" => (123, 102, 0x19),
+
+        // ── Numeric keypad ───────────────────────────────────────────────
+        "Numpad0" => (82, 82, 0x60),
+        "Numpad1" => (79, 83, 0x61),
+        "Numpad2" => (80, 84, 0x62),
+        "Numpad3" => (81, 85, 0x63),
+        "Numpad4" => (75, 86, 0x64),
+        "Numpad5" => (76, 87, 0x65),
+        "Numpad6" => (77, 88, 0x66),
+        "Numpad7" => (71, 89, 0x67),
+        "Numpad8" => (72, 91, 0x68),
+        "Numpad9" => (73, 92, 0x69),
+        "NumpadDivide" => (98, 75, 0x6F),   // VK_DIVIDE
+        "NumpadMultiply" => (55, 67, 0x6A), // VK_MULTIPLY
+        "NumpadSubtract" => (74, 78, 0x6D), // VK_SUBTRACT
+        "NumpadAdd" => (78, 69, 0x6B),      // VK_ADD
+        "NumpadDecimal" => (83, 65, 0x6E),  // VK_DECIMAL
+        // Windows does not have a separate VK for the keypad Enter; it is
+        // VK_RETURN distinguished by the extended-key flag.
+        "NumpadEnter" => (96, 76, 0x0D),
+        "NumLock" => (69, 71, 0x90),
+
+        // ── Remaining system keys ────────────────────────────────────────
+        "PrintScreen" => (99, NO_CODE, 0x2C), // VK_SNAPSHOT
+        "ScrollLock" => (70, NO_CODE, 0x91),  // VK_SCROLL
+        "Pause" => (119, NO_CODE, 0x13),      // VK_PAUSE
+        "ContextMenu" => (127, 110, 0x5D),    // VK_APPS
+
+        "F13" => (183, 105, 0x7C),
+        "F14" => (184, 107, 0x7D),
+        "F15" => (185, 113, 0x7E),
+        "F16" => (186, 106, 0x7F),
+        "F17" => (187, 64, 0x80),
+        "F18" => (188, 79, 0x81),
+        "F19" => (189, 80, 0x82),
+        "F20" => (190, 90, 0x83),
+
         _ => return None,
     };
     Some(KeyCodes { evdev, mac, vk })
 }
 
-/// Linux evdev `KEY_*` code for a W3C `code`, if known.
+/// Linux evdev `KEY_*` code for a W3C `code`, if this platform has one.
 pub fn code_to_evdev(code: &str) -> Option<u16> {
-    lookup(code).map(|k| k.evdev)
+    lookup(code).map(|k| k.evdev).filter(|&c| c != NO_CODE)
 }
 
-/// macOS `CGKeyCode` for a W3C `code`, if known.
+/// macOS `CGKeyCode` for a W3C `code`, if this platform has one. Returns
+/// `None` for keys macOS lacks entirely (変換 / 無変換 / かな, PrintScreen,
+/// ScrollLock, Pause).
 pub fn code_to_cgkeycode(code: &str) -> Option<u16> {
-    lookup(code).map(|k| k.mac)
+    lookup(code).map(|k| k.mac).filter(|&c| c != NO_CODE)
 }
 
-/// Windows virtual-key code for a W3C `code`, if known.
+/// Windows virtual-key code for a W3C `code`, if this platform has one.
 pub fn code_to_vk(code: &str) -> Option<u16> {
-    lookup(code).map(|k| k.vk)
+    lookup(code).map(|k| k.vk).filter(|&c| c != NO_CODE)
 }
 
 #[cfg(test)]
@@ -224,11 +285,70 @@ mod tests {
         assert_eq!(code_to_vk("Digit9"), Some(0x39));
     }
 
+    /// JIS keyboards: ¥ and ろ are ordinary keys a Japanese user hits daily,
+    /// and 変換/無変換/かな are how the IME is driven at all.
+    #[test]
+    fn jis_keys_are_mapped_on_linux() {
+        assert_eq!(code_to_evdev("IntlYen"), Some(124));
+        assert_eq!(code_to_evdev("IntlRo"), Some(89));
+        assert_eq!(code_to_evdev("Convert"), Some(92));
+        assert_eq!(code_to_evdev("NonConvert"), Some(94));
+        assert_eq!(code_to_evdev("KanaMode"), Some(93));
+    }
+
+    /// macOS has no keycode for the IME keys. They must resolve to None rather
+    /// than injecting the 0xFFFF sentinel as a real key.
+    #[test]
+    fn keys_absent_on_macos_resolve_to_none() {
+        for code in ["Convert", "NonConvert", "KanaMode", "PrintScreen", "ScrollLock", "Pause"] {
+            assert_eq!(code_to_cgkeycode(code), None, "{code} should be absent on macOS");
+            // ...but they still exist on Linux and Windows.
+            assert!(code_to_evdev(code).is_some(), "{code} evdev");
+            assert!(code_to_vk(code).is_some(), "{code} vk");
+        }
+    }
+
+    /// The keypad is physically distinct from the digit row: Numpad1 and
+    /// Digit1 must never collide, or numeric entry lands on the wrong key.
+    #[test]
+    fn numpad_is_distinct_from_digit_row() {
+        for d in 0..=9u8 {
+            let pad = lookup(&format!("Numpad{d}")).unwrap();
+            let row = lookup(&format!("Digit{d}")).unwrap();
+            assert_ne!(pad.evdev, row.evdev, "Numpad{d}/Digit{d} evdev");
+            assert_ne!(pad.mac, row.mac, "Numpad{d}/Digit{d} mac");
+            assert_ne!(pad.vk, row.vk, "Numpad{d}/Digit{d} vk");
+        }
+        assert_eq!(code_to_vk("Numpad0"), Some(0x60)); // VK_NUMPAD0
+        assert_eq!(code_to_vk("Digit0"), Some(0x30));
+    }
+
+    /// Four pairs share a Windows VK. These are Windows' own numbering, not
+    /// transcription slips, and are pinned here so a future edit that creates
+    /// an *unintended* collision is noticed. evdev and CGKeyCode — the two
+    /// spaces that were actually broken — have no collisions at all.
+    #[test]
+    fn known_windows_vk_collisions_are_intentional() {
+        // No separate VK for keypad Enter; the extended-key flag distinguishes it.
+        assert_eq!(code_to_vk("NumpadEnter"), code_to_vk("Enter"));
+        // On JIS the ¥ key sits where US has backslash; both report VK_OEM_5.
+        assert_eq!(code_to_vk("IntlYen"), code_to_vk("Backslash"));
+        // VK_OEM_102 is "the extra key": ろ on JIS, <> on ISO. Never both.
+        assert_eq!(code_to_vk("IntlRo"), code_to_vk("IntlBackslash"));
+        // VK_KANA and VK_HANGUL are both 0x15 in WinUser.h.
+        assert_eq!(code_to_vk("KanaMode"), code_to_vk("Lang1"));
+
+        // ...but these must stay distinct where it matters.
+        assert_ne!(code_to_evdev("NumpadEnter"), code_to_evdev("Enter"));
+        assert_ne!(code_to_evdev("IntlYen"), code_to_evdev("Backslash"));
+        assert_ne!(code_to_cgkeycode("IntlYen"), code_to_cgkeycode("Backslash"));
+    }
+
     #[test]
     fn unknown_code_returns_none_so_caller_can_fall_back() {
         assert_eq!(lookup("NoSuchKey"), None);
         assert_eq!(lookup(""), None);
-        assert_eq!(code_to_evdev("F13"), None); // not in the table (yet)
+        assert_eq!(code_to_evdev("F21"), None); // beyond F20, not in the table
     }
 
     /// Letters and digits must be unique per platform — a duplicated row would

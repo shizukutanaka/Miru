@@ -39,12 +39,4 @@ impl RawFrame {
             h: height,
         }]
     }
-
-    pub fn is_full_frame(&self) -> bool {
-        self.dirty_rects.len() == 1
-            && self.dirty_rects[0].x == 0
-            && self.dirty_rects[0].y == 0
-            && self.dirty_rects[0].w == self.width
-            && self.dirty_rects[0].h == self.height
-    }
 }

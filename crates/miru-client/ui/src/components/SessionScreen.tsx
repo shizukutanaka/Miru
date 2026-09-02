@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api, SessionStats, DisplayInfo } from "../lib/tauri";
 import { WebCodecsRenderer, webcodecsVp9Supported } from "../lib/webcodecs-renderer";
+import { BLOCKED_CHORDS, KeyTracker } from "../lib/key-tracker";
+import { MoveCoalescer } from "../lib/move-coalescer";
+import { normalizeWheel } from "../lib/wheel-normalize";
+import { makeInputSender } from "../lib/input-sender";
+import { TouchGestures, type TouchAction } from "../lib/touch-gestures";
+import { base64ToBytes, bytesToBase64 } from "../lib/base64";
 import { DisplayTabs } from "./DisplayTabs";
 import { PairingDialog } from "./PairingDialog";
 
@@ -32,8 +38,20 @@ export function SessionScreen({ onDisconnect }: Props) {
   // host can actually send audio — offering a mute for a silent stream would
   // be a false affordance.
   const [audioAvailable, setAudioAvailable] = useState(false);
+  const [selectedChord, setSelectedChord] = useState<string>(BLOCKED_CHORDS[0].label);
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const connectedAtRef = useRef<number | null>(null);
+  // Input is only forwarded once the session is fully connected. Before that
+  // the host's session slot already exists, so events would be buffered and
+  // then replayed into the remote machine the moment the user confirms the
+  // fingerprint (see lib/input-sender.ts).
+  const inputReadyRef = useRef(false);
+  const sendInputRef = useRef(
+    makeInputSender(() => inputReadyRef.current, api.sendInput),
+  );
+  /// Read through a ref so the pointer handlers, registered once, still see
+  /// the display the user switched to afterwards.
+  const selectedDisplayRef = useRef(0);
   const [qosMode, setQosMode] = useState<"quality" | "balanced" | "smooth">("balanced");
   const [hostPubAddr, setHostPubAddr] = useState<string | null>(null);
 
@@ -43,6 +61,10 @@ export function SessionScreen({ onDisconnect }: Props) {
       : stats.rtt_ms > 150 || stats.packet_loss_pct > 3
       ? "warn"
       : "good";
+
+  useEffect(() => {
+    inputReadyRef.current = status === "connected";
+  }, [status]);
 
   const lastFrameRef = useRef<number>(Date.now());
   const [stalled, setStalled] = useState(false);
@@ -95,7 +117,7 @@ export function SessionScreen({ onDisconnect }: Props) {
           }
           try {
             const bmp = await createImageBitmap(
-              new Blob([b64ToBytes(f.b64)], { type: "image/jpeg" }),
+              new Blob([base64ToBytes(f.b64)], { type: "image/jpeg" }),
             );
             const ctx = canvas.getContext("2d");
             ctx?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
@@ -219,22 +241,38 @@ export function SessionScreen({ onDisconnect }: Props) {
     const buttonName = (b: number) =>
       b === 0 ? "left" : b === 1 ? "middle" : b === 2 ? "right" : "left";
 
+    // Mice report at 125–1000 Hz; one IPC invoke per event floods the channel
+    // and can push the host's 1000 ev/s limiter into dropping keystrokes.
+    // Collapse movement to the newest position per animation frame.
+    const moves = new MoveCoalescer(
+      (m) => sendInputRef.current(m),
+      undefined,
+      () => selectedDisplayRef.current,
+    );
+
     const onMove = (e: MouseEvent) => {
       const { x, y } = norm(e);
-      api.sendInput({ kind: "mouse_move", x, y });
+      moves.push(x, y);
     };
+    // Buttons and wheel flush first: they must never land at a stale position.
     const onDown = (e: MouseEvent) => {
       const { x, y } = norm(e);
-      api.sendInput({ kind: "mouse_down", x, y, button: buttonName(e.button) });
+      moves.flush();
+      sendInputRef.current({ kind: "mouse_down", x, y, button: buttonName(e.button), display: selectedDisplayRef.current });
     };
     const onUp = (e: MouseEvent) => {
       const { x, y } = norm(e);
-      api.sendInput({ kind: "mouse_up", x, y, button: buttonName(e.button) });
+      moves.flush();
+      sendInputRef.current({ kind: "mouse_up", x, y, button: buttonName(e.button), display: selectedDisplayRef.current });
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const { x, y } = norm(e);
-      api.sendInput({ kind: "scroll", x, y, dx: -e.deltaX / 100, dy: -e.deltaY / 100 });
+      moves.flush();
+      // Normalize by deltaMode: WebKitGTK (the Linux Tauri webview) and Firefox
+      // report line mode, where a raw `/100` collapses a notch to ~0.03.
+      const { dx, dy } = normalizeWheel(e.deltaX, e.deltaY, e.deltaMode);
+      sendInputRef.current({ kind: "scroll", x, y, dx: -dx, dy: -dy, display: selectedDisplayRef.current });
     };
     const onContext = (e: Event) => e.preventDefault();
 
@@ -246,17 +284,31 @@ export function SessionScreen({ onDisconnect }: Props) {
         y: Math.max(0, Math.min(1, (t.clientY - rect.top) / rect.height)),
       };
     };
-    let lastTouchPos = { x: 0.5, y: 0.5 };
     let lastPinchDist = 0;
+    // Owns the left-button state so a release is only ever sent when a press
+    // is actually outstanding, and defers it until the gesture is known so a
+    // long press can become a right click (see lib/touch-gestures.ts).
+    const gestures = new TouchGestures();
+
+    const applyTouch = (actions: TouchAction[]) => {
+      for (const a of actions) {
+        moves.flush();
+        sendInputRef.current({
+          kind: a.type.startsWith("press_") ? "mouse_down" : "mouse_up",
+          x: a.x,
+          y: a.y,
+          button: a.type.endsWith("_right") ? "right" : "left",
+        });
+      }
+    };
 
     const onTouchStart = (e: TouchEvent) => {
       e.preventDefault();
-      if (e.touches.length === 1) {
-        const { x, y } = normTouch(e.touches[0]);
-        lastTouchPos = { x, y };
-        api.sendInput({ kind: "mouse_move", x, y });
-        api.sendInput({ kind: "mouse_down", x, y, button: "left" });
-      } else if (e.touches.length === 2) {
+      const pos =
+        e.touches.length > 0 ? normTouch(e.touches[0]) : { x: 0.5, y: 0.5 };
+      if (e.touches.length === 1) moves.push(pos.x, pos.y);
+      applyTouch(gestures.start(e.touches.length, pos, performance.now()));
+      if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
         lastPinchDist = Math.hypot(dx, dy);
@@ -266,8 +318,8 @@ export function SessionScreen({ onDisconnect }: Props) {
       e.preventDefault();
       if (e.touches.length === 1) {
         const { x, y } = normTouch(e.touches[0]);
-        lastTouchPos = { x, y };
-        api.sendInput({ kind: "mouse_move", x, y });
+        applyTouch(gestures.move(1, { x, y }));
+        moves.push(x, y);
       } else if (e.touches.length === 2) {
         const dx = e.touches[1].clientX - e.touches[0].clientX;
         const dy = e.touches[1].clientY - e.touches[0].clientY;
@@ -276,15 +328,16 @@ export function SessionScreen({ onDisconnect }: Props) {
         lastPinchDist = dist;
         const cx = (normTouch(e.touches[0]).x + normTouch(e.touches[1]).x) / 2;
         const cy = (normTouch(e.touches[0]).y + normTouch(e.touches[1]).y) / 2;
-        api.sendInput({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta });
+        moves.flush();
+        sendInputRef.current({ kind: "scroll", x: cx, y: cy, dx: 0, dy: delta, display: selectedDisplayRef.current });
       }
     };
     const onTouchEnd = (e: TouchEvent) => {
       e.preventDefault();
-      if (e.changedTouches.length > 0) {
-        api.sendInput({ kind: "mouse_up", x: lastTouchPos.x, y: lastTouchPos.y, button: "left" });
-      }
-      lastPinchDist = 0;
+      // Releases only if a press is outstanding — a two-finger scroll never
+      // pressed, and touchend fires once per finger.
+      applyTouch(gestures.end(performance.now()));
+      if (e.touches.length < 2) lastPinchDist = 0;
     };
 
     canvas.addEventListener("mousemove", onMove);
@@ -305,46 +358,25 @@ export function SessionScreen({ onDisconnect }: Props) {
       canvas.removeEventListener("touchstart", onTouchStart);
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
+      // Don't leave the host with a touch-pressed button after unmount.
+      applyTouch(gestures.cancel());
+      // Drop any queued move so an in-flight frame can't fire after unmount.
+      moves.cancel();
     };
   }, []);
 
-  // Keyboard
+  // Keyboard — state tracking lives in KeyTracker (unit-tested); this effect
+  // only owns the DOM listeners.
   useEffect(() => {
-    // Physical keys currently held down, tracked so they can be released if we
-    // lose focus. Without this, alt-tabbing away while a modifier is held sends
-    // key_down with no matching key_up and the key stays stuck on the host —
-    // on Linux the uinput device outlives the session, so it stays stuck across
-    // reconnects too.
-    const held = new Set<string>();
+    const tracker = new KeyTracker((m) => sendInputRef.current(m));
 
     const onKey = (down: boolean) => (e: KeyboardEvent) => {
-      // Don't intercept window-management keys
-      if ((e.ctrlKey || e.metaKey) && ["q", "w", "h", "m"].includes(e.key.toLowerCase())) return;
-      e.preventDefault();
-      const mods =
-        (e.shiftKey ? 0x01 : 0) |
-        (e.ctrlKey ? 0x02 : 0) |
-        (e.altKey ? 0x04 : 0) |
-        (e.metaKey ? 0x08 : 0);
-      if (down) held.add(e.code);
-      else held.delete(e.code);
-      api.sendInput({
-        kind: down ? "key_down" : "key_up",
-        // `code` is the physical key and is layout-independent; `keyCode` is
-        // sent only so older hosts keep working.
-        code: e.code,
-        key: e.keyCode,
-        modifiers: mods,
-      });
+      // A blocked chord returns false and must reach the viewer's own window.
+      if (tracker.handleKey(down, e)) e.preventDefault();
     };
 
     // Release everything still held when the window loses focus or is hidden.
-    const releaseAll = () => {
-      for (const code of held) {
-        api.sendInput({ kind: "key_up", code, key: 0, modifiers: 0 });
-      }
-      held.clear();
-    };
+    const releaseAll = () => tracker.releaseAll();
     const onVisibility = () => {
       if (document.hidden) releaseAll();
     };
@@ -372,6 +404,9 @@ export function SessionScreen({ onDisconnect }: Props) {
 
   const handleSelectDisplay = async (index: number) => {
     setSelectedDisplay(index);
+    // Keep the ref in step so pointer events sent before the next render
+    // already carry the new display.
+    selectedDisplayRef.current = index;
     try { await api.selectDisplay(index); } catch {}
   };
 
@@ -400,6 +435,33 @@ export function SessionScreen({ onDisconnect }: Props) {
     const next = qosMode === "balanced" ? "quality" : qosMode === "quality" ? "smooth" : "balanced";
     setQosMode(next);
     try { await api.sendQosHint(next); } catch {}
+  };
+
+  // Chords the keyboard handler deliberately swallows so they act on the
+  // viewer's own window rather than closing it. They are unreachable by typing,
+  // so the host can never be told to close a tab or hide a window — this menu
+  // is the way to send them explicitly.
+  // Ctrl+Alt+Del is intentionally absent: Windows blocks SendInput from
+  // generating it by design (FEATURE_AUDIT item 16), so offering it would be a
+  // control that silently does nothing on the platform that needs it most.
+  const sendCtrlChord = async () => {
+    const chord = BLOCKED_CHORDS.find((c) => c.label === selectedChord);
+    if (!chord) return;
+    const CTRL = { code: "ControlLeft", key: 17 };
+    const mods = 0x02; // Ctrl
+    try {
+      await api.sendInput({ kind: "key_down", ...CTRL, modifiers: mods });
+      await api.sendInput({ kind: "key_down", code: chord.code, key: chord.key, modifiers: mods });
+      await api.sendInput({ kind: "key_up", code: chord.code, key: chord.key, modifiers: mods });
+    } catch {
+      // A failed send mid-chord is not worth an error dialog; the finally below
+      // still lifts Ctrl, and an uncaught rejection here would escape the
+      // onClick handler.
+    } finally {
+      // Always lift Ctrl, even if a send above failed, so the host is not left
+      // with a latched modifier.
+      await api.sendInput({ kind: "key_up", ...CTRL, modifiers: mods }).catch(() => {});
+    }
   };
 
   const handleToggleMute = async () => {
@@ -442,11 +504,10 @@ export function SessionScreen({ onDisconnect }: Props) {
     setFileSending(true);
     try {
       const buf = await file.arrayBuffer();
-      // Convert to base64
-      const bytes = new Uint8Array(buf);
-      let binary = "";
-      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-      const b64 = btoa(binary);
+      // Native encoder where available, chunked fallback otherwise. Appending
+      // one character at a time froze the window for large files — the picker
+      // allows up to 100 MB, i.e. 100 million iterations on the main thread.
+      const b64 = bytesToBase64(new Uint8Array(buf));
       await api.sendFile(file.name, b64);
     } catch (err) {
       console.error("File send failed:", err);
@@ -585,20 +646,31 @@ export function SessionScreen({ onDisconnect }: Props) {
         >
           {fileSending ? "送信中..." : "ファイル送信"}
         </button>
+        <label className="chord-send">
+          <span className="visually-hidden">ホストへ送る特殊キー</span>
+          <select
+            value={selectedChord}
+            onChange={(e) => setSelectedChord(e.target.value)}
+            disabled={status !== "connected"}
+            title="ビューア側で握り潰される組み合わせをホストへ送ります"
+          >
+            {BLOCKED_CHORDS.map((c) => (
+              <option key={c.label} value={c.label}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+        <button
+          onClick={sendCtrlChord}
+          disabled={status !== "connected"}
+          title={`${selectedChord} をホストへ送信`}
+        >
+          特殊キー送信
+        </button>
         <button onClick={handleFullscreen}>フルスクリーン</button>
         <button className="danger" onClick={handleDisconnect}>切断</button>
       </div>
     </div>
   );
-}
-
-/** Decode base64 → ArrayBuffer without an intermediate data-URL string. */
-function b64ToBytes(b64: string): ArrayBuffer {
-  const bin = atob(b64);
-  const buf = new ArrayBuffer(bin.length);
-  const view = new Uint8Array(buf);
-  for (let i = 0; i < bin.length; i++) view[i] = bin.charCodeAt(i);
-  return buf;
 }
 
 function fmtDuration(secs: number): string {

@@ -37,12 +37,12 @@ impl AgentHandler {
                 "mouse_move",
                 json!({"x": x, "y": y, "display": display}),
             ),
-            InputKind::MouseDown { button, x, y } | InputKind::MouseUp { button, x, y } => (
+            InputKind::MouseDown { button, x, y, .. } | InputKind::MouseUp { button, x, y, .. } => (
                 Capability::PointerClick,
                 "mouse_click",
                 json!({"button": button_name(*button), "x": x, "y": y}),
             ),
-            InputKind::Scroll { dx, dy, x, y } => (
+            InputKind::Scroll { dx, dy, x, y, .. } => (
                 Capability::PointerMove,
                 "scroll",
                 json!({"dx": dx, "dy": dy, "x": x, "y": y}),

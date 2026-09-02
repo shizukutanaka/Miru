@@ -7,6 +7,9 @@ use miru_common::message::VideoCodec;
 #[cfg(feature = "vpx")]
 use crate::vpx::VpxEncoder;
 
+#[cfg(feature = "ffmpeg")]
+use crate::ffmpeg_enc::FFmpegEncoder;
+
 pub struct Encoder {
     inner: Box<dyn EncoderBackend>,
     codec: VideoCodec,
@@ -23,6 +26,36 @@ pub trait EncoderBackend: Send {
     ) -> Result<Option<EncodedPacket>>;
     fn request_keyframe(&mut self);
     fn update_bitrate(&mut self, kbps: u32);
+}
+
+/// Try each hardware encoder this machine reports, in the order `probe()`
+/// returns them, and take the first that actually opens.
+///
+/// Opening is the only honest capability test: `h264_nvenc` is compiled into
+/// most distro libavcodec builds whether or not an NVIDIA card is installed, so
+/// presence proves nothing.
+#[cfg(feature = "ffmpeg")]
+fn open_hw(
+    codec: &VideoCodec,
+    width: u32,
+    height: u32,
+    fps: u8,
+    bitrate_kbps: u32,
+) -> Result<FFmpegEncoder> {
+    let mut last: Option<anyhow::Error> = None;
+    for hw in crate::hw::probe() {
+        if !hw.codecs().contains(codec) {
+            continue;
+        }
+        match FFmpegEncoder::new(hw, codec.clone(), width, height, fps, bitrate_kbps) {
+            Ok(enc) => return Ok(enc),
+            Err(e) => last = Some(e),
+        }
+    }
+    match last {
+        Some(e) => Err(e.context(format!("no hardware encoder could open for {codec:?}"))),
+        None => bail!("no hardware encoder on this machine supports {codec:?}"),
+    }
 }
 
 impl Encoder {
@@ -54,8 +87,13 @@ impl Encoder {
                 bail!("VP9/VP8 encoding requires the `vpx` feature (install libvpx-dev)")
             }
             VideoCodec::Jpeg => Box::new(JpegEncoder::new(width, height)),
+            #[cfg(feature = "ffmpeg")]
             VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265 => {
-                bail!("{codec:?} encoding not yet implemented (planned for v0.3)")
+                Box::new(open_hw(&codec, width, height, fps, bitrate_kbps)?)
+            }
+            #[cfg(not(feature = "ffmpeg"))]
+            VideoCodec::Av1 | VideoCodec::H264 | VideoCodec::H265 => {
+                bail!("{codec:?} encoding requires the `ffmpeg` feature (install libavcodec-dev)")
             }
         };
         Ok(Self { inner, codec })

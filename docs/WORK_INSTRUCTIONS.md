@@ -11,16 +11,25 @@
 
 ## 0. 全タスク共通の前提(最初に読む)
 
-1. **最優先タスクは `cargo test --workspace` の初回実行**。本ブランチの Rust 変更は
-   全て「作成環境が crates.io 遮断でコンパイル不可」のまま目視レビューのみで
-   コミットされている(各コミットメッセージに明記)。ビルドできる環境に入ったら
-   何より先にこれを実行し、エラーをタスク E の手順で潰すこと。
-2. フロントエンドは検証済み: `cd crates/miru-client/ui && npm run typecheck && npm test`
-   (tsc エラーゼロ + Vitest 10件パス)。
-3. コミット規約: Conventional Commits (feat/fix/perf/refactor/test/docs/chore)。
+1. **最優先タスクは `cargo test --workspace` の初回実行**。本ブランチの Rust 変更の
+   多くは crates.io 遮断環境でコミットされている(各コミットメッセージに明記)。
+   ビルドできる環境に入ったら何より先にこれを実行し、エラーをタスク E で潰すこと。
+   **実際にこの経路で 1 件のコンパイルエラーが混入した**(`SessionEvent` にフィールドを
+   追加した際に `state.rs` の構築サイトが追随せず)ため、この警告は理論ではない。
+2. **crates.io が無くても回る検証がある**: `scripts/verify-offline.sh`。
+   全 `.rs` の構文チェック(rustfmt はパースのみで依存解決不要)+ std だけに依存する
+   モジュール(`keymap` / `backoff`)のテストを素の rustc で**実際に実行** + フロントの
+   tsc/vitest。**`cargo test` の代わりにはならない**(クレート境界の型エラーは検出不可)が、
+   「ビルドできないから何も確認していない」を防ぐ。
+   ピンされたツールチェーンが取得できない環境では `RUSTUP_TOOLCHAIN=stable` を付ける
+   (`ls ~/.rustup/toolchains` で確認)。**rustc 自体はインストール済みでも
+   `rust-toolchain.toml` のピンが取得不可だと全体が使えなくなる**点に注意。
+3. フロントエンドは検証済み: `cd crates/miru-client/ui && npm run typecheck && npm test`
+   (tsc エラーゼロ + Vitest 69件パス)。
+4. コミット規約: Conventional Commits (feat/fix/perf/refactor/test/docs/chore)。
    機能追加はテスト同 PR 必須。`unwrap()` 禁止(CI に予算ゲートあり、現在25個)。
    `unsafe` は `platform/` 配下のみ。
-4. CI はまだ `.github/workflows-proposed/` に隔離されている(リポジトリ管理者が
+5. CI はまだ `.github/workflows-proposed/` に隔離されている(リポジトリ管理者が
    `.github/workflows/` へ移動するまで動かない — 自動化エージェントには
    `workflows` 権限がなく移動不可)。
 
@@ -113,6 +122,26 @@ SCStream へ。単一ファイル・単一 OS で完結し既存の `ScreenCaptu
 - `miru-sandbox/src/linux.rs` の landlock フォールバック(`net_handled` フラグ)
 - `miru-codec/src/color.rs` の新モジュール参照
 - `vpx.rs` の `VP9E_SET_TUNE_CONTENT` 定数名(vpx-sys の bindgen 生成名と一致するか)
+
+### タスク G: マルチモニタ座標の一括修正 【Opus 推奨 / 要ビルド環境】
+
+FEATURE_AUDIT 項目17。**非プライマリ表示中はクリック位置が3OS全てでずれる**。
+調査済みの事実:
+
+- `DisplayInfo`(`miru-common/src/message.rs`)は `width`/`height`/`primary` のみで
+  **x/y オフセットを持たない** → プロトコル上マルチモニタ配置を表現できない
+- **Windows**: `MOUSEEVENTF_ABSOLUTE` を `MOUSEEVENTF_VIRTUALDESK` 無しで使用。
+  MS 公式 MOUSEINPUT ドキュメント曰く「マルチモニタでは座標はプライマリに
+  マップされる。`MOUSEEVENTF_VIRTUALDESK` 指定時のみ仮想デスクトップ全体」
+- **macOS**: `screen_point()` が `CGDisplay::main()` 固定。CGEvent のマウス座標は
+  グローバル表示空間なので、対象ディスプレイの origin を足せば正しくなる
+- **Linux**: ABS 0〜65535 はコンポジタが仮想デスクトップ全体へマップする
+- `MouseMove` は `display` フィールドを持つが3バックエンドとも `..` で破棄。
+  **`MouseDown`/`MouseUp` にはそもそも `display` が無い**
+
+**⚠️ 部分修正は退行を招く**: `MOUSEEVENTF_VIRTUALDESK` だけ足すと、プライマリ
+1枚を見ている通常ケースで (0.5,0.5) が仮想デスクトップ中央へずれる。
+①〜⑤(項目17参照)を一括で行い、必ず実機のマルチモニタ環境で検証すること。
 
 ### タスク F: `PairPrompt.tsx` の削除可否 【人間の判断待ち — 実装するな】
 

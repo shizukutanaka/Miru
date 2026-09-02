@@ -253,11 +253,11 @@ impl McpServer {
         let times = if double { 2 } else { 1 };
         for _ in 0..times {
             let down = InputEvent {
-                kind: InputKind::MouseDown { button, x, y },
+                kind: InputKind::MouseDown { button, x, y, display: 0 },
                 timestamp_ms: now_ms(),
             };
             let up = InputEvent {
-                kind: InputKind::MouseUp { button, x, y },
+                kind: InputKind::MouseUp { button, x, y, display: 0 },
                 timestamp_ms: now_ms(),
             };
             self.bridge.send_input(down).await?;
@@ -293,7 +293,7 @@ impl McpServer {
         )?;
 
         let evt = InputEvent {
-            kind: InputKind::Scroll { dx, dy, x, y },
+            kind: InputKind::Scroll { dx, dy, x, y, display: 0 },
             timestamp_ms: now_ms(),
         };
         self.bridge.send_input(evt).await?;
@@ -347,27 +347,56 @@ impl McpServer {
         }
         let mut modifiers = 0u8;
         let mut key_str = "";
+        // Physical modifier keys, in press order. A chord CANNOT be expressed
+        // by the `modifiers` bitmask alone: only the macOS backend reads it
+        // (as CGEventFlags); the Linux and Windows backends ignore the field
+        // entirely, so "Ctrl+C" used to arrive as a bare "c" there. Real
+        // modifier key events are the portable way to build a chord.
+        let mut mod_codes: Vec<&'static str> = Vec::new();
         for p in &parts {
             match *p {
-                "Shift" => modifiers |= 0x01,
-                "Ctrl" | "Control" => modifiers |= 0x02,
-                "Alt" | "Option" => modifiers |= 0x04,
-                "Cmd" | "Meta" | "Win" => modifiers |= 0x08,
+                "Shift" => {
+                    modifiers |= 0x01;
+                    mod_codes.push("ShiftLeft");
+                }
+                "Ctrl" | "Control" => {
+                    modifiers |= 0x02;
+                    mod_codes.push("ControlLeft");
+                }
+                "Alt" | "Option" => {
+                    modifiers |= 0x04;
+                    mod_codes.push("AltLeft");
+                }
+                "Cmd" | "Meta" | "Win" => {
+                    modifiers |= 0x08;
+                    mod_codes.push("MetaLeft");
+                }
                 _ => key_str = p,
             }
         }
         let key = parse_key(key_str)?;
+        let key_code = parse_key_code(key_str);
 
-        let down = InputEvent {
-            kind: InputKind::KeyDown { key, modifiers, code: None },
+        // Press modifiers → press/release the key → release modifiers in
+        // reverse order, so nothing is left latched on the host.
+        let mut events: Vec<InputEvent> = Vec::with_capacity(mod_codes.len() * 2 + 2);
+        for code in &mod_codes {
+            events.push(modifier_event(code, true, modifiers));
+        }
+        events.push(InputEvent {
+            kind: InputKind::KeyDown { key, modifiers, code: key_code.clone() },
             timestamp_ms: now_ms(),
-        };
-        let up = InputEvent {
-            kind: InputKind::KeyUp { key, modifiers, code: None },
+        });
+        events.push(InputEvent {
+            kind: InputKind::KeyUp { key, modifiers, code: key_code },
             timestamp_ms: now_ms(),
-        };
-        self.bridge.send_input(down).await?;
-        self.bridge.send_input(up).await?;
+        });
+        for code in mod_codes.iter().rev() {
+            events.push(modifier_event(code, false, modifiers));
+        }
+        for evt in events {
+            self.bridge.send_input(evt).await?;
+        }
 
         Ok(vec![Content::Text {
             text: format!("Sent key combo: {combo}"),
@@ -456,8 +485,76 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// Build a KeyDown/KeyUp for a physical modifier key (e.g. "ControlLeft").
+fn modifier_event(code: &str, down: bool, modifiers: u8) -> InputEvent {
+    // Legacy `key` is the VK for hosts that predate the `code` field.
+    let key = miru_input::keymap::code_to_vk(code).map(u32::from).unwrap_or(0);
+    let code = Some(code.to_string());
+    InputEvent {
+        kind: if down {
+            InputKind::KeyDown { key, modifiers, code }
+        } else {
+            InputKind::KeyUp { key, modifiers, code }
+        },
+        timestamp_ms: now_ms(),
+    }
+}
+
+/// Map a key name to the W3C UI Events physical-key identifier the host uses
+/// to look up the real per-OS key code (see `miru_input::keymap`).
+///
+/// Without this the agent path sends only the legacy VK number, which the host
+/// casts straight into evdev/CGKeyCode — different numbering spaces, so "A"
+/// injected as evdev 65 is KEY_F7. Returning None falls back to that legacy
+/// behaviour rather than failing the call.
+fn parse_key_code(s: &str) -> Option<String> {
+    let mut chars = s.chars();
+    if let Some(c) = chars.next().filter(|_| chars.next().is_none()) {
+        let c = c.to_ascii_uppercase();
+        if c.is_ascii_alphabetic() {
+            return Some(format!("Key{c}"));
+        }
+        if c.is_ascii_digit() {
+            return Some(format!("Digit{c}"));
+        }
+    }
+    Some(
+        match s {
+            "Enter" | "Return" => "Enter",
+            "Tab" => "Tab",
+            "Escape" | "Esc" => "Escape",
+            "Backspace" => "Backspace",
+            "Delete" | "Del" => "Delete",
+            "Space" => "Space",
+            "Up" => "ArrowUp",
+            "Down" => "ArrowDown",
+            "Left" => "ArrowLeft",
+            "Right" => "ArrowRight",
+            "Home" => "Home",
+            "End" => "End",
+            "PageUp" => "PageUp",
+            "PageDown" => "PageDown",
+            "F1" => "F1",
+            "F2" => "F2",
+            "F3" => "F3",
+            "F4" => "F4",
+            "F5" => "F5",
+            "F6" => "F6",
+            "F7" => "F7",
+            "F8" => "F8",
+            "F9" => "F9",
+            "F10" => "F10",
+            "F11" => "F11",
+            "F12" => "F12",
+            _ => return None,
+        }
+        .to_string(),
+    )
+}
+
 /// Parse a key name to a Windows VK-style scancode.
-/// We use VK codes for cross-platform mapping (host translates per OS).
+/// Kept as the legacy `key` field for hosts that predate `code`; new hosts
+/// prefer `parse_key_code`.
 fn parse_key(s: &str) -> Result<u32> {
     let mut chars = s.chars();
     if let Some(c) = chars.next().filter(|_| chars.next().is_none()) {
@@ -536,6 +633,49 @@ mod tests {
         assert_eq!(parse_key("a").unwrap(), 'A' as u32);
         assert_eq!(parse_key("Z").unwrap(), 'Z' as u32);
         assert_eq!(parse_key("5").unwrap(), '5' as u32);
+    }
+
+    #[test]
+    fn parse_key_code_maps_to_w3c_physical_keys() {
+        assert_eq!(parse_key_code("a").as_deref(), Some("KeyA"));
+        assert_eq!(parse_key_code("Z").as_deref(), Some("KeyZ"));
+        assert_eq!(parse_key_code("5").as_deref(), Some("Digit5"));
+        assert_eq!(parse_key_code("Enter").as_deref(), Some("Enter"));
+        assert_eq!(parse_key_code("Esc").as_deref(), Some("Escape"));
+        assert_eq!(parse_key_code("Up").as_deref(), Some("ArrowUp"));
+        assert_eq!(parse_key_code("F11").as_deref(), Some("F11"));
+    }
+
+    /// Unknown names must degrade to the legacy path, not fail the tool call.
+    #[test]
+    fn parse_key_code_unknown_is_none() {
+        assert_eq!(parse_key_code("NoSuchKey"), None);
+    }
+
+    /// Every code we emit must resolve in the host's mapping table — otherwise
+    /// the host silently falls back to the broken raw cast.
+    #[test]
+    fn emitted_codes_resolve_in_host_keymap() {
+        for name in [
+            "a", "z", "0", "9", "Enter", "Return", "Tab", "Escape", "Esc", "Backspace", "Delete",
+            "Del", "Space", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown",
+            "F1", "F12",
+        ] {
+            let code = parse_key_code(name).unwrap_or_else(|| panic!("{name} unmapped"));
+            assert!(
+                miru_input::keymap::lookup(&code).is_some(),
+                "{name} → {code} missing from miru_input::keymap"
+            );
+        }
+    }
+
+    /// The modifier keys a chord presses must also resolve.
+    #[test]
+    fn chord_modifier_codes_resolve() {
+        for code in ["ShiftLeft", "ControlLeft", "AltLeft", "MetaLeft"] {
+            assert!(miru_input::keymap::lookup(code).is_some(), "{code}");
+            assert!(miru_input::keymap::code_to_vk(code).is_some(), "{code} vk");
+        }
     }
 
     #[test]

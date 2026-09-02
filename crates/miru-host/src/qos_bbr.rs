@@ -4,7 +4,8 @@
 //!   - Parsec's BUD: predict congestion BEFORE packet loss occurs
 //!   - Google BBR: model the bottleneck bandwidth and propagation delay
 //!
-//! The classic AIMD ("AIMDController") below reacts to loss after it happens.
+//! The classic AIMD controller this replaced reacted to loss only after it had
+//! already happened; it was deleted once nothing referenced it any more.
 //! BBR tracks the minimum RTT (best path) and the maximum delivery rate, and
 //! only saturates when delivery rate stops growing — which signals the
 //! bottleneck queue is filling up before the queue overflows into loss.
@@ -265,10 +266,6 @@ impl BbrQos {
     }
     pub fn bitrate_kbps(&self) -> u32 {
         self.cur_bitrate_kbps
-    }
-    #[allow(dead_code)]
-    pub fn rtt_min_ms(&self) -> Option<u32> {
-        self.rtt_min_us.map(|us| us / 1000)
     }
 }
 

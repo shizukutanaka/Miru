@@ -47,18 +47,3 @@ pub fn pinned_client_config(pinned_cert_der: Vec<u8>) -> Result<Arc<ClientConfig
 
     Ok(Arc::new(config))
 }
-
-/// IMPORTANT: there is NO function here to disable cert validation.
-/// If you find yourself wanting one, the answer is: pin the cert instead.
-/// See `pinned_client_config` above.
-///
-/// If the user passes `MIRU_DANGEROUS_INSECURE_TLS=1`, we LOG a warning but
-/// still refuse — they need a code change (and review) to actually disable.
-pub fn assert_secure_mode() {
-    if std::env::var("MIRU_DANGEROUS_INSECURE_TLS").is_ok() {
-        tracing::error!(
-            "MIRU_DANGEROUS_INSECURE_TLS is set, but this build does not honor it. \
-             Pin a self-signed cert via pinned_client_config() instead."
-        );
-    }
-}

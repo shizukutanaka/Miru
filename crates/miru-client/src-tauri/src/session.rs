@@ -89,6 +89,9 @@ pub async fn run(
     acl_path: std::path::PathBuf,
     pending_pairing: Arc<Mutex<Option<oneshot::Sender<bool>>>>,
     webcodecs_decode: Arc<std::sync::atomic::AtomicBool>,
+    /// When set, inbound AudioFrames are dropped at the network boundary rather
+    /// than decoded and played (see the mute toggle in AppState).
+    audio_muted: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
     emit_status(&app, "connecting", None, None);
 

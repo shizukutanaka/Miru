@@ -26,8 +26,10 @@ use tokio::time;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+#[cfg(feature = "agent")]
+use crate::agent_handler::AgentHandler;
 use crate::{
-    agent_handler::AgentHandler, backpressure::FrameController, capture_loop,
+    backpressure::FrameController, capture_loop,
     input_handler::InputHandler, metrics::SessionMetrics, qos_bbr::BbrQos,
     recording::SessionRecorder, safe_fs,
 };
@@ -239,7 +241,11 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
         }
     };
 
-    let mut backoff_secs = 5u64;
+    // Attempt counter for jittered backoff. Plain doubling synchronised every
+    // host pointed at the same signal server: they all disconnect together on a
+    // restart and then retry in lockstep. See miru_common::backoff.
+    const SIGNAL_BACKOFF_BASE_SECS: u64 = 5;
+    let mut attempt: u32 = 0;
 
     loop {
         let mut signal = match SignalClient::connect_with_pub_addr_signed(
@@ -252,13 +258,18 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
         .await
         {
             Ok(s) => {
-                backoff_secs = 5;
+                attempt = 0;
                 s
             }
             Err(e) => {
-                warn!("Signal connect failed: {}; retrying in {}s", e, backoff_secs);
-                time::sleep(Duration::from_secs(backoff_secs)).await;
-                backoff_secs = (backoff_secs * 2).min(SIGNAL_BACKOFF_MAX_SECS);
+                let delay = miru_common::backoff::next_delay(
+                    attempt,
+                    SIGNAL_BACKOFF_BASE_SECS,
+                    SIGNAL_BACKOFF_MAX_SECS,
+                );
+                warn!("Signal connect failed: {}; retrying in {}s", e, delay.as_secs());
+                time::sleep(delay).await;
+                attempt = attempt.saturating_add(1);
                 continue;
             }
         };
@@ -288,14 +299,14 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
                     });
                 }
                 Some(SignalEvent::Disconnected) => {
-                    warn!("Signal disconnected — reconnecting in {}s", backoff_secs);
+                    warn!("Signal disconnected — reconnecting");
                     break true;
                 }
                 Some(SignalEvent::Error { code, message }) => {
                     error!("Signal error {}: {}", code, message);
                 }
                 None => {
-                    warn!("Signal stream ended — reconnecting in {}s", backoff_secs);
+                    warn!("Signal stream ended — reconnecting");
                     break true;
                 }
                 _ => {}
@@ -303,8 +314,14 @@ pub async fn run(device_id: DeviceId, signal_url: String, config: HostConfig) ->
         };
 
         if reconnect {
-            time::sleep(Duration::from_secs(backoff_secs)).await;
-            backoff_secs = (backoff_secs * 2).min(SIGNAL_BACKOFF_MAX_SECS);
+            let delay = miru_common::backoff::next_delay(
+                attempt,
+                SIGNAL_BACKOFF_BASE_SECS,
+                SIGNAL_BACKOFF_MAX_SECS,
+            );
+            warn!("Reconnecting to signal in {}s", delay.as_secs());
+            time::sleep(delay).await;
+            attempt = attempt.saturating_add(1);
         } else {
             break;
         }
@@ -320,7 +337,10 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     let host_features = Features {
         codecs: miru_codec::available_codecs(),
         audio_codecs: vec![AudioCodec::Opus],
-        hw_encode: !miru_codec::probe_hw().is_empty(),
+        // Advertise hardware encoding only if this build can actually do it.
+        // probe_hw() reports silicon, which is true on nearly every desktop and
+        // was telling viewers we had an encoder we never compiled in.
+        hw_encode: miru_codec::has_hw_encode(),
         hw_decode: false,
         clipboard: true,
         file_transfer: true,
@@ -351,6 +371,16 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 3b. If the peer declared AiAgent role, build an AgentHandler gate.
     //     The token must be embedded in the pubkey field as a 4th segment.
     //     All input events pass through gate_input() before being injected.
+    // Without the `agent` feature there is no capability gate compiled in, so a
+    // peer claiming AiAgent must be refused outright — falling through would
+    // hand it the ungated human path (see ADR 0022).
+    #[cfg(not(feature = "agent"))]
+    if result.peer_role == Role::AiAgent {
+        warn!("Peer requested AiAgent role, but this build has the agent feature disabled — refusing");
+        return Ok(());
+    }
+
+    #[cfg(feature = "agent")]
     let agent_handler: Option<AgentHandler> = if result.peer_role == Role::AiAgent {
         match crate::agent_handler::extract_agent_token(&result.peer_pubkey_field) {
             Ok(token_str) => {
@@ -421,6 +451,8 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         .unwrap_or_default()
         .into_iter()
         .map(|d| miru_common::message::DisplayInfo {
+            x: d.x,
+            y: d.y,
             index: d.index,
             width: d.width,
             height: d.height,
@@ -538,6 +570,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                         }
                     }
                     // AI agent without ScreenRead capability: discard frame instead of transmitting.
+                    #[cfg(feature = "agent")]
                     if agent_handler.as_ref().is_some_and(|h| !h.allow_screen_send()) {
                         continue;
                     }
@@ -566,10 +599,16 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
                     Some(Msg::InputEvent(evt)) if matches!(permission, Permission::Control | Permission::Full) => {
                         // If this is an AI agent session, every event must pass
                         // through the capability gate (authorize + audit log).
+                        #[cfg(feature = "agent")]
                         let allowed = match &agent_handler {
                             Some(gate) => gate.gate_input(&evt).is_ok(),
                             None => true, // human viewers: unconditional
                         };
+                        // Default build serves human viewers only; the AiAgent
+                        // role was already refused above, so there is nothing
+                        // to gate and no branch on the input hot path.
+                        #[cfg(not(feature = "agent"))]
+                        let allowed = true;
                         if allowed {
                             let _ = input_handler.handle_input(&evt);
                         }
@@ -733,6 +772,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
     // 8. Transparency anchoring — record an immutable, signed commitment of
     //    this session's metadata. Posted to Rekor if MIRU_REKOR_URL is set.
     //    Non-fatal: anchoring failure must never break session teardown.
+    #[cfg(feature = "agent")]
     if let Ok(rekor_url) = std::env::var("MIRU_REKOR_URL") {
         let metadata = metrics.snapshot();
         // Host-only attestation: the viewer's signing key is never available
