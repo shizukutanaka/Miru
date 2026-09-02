@@ -97,7 +97,6 @@ fn has_dll(name: &str) -> bool {
     PathBuf::from(system).join("System32").join(name).exists()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

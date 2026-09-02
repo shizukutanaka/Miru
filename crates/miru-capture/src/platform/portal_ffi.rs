@@ -62,7 +62,11 @@ impl PipeWireVideoStream {
         if handle.is_null() {
             return None;
         }
-        Some(Self { handle, seq: 0, buf: Vec::new() })
+        Some(Self {
+            handle,
+            seq: 0,
+            buf: Vec::new(),
+        })
     }
 
     /// Negotiated frame size, or None until the format has been agreed.
@@ -83,7 +87,13 @@ impl PipeWireVideoStream {
         loop {
             let cap = self.buf.len() as c_int;
             let n = unsafe {
-                miru_pw_take(self.handle, self.buf.as_mut_ptr(), cap, &mut self.seq, &mut need)
+                miru_pw_take(
+                    self.handle,
+                    self.buf.as_mut_ptr(),
+                    cap,
+                    &mut self.seq,
+                    &mut need,
+                )
             };
             if n > 0 {
                 return Some(&self.buf[..n as usize]);
@@ -153,7 +163,10 @@ impl ScreenCastSession {
     pub fn open(include_cursor: bool) -> Result<Self, PortalError> {
         let handle = unsafe { miru_portal_open(c_int::from(include_cursor)) };
         if handle.is_null() {
-            return Err(PortalError { stage: "allocate".into(), detail: None });
+            return Err(PortalError {
+                stage: "allocate".into(),
+                detail: None,
+            });
         }
         if unsafe { miru_portal_ok(handle) } != 1 {
             let err = PortalError {
@@ -166,7 +179,11 @@ impl ScreenCastSession {
         }
         let node_id = unsafe { miru_portal_node_id(handle) };
         let fd = unsafe { miru_portal_fd(handle) };
-        Ok(Self { handle, node_id, fd })
+        Ok(Self {
+            handle,
+            node_id,
+            fd,
+        })
     }
 
     /// PipeWire node id to stream from.
@@ -204,7 +221,10 @@ mod tests {
             return;
         }
         let err = ScreenCastSession::open(false).expect_err("no portal should fail");
-        assert!(!err.stage.is_empty(), "failure must name the step that refused");
+        assert!(
+            !err.stage.is_empty(),
+            "failure must name the step that refused"
+        );
         assert!(format!("{err}").contains("ScreenCast"));
     }
 
@@ -219,9 +239,8 @@ mod tests {
     }
 
     fn pipewire_present() -> bool {
-        std::env::var_os("XDG_RUNTIME_DIR").is_some_and(|d| {
-            std::path::Path::new(&d).join("pipewire-0").exists()
-        })
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .is_some_and(|d| std::path::Path::new(&d).join("pipewire-0").exists())
     }
 
     /// Real frames, through a real PipeWire daemon: the test brings up its own

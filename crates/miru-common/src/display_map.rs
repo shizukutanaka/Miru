@@ -163,13 +163,19 @@ mod tests {
 
     /// Side by side, secondary to the right: desktop is 3840x1080.
     fn side_by_side() -> Vec<DisplayInfo> {
-        vec![d(0, 0, 0, 1920, 1080, true), d(1, 1920, 0, 1920, 1080, false)]
+        vec![
+            d(0, 0, 0, 1920, 1080, true),
+            d(1, 1920, 0, 1920, 1080, false),
+        ]
     }
 
     /// Secondary to the LEFT, so the primary is not at the origin and the
     /// virtual desktop starts at a negative x.
     fn left_of_primary() -> Vec<DisplayInfo> {
-        vec![d(0, 0, 0, 1920, 1080, true), d(1, -1280, 0, 1280, 1024, false)]
+        vec![
+            d(0, 0, 0, 1920, 1080, true),
+            d(1, -1280, 0, 1280, 1024, false),
+        ]
     }
 
     #[test]
@@ -195,7 +201,10 @@ mod tests {
     fn secondary_display_maps_to_the_right_half_of_the_desktop() {
         let ds = side_by_side();
         let (vx, _) = virtual_normalized(&ds, 1, 0.5, 0.5).unwrap();
-        assert!((vx - 0.75).abs() < 1e-9, "expected 0.75 of the desktop, got {vx}");
+        assert!(
+            (vx - 0.75).abs() < 1e-9,
+            "expected 0.75 of the desktop, got {vx}"
+        );
         // And the primary's centre is a quarter across, not a half.
         let (px, _) = virtual_normalized(&ds, 0, 0.5, 0.5).unwrap();
         assert!((px - 0.25).abs() < 1e-9, "got {px}");

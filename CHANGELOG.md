@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Formatting drift in six files introduced by earlier work on this branch**
+  (`cargo fmt --all --check` is a required check and was failing). Scoped to the
+  files that were clean at the merge base and dirty afterwards, so the fix is 61
+  lines rather than a 2289-line workspace-wide reformat that would bury the
+  actual change.
+
 - **BBR QoS adaptation was inert** (Socratic: the QoS loop computed new fps/bitrate
   every second but only sent `QosUpdate` to the viewer for display — the host's
   own encoder ran at the initial fixed fps/bitrate for the entire session).
@@ -68,6 +74,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way to drop the double-codec is a future WebCodecs `VideoDecoder` path
 
 ### Added
+- **Offline cross-crate consistency check** (`scripts/check-cross-crate.py`, wired
+  into `scripts/verify-offline.sh`). Both compile errors this project has shipped
+  were a definition changing without its use in another crate following, and
+  neither review nor the offline gate caught them. Socratic: "cargo is blocked so
+  those are invisible" was an assumption, not a fact — both are textual mismatches
+  that need no type system. Verified against the commits where they happened:
+  flags `8539eb0^` (`SessionEvent` literal missing `audio_available`) and
+  `8c7822a^` (`session::run()` takes 11 arguments, 12 passed), clean on HEAD.
+  Deliberately under-reports: bare-name calls, closures in argument lists,
+  `..base` literals, defaulted/`non_exhaustive` structs and duplicate names are
+  skipped rather than guessed at. Does **not** replace `cargo test --workspace` —
+  trait bounds, generic arguments and dependency API misuse remain invisible.
+
 - **OpenUrl protocol message**: new `Msg::OpenUrl(OpenUrlRequest)` lets the MCP
   (or future viewer UI) ask the host to open a URL in its default browser; handled
   in Full-permission sessions via the `open` crate; `RemoteBridge.open_url()` now

@@ -356,7 +356,11 @@ impl PipeWireCapturer {
             })?;
 
         info!("Linux capture: PipeWire node {}", session.node_id());
-        Ok(Self { _session: session, stream, current_display: 0 })
+        Ok(Self {
+            _session: session,
+            stream,
+            current_display: 0,
+        })
     }
 
     /// The portal grants one source, chosen by the user in its own picker, so

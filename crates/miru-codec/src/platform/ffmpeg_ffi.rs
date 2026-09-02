@@ -90,13 +90,21 @@ impl FfmpegEncoder {
         if handle.is_null() {
             return None;
         }
-        Some(Self { handle, scratch: Vec::new() })
+        Some(Self {
+            handle,
+            scratch: Vec::new(),
+        })
     }
 
     /// Submit one I420 frame (Y, then U, then V, tightly packed).
     pub fn send(&mut self, i420: &[u8], keyframe: bool) -> Result<(), i32> {
         let r = unsafe {
-            miru_enc_send(self.handle, i420.as_ptr(), i420.len(), c_int::from(keyframe))
+            miru_enc_send(
+                self.handle,
+                i420.as_ptr(),
+                i420.len(),
+                c_int::from(keyframe),
+            )
         };
         if r < 0 {
             return Err(r);
