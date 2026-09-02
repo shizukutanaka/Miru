@@ -109,6 +109,19 @@ else
   echo "$orphans" | sed 's/^/       /'
 fi
 
+# ── 2c. Cross-crate struct literals ──────────────────────────────────────────
+# A struct literal that disagrees with its definition in another crate is one of
+# the two mistakes this branch actually shipped, and neither the gate nor review
+# caught it. Verified against the commit where it happened: the checker flags
+# 8539eb0^ and is clean here.
+step "Cross-crate struct literals"
+if mismatches=$(python3 scripts/check-cross-crate.py); then
+  ok "every checked struct literal matches its definition"
+else
+  fail "struct literal(s) disagreeing with the definition:"
+  echo "$mismatches" | sed 's/^/       /'
+fi
+
 # ── 3. Standalone module tests ───────────────────────────────────────────────
 # Modules whose code and tests only touch std can be compiled and run directly.
 # Add a module here when it qualifies — it is the cheapest real verification
