@@ -101,7 +101,7 @@ git tag v0.1.0 && git push origin v0.1.0
 - ✓ X25519 ハンドシェイク実動作 (テスト済み)
 - ✓ libvpx VP9 enc/dec 動作
 - ✓ JPEG 経由のビューア表示パス
-- ✓ WebGL2 YUV シェーダー (高速パス準備済み)
+- ✓ WebCodecs (VP9/VP8) 直接デコード、非対応環境は JPEG へ自動フォールバック(ADR 0013/0020)
 - ✓ Tauri v2 ビューア UI (接続・セッション画面・ペアリング)
 - ✓ Ed25519 identity + TOFU ACL + PIN
 - ✓ NAT 越え (STUN + UDP hole-punch)
@@ -118,8 +118,15 @@ git tag v0.1.0 && git push origin v0.1.0
       `ffmpeg-next` は使わない。`csrc/miru_ffmpeg.c`(C シム)+ `build.rs`
       + `platform/ffmpeg_ffi.rs` で **Rust 依存ゼロ**。実エンコード検証済み
       (`verify-offline.sh`)。残は GPU 実機での nvenc/vaapi 確認のみ。
-- [ ] WebGL2 YUV パスを実通信フローで動作 (現在 JPEG プレビュー)
+- [x] ~~WebGL2 YUV パスを実通信フローで動作~~ → **不採用。WebCodecs で代替実装済み**
+      ADR 0013 が生 I420 の IPC 転送(WebGL2 案)を帯域 ~15x 退行として却下し、
+      WebCodecs `VideoDecoder` 経由の VP9/VP8 直接デコードを実装(非対応環境は
+      JPEG へ自動フォールバック)。参照ゼロだった `yuv-renderer.ts` は削除済み(ADR 0022)。
 - [ ] PipeWire DMA-BUF 実装 (Wayland zero-copy)
-      現状は `platform/linux.rs` 内の `PipeWireCapturer` が `bail!` するのみ。
+      **交渉・ストリーム受信・`LinuxCapturer` 配線は実装済み**(`platform/portal_ffi.rs`
+      = xdg-desktop-portal ScreenCast)。portal のハンドシェイクと PipeWire フレーム受信は
+      それぞれ実サービスに対して個別に検証済みだが、**通しでの実機確認はまだ**
+      (`docs/PRODUCT_ASSESSMENT.md` 改善点②)。現行経路は SHM 経由の BGRx コピーで、
+      本項目が指す DMA-BUF zero-copy への最適化は未着手。
 - [ ] PIN ペアリング UI と Rust 側の統合
 - [ ] 自動更新 (tauri-plugin-updater)
