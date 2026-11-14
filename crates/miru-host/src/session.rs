@@ -29,6 +29,7 @@ use uuid::Uuid;
 #[cfg(feature = "agent")]
 use crate::agent_handler::AgentHandler;
 use crate::{
+    audio_loop,
     backpressure::FrameController, capture_loop,
     input_handler::InputHandler, metrics::SessionMetrics, qos_bbr::BbrQos,
     recording::SessionRecorder, safe_fs,
