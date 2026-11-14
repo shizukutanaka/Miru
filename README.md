@@ -2,11 +2,7 @@
 
 > AI 時代の安全な PC 制御 fabric — P2P リモートデスクトップ + AI エージェント基盤
 
-[![CI](https://github.com/shizukutanaka/miru/actions/workflows/ci.yml/badge.svg)](https://github.com/shizukutanaka/miru/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-173%20passing-brightgreen.svg)](#状態)
-[![Build](https://img.shields.io/badge/workspace-17%2F17%20compile-brightgreen.svg)](#状態)
-[![Clippy](https://img.shields.io/badge/clippy-0%20warnings-brightgreen.svg)](#状態)
 
 ## なぜ Miru か
 
@@ -35,9 +31,10 @@
 ## 状態
 
 ```
-Workspace:        17/17 crates compile (rustc 1.88, --all-targets)  ✅
-Warnings:         0 (cargo + clippy + rustfmt)                      ✅
-Tests:            173 passing / 0 failing (unit + integration + doc) ✅
+Workspace:        16/17 crates compile を実測 (miru-client は要システムライブラリのため未検証)
+                  CI は未有効化 — .github/workflows-proposed/ に提案として同梱
+Tests:            252 passing / 2 failing を実測 (2026-11-14、miru-client 除く)
+                  2 failing は実 OS への入力注入を要するテストで、ヘッドレス環境では失敗する
 Sandbox:          seccomp syscall=true  ✅  (実機確認)
 Signal register:  Register: XXXX-XXXX  ✅  (実機確認)
 ```

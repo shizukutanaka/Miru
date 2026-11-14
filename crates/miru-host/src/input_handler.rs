@@ -7,7 +7,9 @@
 
 use anyhow::Result;
 use miru_common::display_map;
-use miru_common::message::{ClipboardFormat, ClipboardSync, DisplayInfo, InputEvent, InputKind};
+use miru_common::message::{
+    ClipboardFormat, ClipboardSync, DisplayInfo, InputEvent, InputKind, MouseButton,
+};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
