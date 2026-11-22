@@ -4,6 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+**Miru の本体はリモートデスクトップではなく、AI エージェントに実機を触らせるための「権限と証跡」の層です。** 画面転送はその最初の利用例にすぎません。モデルの側（Claude / GPT / Gemini の computer use）には権限の発行・失効・監査の仕組みが無く、リモートデスクトップ製品の側はアカウントとクラウドが課金の前提になっています。Miru は capability トークン（TTL ≤15分・失効可能・capability 単位の rate limit）と、改ざんを検知できる監査ログを、運営サーバーなし・MIT ライセンスで提供します。
+
 ## なぜ Miru か
 
 リモートデスクトップは 20 年間ほぼ変わっていない。Miru は 4 軸で刷新する:
