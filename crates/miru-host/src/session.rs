@@ -464,7 +464,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
         .collect();
     let _ = relay
         .send_msg(&Msg::DisplayList(miru_common::message::DisplayList {
-            displays: display_list,
+            displays: display_list.clone(),
         }))
         .await;
 
@@ -544,6 +544,7 @@ async fn handle_viewer(relay_url: String, token: String, config: HostConfig) -> 
 
     // 7. Main loop
     let mut input_handler = InputHandler::new();
+    input_handler.set_displays(display_list);
     let mut ping_ticker = time::interval(Duration::from_secs(1));
     // Bytes sent since last ping tick — used to estimate delivery rate for BBR.
     let mut bytes_since_ping: u64 = 0;
