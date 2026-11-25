@@ -42,15 +42,6 @@ pub struct Bounds {
     pub height: u32,
 }
 
-impl Bounds {
-    fn right(&self) -> i64 {
-        self.x as i64 + self.width as i64
-    }
-    fn bottom(&self) -> i64 {
-        self.y as i64 + self.height as i64
-    }
-}
-
 /// The rectangle enclosing every display.
 ///
 /// Returns None when there are no displays, rather than inventing a desktop —
