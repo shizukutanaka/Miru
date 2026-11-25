@@ -110,6 +110,14 @@ impl InputHandler {
     }
 
     pub fn handle_input(&mut self, event: &InputEvent) -> Result<()> {
+        self.handle_input_with(event, miru_input::inject)
+    }
+
+    fn handle_input_with(
+        &mut self,
+        event: &InputEvent,
+        inject: impl FnOnce(&InputEvent) -> Result<()>,
+    ) -> Result<()> {
         // Rate limiting
         if self.rate_limit_window_start.elapsed() > Duration::from_secs(1) {
             self.event_count = 0;
@@ -196,7 +204,7 @@ impl InputHandler {
             }
             _ => event,
         };
-        miru_input::inject(event)
+        inject(event)
     }
 
     pub fn handle_clipboard(&self, sync: &ClipboardSync) -> Result<()> {
@@ -332,7 +340,19 @@ mod tests {
         if let InputKind::MouseMove { x, y, display } = ev.kind {
             assert_eq!(h.to_virtual(x, y, display).0, 0.75);
         }
-        assert!(h.handle_input(&ev).is_ok());
+        let mut injected = None;
+        let result = h.handle_input_with(&ev, |evt| {
+            injected = Some(evt.clone());
+            Ok(())
+        });
+        assert!(result.is_ok());
+        let Some(injected) = injected else {
+            panic!("stub injector receives the remapped event")
+        };
+        match injected.kind {
+            InputKind::MouseMove { x, .. } => assert_eq!(x, 0.75),
+            other => panic!("unexpected injected event: {other:?}"),
+        }
     }
 
     /// Clicks carried no display before this change, so they could not be
@@ -350,11 +370,11 @@ mod tests {
             },
             timestamp_ms: 0,
         };
-        assert!(h.handle_input(&down).is_ok());
+        assert!(h.handle_input_with(&down, |_| Ok(())).is_ok());
         let scroll = InputEvent {
             kind: InputKind::Scroll { dx: 0.0, dy: 1.0, x: 0.5, y: 0.5, display: 1 },
             timestamp_ms: 0,
         };
-        assert!(h.handle_input(&scroll).is_ok());
+        assert!(h.handle_input_with(&scroll, |_| Ok(())).is_ok());
     }
 }

@@ -72,17 +72,20 @@ pub async fn send_input(args: SendInputArgs, state: State<'_, AppState>) -> Resu
             button: parse_button(&args.button),
             x: args.x.unwrap_or(0.0),
             y: args.y.unwrap_or(0.0),
+            display: 0,
         },
         "mouse_up" => InputKind::MouseUp {
             button: parse_button(&args.button),
             x: args.x.unwrap_or(0.0),
             y: args.y.unwrap_or(0.0),
+            display: 0,
         },
         "scroll" => InputKind::Scroll {
             dx: args.dx.unwrap_or(0.0),
             dy: args.dy.unwrap_or(0.0),
             x: args.x.unwrap_or(0.0),
             y: args.y.unwrap_or(0.0),
+            display: 0,
         },
         "key_down" => InputKind::KeyDown {
             code: args.code.clone(),
