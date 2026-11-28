@@ -216,12 +216,40 @@ async fn main() -> Result<()> {
 fn load_or_create_device_id(dir: &std::path::Path) -> Result<DeviceId> {
     let path = dir.join("device_id");
     if path.exists() {
-        Ok(DeviceId(std::fs::read_to_string(&path)?.trim().to_string()))
-    } else {
-        let id = DeviceId::new();
-        std::fs::write(&path, id.0.as_str())?;
-        Ok(id)
+        let stored = std::fs::read_to_string(&path)?.trim().to_string();
+        if is_valid_device_id(&stored) {
+            return Ok(DeviceId(stored));
+        }
+
+        let corrupt_path = dir.join("device_id.corrupt");
+        match std::fs::rename(&path, &corrupt_path) {
+            Ok(()) => tracing::warn!(
+                "Corrupt device_id at {} moved to {}; generating a new device ID",
+                path.display(),
+                corrupt_path.display()
+            ),
+            Err(e) => tracing::warn!(
+                "Corrupt device_id at {} could not be moved to {} ({}); generating a new device ID",
+                path.display(),
+                corrupt_path.display(),
+                e
+            ),
+        }
     }
+
+    let id = DeviceId::new();
+    std::fs::write(&path, id.0.as_str())?;
+    Ok(id)
+}
+
+fn is_valid_device_id(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    bytes.len() == 9
+        && bytes[4] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || b.is_ascii_hexdigit())
 }
 
 /// `miru-host audit <verify|show> [path]` — inspect the agent audit log.
@@ -474,4 +502,63 @@ fn parse_capability(s: &str) -> Option<miru_agent::Capability> {
         "open_url" => OpenUrl,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_device_id_file_generates_and_saves_one() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+
+        let id = load_or_create_device_id(dir.path())?;
+
+        assert!(is_valid_device_id(&id.0));
+        assert_eq!(std::fs::read_to_string(dir.path().join("device_id"))?, id.0);
+        assert!(!dir.path().join("device_id.corrupt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn valid_device_id_file_is_reused_without_backup() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("device_id"), "AB12-CD34")?;
+
+        let id = load_or_create_device_id(dir.path())?;
+
+        assert_eq!(id.0, "AB12-CD34");
+        assert_eq!(std::fs::read_to_string(dir.path().join("device_id"))?, "AB12-CD34");
+        assert!(!dir.path().join("device_id.corrupt").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn empty_device_id_file_is_backed_up_and_regenerated() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("device_id"), "")?;
+
+        let id = load_or_create_device_id(dir.path())?;
+
+        assert!(is_valid_device_id(&id.0));
+        assert_eq!(std::fs::read_to_string(dir.path().join("device_id"))?, id.0);
+        assert_eq!(std::fs::read_to_string(dir.path().join("device_id.corrupt"))?, "");
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_device_id_file_is_backed_up_and_regenerated() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        std::fs::write(dir.path().join("device_id"), "not-a-valid-id")?;
+
+        let id = load_or_create_device_id(dir.path())?;
+
+        assert!(is_valid_device_id(&id.0));
+        assert_eq!(std::fs::read_to_string(dir.path().join("device_id"))?, id.0);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("device_id.corrupt"))?,
+            "not-a-valid-id"
+        );
+        Ok(())
+    }
 }
